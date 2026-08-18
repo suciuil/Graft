@@ -174,6 +174,19 @@ const JAVA_TYPE_DECLS: ReadonlySet<string> = new Set([
 /** Pass 1 over a parsed file: collect variable->type bindings. Pure. */
 export function collectBindings(root: Parser.SyntaxNode, lang: Language): FileBindings {
   const bindings = new FileBindings();
+  // The optional depth grammars (C#/Groovy/PL/SQL/markup) have no receiver-binding
+  // pass yet: return empty so resolveRecvType falls back to name-only resolution
+  // (self/this/enclosing-class still resolve — those need no bindings map).
+  if (
+    lang === "c_sharp" ||
+    lang === "groovy" ||
+    lang === "plsql" ||
+    lang === "css" ||
+    lang === "html" ||
+    lang === "razor"
+  ) {
+    return bindings;
+  }
   const aliases = new Map<string, string>();
   collectAliases(root, lang, aliases);
   visit(root, lang, [], null, bindings, aliases);

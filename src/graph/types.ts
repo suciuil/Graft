@@ -29,7 +29,17 @@ export type Kind =
   // breadth tier's kinds read truthfully in cards/skeleton.
   | "module"
   | "constant"
-  | "variable";
+  | "variable"
+  // Optional depth-tier grammars (C#/PL/SQL/markup) that carry constructs the
+  // set above cannot name truthfully: a PL/SQL package/procedure/table, a CSS
+  // rule, an id'd HTML element. Kept distinct so their cards/skeleton read as
+  // what they are rather than being coerced into "class"/"function".
+  | "package"
+  | "procedure"
+  | "table"
+  | "rule"
+  | "element"
+  | "view";
 
 /** How confident we are an edge is true, best-first. The hand-written AST
  * resolver assigns `extracted`/`inferred`; the opt-in LSP enrichment pass

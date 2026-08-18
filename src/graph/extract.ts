@@ -12,12 +12,111 @@ import Python from "tree-sitter-python";
 import Go from "tree-sitter-go";
 import Java from "tree-sitter-java";
 import PHP from "tree-sitter-php";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createRequire } from "node:module";
+import { readdirSync } from "node:fs";
 import { contentHash } from "../util/id.js";
 import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } from "./bindings.js";
 import type { Kind, NodeV1, Relation } from "./types.js";
 
-export type Language = "typescript" | "tsx" | "python" | "go" | "java" | "php";
+/** Depth-tier languages with a hand-written extractor. The first six ship as
+ * core dependencies; the rest (`c_sharp`…`razor`) are OPTIONAL, locally-built
+ * native grammars — claimed only when their binding loads (see {@link grammarAvailable}). */
+export type Language =
+  | "typescript"
+  | "tsx"
+  | "python"
+  | "go"
+  | "java"
+  | "php"
+  | "c_sharp"
+  | "groovy"
+  | "plsql"
+  | "css"
+  | "html"
+  | "razor";
+
+/** Optional grammar key → the package that ships its native binding. Loaded
+ * best-effort and cached: a missing/unbuildable binding leaves the language
+ * unclaimed, so its files fall through to the breadth tier (or file-only)
+ * instead of crashing the build. */
+const OPTIONAL_GRAMMAR_PKG: Record<string, string> = {
+  c_sharp: "tree-sitter-c-sharp",
+  groovy: "tree-sitter-groovy",
+  plsql: "tree-sitter-plsql",
+  css: "tree-sitter-css-in-js",
+  html: "tree-sitter-html",
+  razor: "tree-sitter-razor",
+};
+
+const require = createRequire(import.meta.url);
+const optionalGrammarCache = new Map<string, unknown | null>();
+
+/** Load an optional native grammar synchronously, bypassing any ESM/top-level-await
+ * index wrapper (C#'s binding uses one) by loading the built `.node` directly via
+ * node-gyp-build, then falling back to scanning build/Release and prebuilds. Cached,
+ * including the null (unavailable) result, so it probes the filesystem once. */
+function loadOptionalGrammar(key: string): unknown | null {
+  if (optionalGrammarCache.has(key)) return optionalGrammarCache.get(key) ?? null;
+  const pkg = OPTIONAL_GRAMMAR_PKG[key];
+  let grammar: unknown | null = null;
+  if (pkg) {
+    let root: string | null = null;
+    try {
+      root = dirname(require.resolve(`${pkg}/package.json`));
+    } catch {
+      root = null;
+    }
+    if (root) {
+      try {
+        const ngb = createRequire(join(root, "package.json"))("node-gyp-build") as (r: string) => unknown;
+        grammar = pickGrammar(ngb(root));
+      } catch {
+        grammar = null;
+      }
+      if (!grammar) {
+        for (const dir of [join(root, "build", "Release"), join(root, "prebuilds", `${process.platform}-${process.arch}`)]) {
+          try {
+            const file = readdirSync(dir).find((f) => f.endsWith(".node"));
+            if (file) {
+              grammar = pickGrammar(require(join(dir, file)));
+              if (grammar) break;
+            }
+          } catch {
+            /* try next candidate */
+          }
+        }
+      }
+    }
+  }
+  optionalGrammarCache.set(key, grammar);
+  return grammar;
+}
+
+function pickGrammar(mod: unknown): unknown | null {
+  if (!mod) return null;
+  const m = mod as { default?: unknown };
+  return m.default ?? mod;
+}
+
+/** Whether an optional depth-tier grammar (`c_sharp`, `groovy`, `plsql`, `css`,
+ * `html`, `razor`) is installed and loads. Synchronous; drives the per-language
+ * test skips and the extension-claiming below. */
+export function grammarAvailable(key: string): boolean {
+  return loadOptionalGrammar(key) !== null;
+}
+
+/** The active SQL dialect, or null when no SQL grammar is built. Only Oracle
+ * PL/SQL is wired today, so this is "plsql" exactly when that grammar loads. */
+export function sqlDialect(): "plsql" | null {
+  return grammarAvailable("plsql") ? "plsql" : null;
+}
+
+/** Whether a SQL grammar (Oracle PL/SQL today) is built — the `.sql`/DDL tests
+ * skip when it isn't. Alias of {@link sqlDialect} as a boolean. */
+export function sqlGrammarAvailable(): boolean {
+  return sqlDialect() !== null;
+}
 
 /**
  * Extension → the tree-sitter grammar that parses it, and the label a human expects
@@ -50,14 +149,38 @@ const EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label: string 
   { ext: ".php", grammar: "php", label: "php" },
 ];
 
-function entryFor(path: string): (typeof EXTENSIONS)[number] | undefined {
+/** Extensions handled by an OPTIONAL depth grammar. Claimed only when that
+ * grammar's binding loads (see {@link grammarAvailable}); otherwise the file
+ * falls through to the breadth tier (e.g. `.cs` via the WASM `c_sharp` grammar)
+ * or, for markup with no breadth grammar, to a file-only node. Ordered
+ * longest-suffix-first, like {@link EXTENSIONS}. */
+const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label: string }> = [
+  { ext: ".cs", grammar: "c_sharp", label: "c#" },
+  { ext: ".groovy", grammar: "groovy", label: "groovy" },
+  { ext: ".gradle", grammar: "groovy", label: "groovy" },
+  { ext: ".pks", grammar: "plsql", label: "sql" },
+  { ext: ".pkb", grammar: "plsql", label: "sql" },
+  { ext: ".plsql", grammar: "plsql", label: "sql" },
+  { ext: ".sql", grammar: "plsql", label: "sql" },
+  { ext: ".cshtml", grammar: "razor", label: "razor" },
+  { ext: ".razor", grammar: "razor", label: "razor" },
+  { ext: ".css", grammar: "css", label: "css" },
+  { ext: ".html", grammar: "html", label: "html" },
+  { ext: ".htm", grammar: "html", label: "html" },
+];
+
+function entryFor(path: string): { ext: string; grammar: Language; label: string } | undefined {
   const p = path.toLowerCase();
-  return EXTENSIONS.find((e) => p.endsWith(e.ext));
+  const core = EXTENSIONS.find((e) => p.endsWith(e.ext));
+  if (core) return core;
+  const opt = OPTIONAL_EXTENSIONS.find((e) => p.endsWith(e.ext));
+  return opt && grammarAvailable(opt.grammar) ? opt : undefined;
 }
 
-/** Every file extension a depth-tier (hand-written) extractor claims. */
+/** Every file extension a depth-tier (hand-written) extractor claims — the core
+ * grammars always, plus any optional grammar whose binding is currently built. */
 export function depthExtensions(): string[] {
-  return EXTENSIONS.map((e) => e.ext);
+  return [...EXTENSIONS.map((e) => e.ext), ...OPTIONAL_EXTENSIONS.filter((e) => grammarAvailable(e.grammar)).map((e) => e.ext)];
 }
 
 /** Map a file path to a supported language, or null if unsupported. */
@@ -193,6 +316,50 @@ const PHP_KINDS: Record<string, Kind> = {
   enum_declaration: "enum",
 };
 
+// C#: namespace declarations are intentionally absent — they're not scope
+// segments (ids stay bare, `File.cs#Class.Method`), so the walk recurses through
+// them. A record maps to "class": it is a nominal reference type, not the
+// data-carrier role Go/Java give "struct". A constructor is a method named after
+// its type; a property is surfaced as a "variable" (its accessor body is opaque).
+const CSHARP_KINDS: Record<string, Kind> = {
+  class_declaration: "class",
+  interface_declaration: "interface",
+  struct_declaration: "struct",
+  record_declaration: "class",
+  record_struct_declaration: "struct",
+  enum_declaration: "enum",
+  method_declaration: "method",
+  constructor_declaration: "method",
+  property_declaration: "variable",
+};
+
+// Groovy: the grammar is loose — a class body is a `closure`, a method is a
+// `function_definition` whose name is in the `function` field (not `name`), so
+// definitions are recognised by describeGroovy rather than this map. Kept only
+// so KINDS_BY_LANG is total over Language.
+const GROOVY_KINDS: Record<string, Kind> = {
+  class_definition: "class",
+  function_definition: "function",
+  function_declaration: "function",
+};
+
+// PL/SQL: a package spec/body is a module of sub-programs; procedures and
+// functions are distinct kinds; a CREATE TABLE is a table. The name lives in a
+// role-specific field (package_name / prc_name / fnc_name), so describePlSql is
+// custom — this map only drives the kind and CALL lookups.
+const PLSQL_KINDS: Record<string, Kind> = {
+  create_package: "package",
+  create_package_body: "package",
+  create_procedure: "procedure",
+  create_function: "function",
+  procedure_declaration: "procedure",
+  procedure_definition: "procedure",
+  function_declaration: "function",
+  function_definition: "function",
+  create_table: "table",
+  create_view: "view",
+};
+
 
 const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   typescript: TS_KINDS,
@@ -201,6 +368,12 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   go: GO_KINDS,
   java: JAVA_KINDS,
   php: PHP_KINDS,
+  c_sharp: CSHARP_KINDS,
+  groovy: GROOVY_KINDS,
+  plsql: PLSQL_KINDS,
+  css: {},
+  html: {},
+  razor: {},
 };
 
 /**
@@ -224,6 +397,16 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
     "nullsafe_member_call_expression",
     "scoped_call_expression",
   ]),
+  // C#: `f()` (invocation) and `new T()` (object creation), mirroring Java.
+  c_sharp: new Set(["invocation_expression", "object_creation_expression"]),
+  // Groovy: `foo(...)` / `obj.foo(...)` are both `function_call`.
+  groovy: new Set(["function_call"]),
+  // PL/SQL: a sub-program call is a `ref_call` (a referenced_element with args).
+  plsql: new Set(["ref_call"]),
+  // Markup/style languages have no call graph — extracted by custom walkers.
+  css: new Set<string>(),
+  html: new Set<string>(),
+  razor: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -234,7 +417,7 @@ const FUNCTION_VALUE_TYPES = new Set([
 ]);
 
 const parser = new Parser();
-const GRAMMARS: Record<Language, unknown> = {
+const CORE_GRAMMARS: Partial<Record<Language, unknown>> = {
   typescript: TypeScript.typescript,
   tsx: TypeScript.tsx,
   python: Python,
@@ -242,6 +425,13 @@ const GRAMMARS: Record<Language, unknown> = {
   java: Java,
   php: PHP.php,
 };
+
+/** The tree-sitter grammar for a language: a statically-imported core grammar,
+ * or an optional native grammar loaded on demand. Null when an optional
+ * grammar's binding isn't built — the caller then degrades to a file-only node. */
+function grammarFor(lang: Language): unknown | null {
+  return CORE_GRAMMARS[lang] ?? loadOptionalGrammar(lang);
+}
 
 export interface WalkCtx {
   rel: string;
@@ -279,8 +469,18 @@ function parseSource(source: string): Parser.SyntaxNode {
 }
 
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
-  parser.setLanguage(GRAMMARS[lang] as never);
+  const grammar = grammarFor(lang);
+  // An optional grammar that isn't built leaves the file indexed but symbol-less,
+  // rather than throwing and marking it a parse error.
+  if (!grammar) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
+  parser.setLanguage(grammar as never);
   const root = parseSource(source);
+  // Markup/style languages carry no call graph, so they bypass the
+  // definition/among-calls walk for a dedicated shape (rules, id'd elements) or,
+  // for Razor (embedded C# is opaque here), a file node only.
+  if (lang === "css") return extractCss(rel, source, root);
+  if (lang === "html") return extractHtml(rel, source, root);
+  if (lang === "razor") return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   const bindings = collectBindings(root, lang);
   const importedSymbols = collectImportedSymbols(root, lang);
 
@@ -375,7 +575,13 @@ function walk(node: Parser.SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEd
               ? javaExported(node)
               : ctx.lang === "php"
                 ? phpExported(node)
-                : tsExported(node),
+                : ctx.lang === "c_sharp"
+                  ? csharpExported(node)
+                  : ctx.lang === "groovy"
+                    ? groovyExported(node)
+                    : ctx.lang === "plsql"
+                      ? true
+                      : tsExported(node),
       origin: "ast",
       body_hash: contentHash(desc.hashNode.text),
       body_text: searchBody(desc.hashNode.text),
@@ -391,10 +597,14 @@ function walk(node: Parser.SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEd
     // class heritage — in Java an interface may also `extends`, and a record/enum
     // may `implements`, so every type declaration is a heritage site, not just a class.
     const javaTypeDecl = ctx.lang === "java" && JAVA_TYPE_KINDS.has(desc.kind);
-    if (desc.kind === "class" || javaTypeDecl) edges.push(...heritageEdges(node, id, ctx));
+    // C#: `class C : Base, IFace` — a base_list hangs off every type declaration
+    // (class/struct/interface), so all of them are heritage sites, not just classes.
+    const csharpTypeDecl =
+      ctx.lang === "c_sharp" && (desc.kind === "class" || desc.kind === "interface" || desc.kind === "struct");
+    if (desc.kind === "class" || javaTypeDecl || csharpTypeDecl) edges.push(...heritageEdges(node, id, ctx));
 
     const enclosingClass =
-      desc.kind === "class" || javaTypeDecl
+      desc.kind === "class" || javaTypeDecl || csharpTypeDecl
         ? desc.name
         : isGoMethod
           ? goReceiverType(node)
@@ -593,6 +803,8 @@ function isDeclarationName(node: Parser.SyntaxNode): boolean {
 function describe(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
   if (ctx.lang === "go") return describeGo(node, ctx);
   if (ctx.lang === "java") return describeJava(node, ctx);
+  if (ctx.lang === "groovy") return describeGroovy(node, ctx);
+  if (ctx.lang === "plsql") return describePlSql(node, ctx);
 
   // PHP closures: `$h = function () {…}` / `fn() => …`, and bare callbacks
   // (`$routes->get('/x', function () {…})`). Captured as function nodes so a
@@ -712,6 +924,63 @@ function describeJava(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | nu
   return desc;
 }
 
+/** Groovy definition shapes. The grammar is loose: a class body is a `closure`,
+ * a method/function is a `function_definition` whose NAME is in the `function`
+ * field (not `name`). A `function_definition` inside a class body reads as a
+ * method; the same node at file scope is a free function. */
+function describeGroovy(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
+  if (node.type === "class_definition") {
+    const name = node.childForFieldName("name")?.text;
+    if (!name) return null;
+    const body = node.childForFieldName("body");
+    return { name, kind: "class", headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+  }
+  if (node.type === "function_definition" || node.type === "function_declaration") {
+    const name = node.childForFieldName("function")?.text;
+    if (!name) return null;
+    const body = node.childForFieldName("body");
+    const kind: Kind = ctx.enclosingKind === "class" ? "method" : "function";
+    return { name, kind, headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+  }
+  return null;
+}
+
+/** PL/SQL definition shapes: a package spec/body (a module of sub-programs), a
+ * procedure or function (declared in a spec, defined in a body, or standalone),
+ * and a CREATE TABLE. The name lives in a role-specific field; a table's name is
+ * the last (schema-stripped) identifier before its column list. Names may be
+ * double-quoted — the quotes are part of the token, not the identifier. */
+const PLSQL_NAME_FIELD: Record<string, string> = {
+  create_package: "package_name",
+  create_package_body: "package_name",
+  create_procedure: "prc_name",
+  procedure_declaration: "prc_name",
+  procedure_definition: "prc_name",
+  create_function: "fnc_name",
+  function_declaration: "fnc_name",
+  function_definition: "fnc_name",
+};
+
+function describePlSql(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
+  const kind = ctx.kinds[node.type];
+  if (!kind) return null;
+  let name: string | undefined;
+  if (node.type === "create_table") {
+    // `CREATE TABLE [schema.]name (…)` — the object name is the last identifier
+    // before the column list, so a schema qualifier drops off.
+    name = node.namedChildren.filter((c) => c.type === "identifier").at(-1)?.text;
+  } else if (node.type === "create_view") {
+    name = node.namedChildren.find((c) => c.type === "identifier")?.text;
+  } else {
+    const field = PLSQL_NAME_FIELD[node.type];
+    name = field ? node.childForFieldName(field)?.text : undefined;
+  }
+  name = name?.replace(/^"|"$/g, "");
+  if (!name) return null;
+  const body = node.childForFieldName("body");
+  return { name, kind, headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+}
+
 /** Java visibility: `public` (or `protected`) on the declaration's own modifier list.
  * A package-private or private member is not part of the API surface. Read off the
  * `modifiers` child's tokens, ignoring annotations, which live in the same node. */
@@ -809,6 +1078,21 @@ function heritageEdges(node: Parser.SyntaxNode, classId: string, ctx: WalkCtx): 
     }
     return edges;
   }
+  if (ctx.lang === "c_sharp") {
+    const bases = node.namedChildren.find((c) => c.type === "base_list");
+    for (const t of bases?.namedChildren ?? []) {
+      if (t.type === "identifier" || t.type === "qualified_name" || t.type === "generic_name") {
+        const name = t.text.replace(/<[^]*>$/, "").replace(/^.*\./, "");
+        if (!name) continue;
+        // C# writes the base class and interfaces in one `:` list with no
+        // syntactic split, so classify by the .NET `IPascalCase` interface
+        // convention — the same heuristic the graph-csharp spec expects.
+        const relation: Relation = /^I[A-Z]/.test(name) ? "implements" : "extends";
+        edges.push({ source: classId, relation, name, file: ctx.rel });
+      }
+    }
+    return edges;
+  }
   const heritage = node.namedChildren.find((c) => c.type === "class_heritage");
   for (const clause of heritage?.namedChildren ?? []) {
     const relation: Relation | null =
@@ -867,6 +1151,9 @@ function calleeName(
   }
 
   if (lang === "php") return phpCallee(node);
+  if (lang === "c_sharp") return csharpCallee(node);
+  if (lang === "groovy") return groovyCallee(node);
+  if (lang === "plsql") return plsqlCallee(node);
 
   const fn = node.childForFieldName("function");
   if (!fn) return null;
@@ -1029,6 +1316,8 @@ function isImport(node: Parser.SyntaxNode, lang: Language): boolean {
   // PHP: one edge per imported symbol — the clause leaf inside a (possibly
   // grouped) `use A\B, C\D;` / `use A\{B, C};` declaration.
   if (lang === "php") return node.type === "namespace_use_clause";
+  if (lang === "c_sharp") return node.type === "using_directive";
+  if (lang === "groovy") return node.type === "groovy_import";
   return node.type === "import_statement" || node.type === "import_from_statement";
 }
 
@@ -1058,6 +1347,16 @@ function importSpecifier(node: Parser.SyntaxNode, lang: Language): string | null
     );
     return id?.text ?? null;
   }
+  if (lang === "c_sharp") {
+    // `using System;` / `using Foo.Bar;` — the imported namespace is the clause's
+    // qualified name (an alias `using A = B;` picks up `A`, close enough here).
+    const n = node.namedChildren.find((c) => c.type === "qualified_name" || c.type === "identifier");
+    return n?.text ?? null;
+  }
+  if (lang === "groovy") {
+    const n = node.childForFieldName("import") ?? node.namedChildren.find((c) => c.type === "qualified_name" || c.type === "identifier");
+    return n?.text ?? null;
+  }
   const str = node.namedChildren.find((c) => c.type === "string");
   if (!str) return null;
   const frag = str.namedChildren.find((c) => c.type === "string_fragment");
@@ -1082,4 +1381,186 @@ function tsExported(node: Parser.SyntaxNode): boolean {
     p = p.parent;
   }
   return false;
+}
+
+/** C# call shapes. A bare `Foo()` invocation is an implicit-`this` method call
+ * (C# has no free functions), routed — like Java's — through owner-qualified
+ * resolution; `recv.Foo()` / `this.Foo()` carry their receiver; `new T()` targets
+ * the constructed type as the graph names it. */
+function csharpCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; receiver?: string } | null {
+  if (node.type === "object_creation_expression") {
+    const type = node.childForFieldName("type") ?? node.namedChildren.find((c) => c.type !== "argument_list");
+    const name = type ? csharpTypeName(type) : null;
+    return name ? { name, viaMember: false } : null;
+  }
+  const fn = node.childForFieldName("function") ?? node.namedChildren[0];
+  if (!fn) return null;
+  if (fn.type === "member_access_expression") {
+    const nm = fn.childForFieldName("name") ?? fn.namedChildren.at(-1);
+    if (!nm) return null;
+    const expr = fn.childForFieldName("expression");
+    const receiver = !expr || expr.type === "this_expression" ? "this" : expr.type === "identifier" ? expr.text : undefined;
+    return { name: nm.text, viaMember: true, receiver };
+  }
+  if (fn.type === "identifier") return { name: fn.text, viaMember: true, receiver: "this" };
+  return null;
+}
+
+/** The type a C# `new` constructs, type arguments and namespace qualifier erased
+ * (`new Box<int>()` → `Box`). Null when the node isn't a plain named type. */
+function csharpTypeName(node: Parser.SyntaxNode): string | null {
+  if (node.type === "generic_name") return csharpTypeName(node.namedChildren[0] ?? node);
+  if (node.type === "qualified_name") return node.text.replace(/^.*\./, "") || null;
+  return node.type === "identifier" ? node.text : null;
+}
+
+/** C# visibility: `public`/`protected`/`internal` on the declaration's own
+ * modifier list make it API surface; an explicit `private` (or a bare member,
+ * which defaults to private) does not. */
+function csharpExported(node: Parser.SyntaxNode): boolean {
+  const mods = node.namedChildren.filter((c) => c.type === "modifier").map((c) => c.text);
+  if (mods.includes("private")) return false;
+  return mods.includes("public") || mods.includes("protected") || mods.includes("internal");
+}
+
+/** Groovy call shapes: `foo(...)` (function = identifier) is a free/implicit call;
+ * `a.b(...)` (function = dotted_identifier) is a member call whose name is the
+ * trailing segment and whose receiver, when a bare identifier, types the call. */
+function groovyCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; receiver?: string } | null {
+  const fn = node.childForFieldName("function") ?? node.namedChildren[0];
+  if (!fn) return null;
+  // A bare `foo(...)` inside a class is an implicit-`this` method call; at file
+  // scope `this` types to nothing, so it degrades to a name-only (free) match —
+  // the same routing C#/Java use for their receiver-less calls.
+  if (fn.type === "identifier") return { name: fn.text, viaMember: true, receiver: "this" };
+  if (fn.type === "dotted_identifier") {
+    const last = fn.namedChildren.at(-1);
+    if (last?.type !== "identifier") return null;
+    const first = fn.namedChildren[0];
+    const receiver = fn.namedChildren.length >= 2 && first?.type === "identifier" ? first.text : undefined;
+    return { name: last.text, viaMember: true, receiver };
+  }
+  return null;
+}
+
+/** Groovy visibility: members default to public; only an explicit `private`
+ * modifier hides one. */
+function groovyExported(node: Parser.SyntaxNode): boolean {
+  return !node.namedChildren.some((c) => c.type === "modifier" && c.text === "private");
+}
+
+/** PL/SQL call: a `ref_call` wraps a `referenced_element` whose `ref_name` is the
+ * sub-program called and whose optional `ref_name_parent` is the owning package
+ * (`pkg.proc()`), passed as the receiver so resolution can qualify the target. */
+function plsqlCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; receiver?: string } | null {
+  const ref = node.childForFieldName("referenced_element") ?? node.namedChildren.find((c) => c.type === "referenced_element");
+  if (!ref) return null;
+  const nameNode = ref.childForFieldName("ref_name");
+  if (!nameNode) return null;
+  const parent = ref.childForFieldName("ref_name_parent");
+  return { name: nameNode.text.replace(/^"|"$/g, ""), viaMember: !!parent, receiver: parent?.text };
+}
+
+/** A bare file node for a language with no symbol structure to extract (Razor)
+ * or whose optional grammar isn't built. Mirrors the walk path's file node. */
+function fileNodeOf(rel: string, source: string): NodeV1 {
+  return {
+    id: rel,
+    name: basename(rel),
+    kind: "file",
+    path: rel,
+    span: `L1-L${Math.max(1, source.split("\n").length)}`,
+    signature: null,
+    exported: true,
+    origin: "ast",
+    body_hash: contentHash(source),
+    chars: source.length,
+    summary_state: "pending",
+    summary: null,
+    crux: null,
+  };
+}
+
+/** CSS: one `rule` node per rule-set, named by its selector text (`.foo`, `#bar`,
+ * `div > p.item`), each contained by the file. Style has no call graph. */
+function extractCss(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode): void => {
+    if (node.type === "rule_set") {
+      const sel = node.namedChildren.find((c) => c.type === "selectors");
+      const name = sel ? sel.text.replace(/\s+/g, " ").trim() : null;
+      if (name) {
+        const id = mintId(`${rel}#${name}`, minted);
+        nodes.push(markupNode(id, name, "rule", rel, node));
+        rawEdges.push({ source: rel, relation: "contains", targetId: id, file: rel });
+      }
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(root);
+  return { nodes, rawEdges };
+}
+
+/** HTML: one `element` node per id'd element, named by its `id`, scoped under the
+ * nearest id'd ancestor (`hero.lnk`) and contained by it (else the file). Elements
+ * without an id are transparent to the scope path but still recursed into. */
+function extractHtml(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, scope: string[], parentId: string): void => {
+    let scopeNext = scope;
+    let parentNext = parentId;
+    if (node.type === "element") {
+      const eid = htmlElementId(node);
+      if (eid) {
+        const id = mintId(`${rel}#${[...scope, eid].join(".")}`, minted);
+        nodes.push(markupNode(id, eid, "element", rel, node));
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        scopeNext = [...scope, eid];
+        parentNext = id;
+      }
+    }
+    for (const child of node.namedChildren) visit(child, scopeNext, parentNext);
+  };
+  visit(root, [], rel);
+  return { nodes, rawEdges };
+}
+
+/** The `id` attribute value of an HTML element's (self-closing) start tag, or null. */
+function htmlElementId(element: Parser.SyntaxNode): string | null {
+  const start = element.namedChildren.find((c) => c.type === "start_tag" || c.type === "self_closing_tag");
+  for (const attr of start?.namedChildren ?? []) {
+    if (attr.type !== "attribute") continue;
+    const nameNode = attr.namedChildren.find((c) => c.type === "attribute_name");
+    if (nameNode?.text.toLowerCase() !== "id") continue;
+    const val = attr.namedChildren.find((c) => c.type === "quoted_attribute_value" || c.type === "attribute_value");
+    if (!val) return null;
+    const inner = val.type === "quoted_attribute_value" ? val.namedChildren.find((c) => c.type === "attribute_value") : val;
+    const text = (inner ?? val).text.replace(/^["']|["']$/g, "").trim();
+    return text || null;
+  }
+  return null;
+}
+
+/** A markup symbol node (CSS rule / HTML element): its source span, searchable
+ * body, and the selector/id as both name and signature. */
+function markupNode(id: string, name: string, kind: Kind, rel: string, node: Parser.SyntaxNode): NodeV1 {
+  return {
+    id,
+    name,
+    kind,
+    path: rel,
+    span: `L${node.startPosition.row + 1}-L${node.endPosition.row + 1}`,
+    signature: name,
+    exported: true,
+    origin: "ast",
+    body_hash: contentHash(node.text),
+    body_text: searchBody(node.text),
+    summary_state: "pending",
+    summary: null,
+    crux: null,
+  };
 }

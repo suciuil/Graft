@@ -71,6 +71,14 @@
     "vscode-languageserver-protocol": "^3.18.2",
     "web-tree-sitter": "^0.25.10"
   },
+  "optionalDependencies": {
+    "tree-sitter-c-sharp": "file:../tree-sitter-c-sharp",
+    "tree-sitter-groovy": "file:../tree-sitter-groovy",
+    "tree-sitter-plsql": "file:../tree-sitter-plsql",
+    "tree-sitter-css-in-js": "file:../tree-sitter-css-in-js",
+    "tree-sitter-html": "file:../tree-sitter-html",
+    "tree-sitter-razor": "file:../tree-sitter-razor"
+  },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",
     "@types/node": "^26.1.0",
