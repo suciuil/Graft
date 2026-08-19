@@ -78,7 +78,14 @@
     "tree-sitter-css-in-js": "file:../tree-sitter-css-in-js",
     "tree-sitter-html": "file:../tree-sitter-html",
     "tree-sitter-razor": "file:../tree-sitter-razor",
-    "@tree-sitter-grammars/tree-sitter-xml": "file:../tree-sitter-xml"
+    "@tree-sitter-grammars/tree-sitter-xml": "file:../tree-sitter-xml",
+    "tree-sitter-c": "file:../tree-sitter-c",
+    "tree-sitter-cpp": "file:../tree-sitter-cpp",
+    "tree-sitter-json": "file:../tree-sitter-json",
+    "tree-sitter-scss": "file:../tree-sitter-scss",
+    "@tree-sitter-grammars/tree-sitter-yaml": "file:../tree-sitter-yaml",
+    "@tree-sitter-grammars/tree-sitter-markdown": "file:../tree-sitter-markdown",
+    "tree-sitter-csv": "file:../tree-sitter-csv"
   },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",

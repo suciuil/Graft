@@ -35,7 +35,14 @@ export type Language =
   | "css"
   | "html"
   | "razor"
-  | "xml";
+  | "xml"
+  | "c"
+  | "cpp"
+  | "json"
+  | "yaml"
+  | "markdown"
+  | "scss"
+  | "csv";
 
 /** Optional grammar key → the package that ships its native binding (and, when the
  * package exports several grammars, the property to pick). Loaded best-effort and
@@ -50,6 +57,18 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   razor: { pkg: "tree-sitter-razor" },
   // Monorepo grammar: its node binding exports { xml, dtd } — pick the XML one.
   xml: { pkg: "@tree-sitter-grammars/tree-sitter-xml", prop: "xml" },
+  // C and C++ get a hand-written depth extractor (they already have a breadth row
+  // too; buildGraph prefers depth for .c/.cpp/.h once the native grammar loads).
+  c: { pkg: "tree-sitter-c" },
+  cpp: { pkg: "tree-sitter-cpp" },
+  // Data/markup: symbol-only custom extractors. markdown's binding default export
+  // is the block grammar (its `inline` grammar is a separate property we don't use).
+  json: { pkg: "tree-sitter-json" },
+  yaml: { pkg: "@tree-sitter-grammars/tree-sitter-yaml" },
+  markdown: { pkg: "@tree-sitter-grammars/tree-sitter-markdown" },
+  scss: { pkg: "tree-sitter-scss" },
+  // Monorepo grammar exporting { csv, psv, tsv } — pick CSV.
+  csv: { pkg: "tree-sitter-csv", prop: "csv" },
 };
 
 const require = createRequire(import.meta.url);
@@ -183,6 +202,25 @@ const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label
   { ext: ".resx", grammar: "xml", label: "xml" },
   // XAML is XML; parsed by the same grammar but labelled distinctly.
   { ext: ".xaml", grammar: "xml", label: "xaml" },
+  // C / C++ depth (also carried by the breadth tier; depth wins when built).
+  { ext: ".c", grammar: "c", label: "c" },
+  { ext: ".cpp", grammar: "cpp", label: "cpp" },
+  { ext: ".cc", grammar: "cpp", label: "cpp" },
+  { ext: ".cxx", grammar: "cpp", label: "cpp" },
+  { ext: ".hpp", grammar: "cpp", label: "cpp" },
+  { ext: ".hh", grammar: "cpp", label: "cpp" },
+  { ext: ".hxx", grammar: "cpp", label: "cpp" },
+  // `.h` is claimed by C (the breadth tier does the same); a C++-only header set
+  // that uses `.h` is the known ambiguity C tooling also lives with.
+  { ext: ".h", grammar: "c", label: "c" },
+  // Data / markup — breadth-level symbols.
+  { ext: ".json", grammar: "json", label: "json" },
+  { ext: ".yaml", grammar: "yaml", label: "yaml" },
+  { ext: ".yml", grammar: "yaml", label: "yaml" },
+  { ext: ".markdown", grammar: "markdown", label: "markdown" },
+  { ext: ".md", grammar: "markdown", label: "markdown" },
+  { ext: ".scss", grammar: "scss", label: "scss" },
+  { ext: ".csv", grammar: "csv", label: "csv" },
 ];
 
 function entryFor(path: string): { ext: string; grammar: Language; label: string } | undefined {
@@ -376,6 +414,27 @@ const PLSQL_KINDS: Record<string, Kind> = {
   create_view: "view",
 };
 
+// C: functions and named aggregate types. The name isn't a `name` field for a
+// function (it hides under the declarator), so describeC reads it specially.
+const C_KINDS: Record<string, Kind> = {
+  function_definition: "function",
+  struct_specifier: "struct",
+  union_specifier: "struct",
+  enum_specifier: "enum",
+  type_definition: "type",
+};
+
+// C++: adds classes and methods. A `function_definition` is a free function, or a
+// method when its declarator is a `Class::name` qualified_identifier (out-of-line
+// definition); namespaces are transparent to scope. describeCpp handles both.
+const CPP_KINDS: Record<string, Kind> = {
+  function_definition: "function",
+  class_specifier: "class",
+  struct_specifier: "struct",
+  union_specifier: "struct",
+  enum_specifier: "enum",
+};
+
 
 const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   typescript: TS_KINDS,
@@ -391,6 +450,13 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   html: {},
   razor: {},
   xml: {},
+  c: C_KINDS,
+  cpp: CPP_KINDS,
+  json: {},
+  yaml: {},
+  markdown: {},
+  scss: {},
+  csv: {},
 };
 
 /**
@@ -425,6 +491,15 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   html: new Set<string>(),
   razor: new Set<string>(),
   xml: new Set<string>(),
+  // C/C++: a call is a `call_expression`.
+  c: new Set(["call_expression"]),
+  cpp: new Set(["call_expression"]),
+  // Data/markup: no call graph (SCSS @include edges are emitted by its extractor).
+  json: new Set<string>(),
+  yaml: new Set<string>(),
+  markdown: new Set<string>(),
+  scss: new Set<string>(),
+  csv: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -487,6 +562,9 @@ function parseSource(source: string): Parser.SyntaxNode {
 }
 
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
+  // A `.h` header carrying C++ constructs is really C++ — the C grammar can't
+  // parse classes/templates — so route it to the C++ extractor.
+  if (lang === "c" && /\.h$/i.test(rel) && looksLikeCpp(source)) lang = "cpp";
   const grammar = grammarFor(lang);
   // An optional grammar that isn't built leaves the file indexed but symbol-less,
   // rather than throwing and marking it a parse error.
@@ -499,6 +577,11 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   if (lang === "css") return extractCss(rel, source, root);
   if (lang === "html") return extractHtml(rel, source, root);
   if (lang === "xml") return extractXml(rel, source, root);
+  if (lang === "json") return extractJson(rel, source, root);
+  if (lang === "yaml") return extractYaml(rel, source, root);
+  if (lang === "markdown") return extractMarkdown(rel, source, root);
+  if (lang === "scss") return extractScss(rel, source, root);
+  if (lang === "csv") return extractCsv(rel, source, root);
   if (lang === "razor") return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   const bindings = collectBindings(root, lang);
   const importedSymbols = collectImportedSymbols(root, lang);
@@ -600,7 +683,9 @@ function walk(node: Parser.SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEd
                     ? groovyExported(node)
                     : ctx.lang === "plsql"
                       ? true
-                      : tsExported(node),
+                      : ctx.lang === "c" || ctx.lang === "cpp"
+                        ? cExported(node)
+                        : tsExported(node),
       origin: "ast",
       body_hash: contentHash(desc.hashNode.text),
       body_text: searchBody(desc.hashNode.text),
@@ -620,10 +705,12 @@ function walk(node: Parser.SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEd
     // (class/struct/interface), so all of them are heritage sites, not just classes.
     const csharpTypeDecl =
       ctx.lang === "c_sharp" && (desc.kind === "class" || desc.kind === "interface" || desc.kind === "struct");
-    if (desc.kind === "class" || javaTypeDecl || csharpTypeDecl) edges.push(...heritageEdges(node, id, ctx));
+    // C++: a base_class_clause hangs off a class/struct declaration.
+    const cppTypeDecl = ctx.lang === "cpp" && (desc.kind === "class" || desc.kind === "struct");
+    if (desc.kind === "class" || javaTypeDecl || csharpTypeDecl || cppTypeDecl) edges.push(...heritageEdges(node, id, ctx));
 
     const enclosingClass =
-      desc.kind === "class" || javaTypeDecl || csharpTypeDecl
+      desc.kind === "class" || javaTypeDecl || csharpTypeDecl || cppTypeDecl
         ? desc.name
         : isGoMethod
           ? goReceiverType(node)
@@ -824,6 +911,8 @@ function describe(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
   if (ctx.lang === "java") return describeJava(node, ctx);
   if (ctx.lang === "groovy") return describeGroovy(node, ctx);
   if (ctx.lang === "plsql") return describePlSql(node, ctx);
+  if (ctx.lang === "c") return describeC(node, ctx);
+  if (ctx.lang === "cpp") return describeCpp(node, ctx);
 
   // PHP closures: `$h = function () {…}` / `fn() => …`, and bare callbacks
   // (`$routes->get('/x', function () {…})`). Captured as function nodes so a
@@ -1000,6 +1089,100 @@ function describePlSql(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | n
   return { name, kind, headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
 }
 
+/** C definition shapes. A function's name is buried under its declarator
+ * (`function_declarator → identifier`, possibly wrapped by pointer_declarator);
+ * struct/union/enum carry a `name` field. Anonymous aggregates are skipped. */
+function describeC(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
+  const kind = ctx.kinds[node.type];
+  if (!kind) return null;
+  if (node.type === "function_definition") {
+    const name = declaratorIdent(node.childForFieldName("declarator"));
+    if (!name) return null;
+    const body = node.childForFieldName("body");
+    return { name, kind: "function", headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+  }
+  const name = node.childForFieldName("name")?.text;
+  if (!name) return null; // anonymous struct/enum (e.g. inside a typedef) — skip
+  const body = node.childForFieldName("body");
+  return { name, kind, headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+}
+
+/** C++ definition shapes: C's set plus classes, and a `function_definition`
+ * resolved to a method when its declarator qualifies a type (`int Repo::Save(){…}`
+ * → method Save, id-scoped under Repo) or when it sits directly in a class body.
+ * Namespaces are transparent (not a scope segment), like C#. In-class method
+ * DECLARATIONS (no body) are skipped — the out-of-line definition carries the body. */
+function describeCpp(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | null {
+  if (node.type === "function_definition") {
+    const decl = node.childForFieldName("declarator");
+    const name = declaratorIdent(decl);
+    if (!name) return null;
+    const owner = qualifiedOwner(decl);
+    const body = node.childForFieldName("body");
+    const headerEnd = body ? body.startIndex : node.endIndex;
+    if (owner) return { name, idName: `${owner}.${name}`, kind: "method", headerEnd, hashNode: node };
+    const kind: Kind = ctx.enclosingKind === "class" || ctx.enclosingKind === "struct" ? "method" : "function";
+    return { name, kind, headerEnd, hashNode: node };
+  }
+  const kind = ctx.kinds[node.type];
+  if (!kind) return null;
+  const name = node.childForFieldName("name")?.text;
+  if (!name) return null;
+  const body = node.childForFieldName("body");
+  return { name, kind, headerEnd: body ? body.startIndex : node.endIndex, hashNode: node };
+}
+
+/** The identifier a C/C++ declarator ultimately names, unwrapping pointer /
+ * reference / array / function / parenthesized declarators. Returns the bare name
+ * (`foo`), or the trailing segment of a C++ qualified declarator (`Save` from
+ * `Repo::Save`); the qualifier is read separately by {@link qualifiedOwner}. */
+function declaratorIdent(node: Parser.SyntaxNode | null | undefined): string | null {
+  let n: Parser.SyntaxNode | null | undefined = node;
+  while (n) {
+    switch (n.type) {
+      case "identifier":
+      case "field_identifier":
+      case "type_identifier":
+        return n.text;
+      case "qualified_identifier": {
+        const name = n.childForFieldName("name") ?? n.namedChildren.at(-1);
+        return name && name.id !== n.id ? declaratorIdent(name) : null;
+      }
+      default:
+        if (!n.type.endsWith("declarator")) return null;
+        n = n.childForFieldName("declarator") ?? n.namedChildren.find((c) => c.type.endsWith("declarator") || c.type.endsWith("identifier"));
+    }
+  }
+  return null;
+}
+
+/** The owning type of a C++ qualified declarator (`Repo::Save` → `Repo`), or null
+ * for an unqualified name. */
+function qualifiedOwner(node: Parser.SyntaxNode | null | undefined): string | null {
+  let n = node;
+  while (n) {
+    if (n.type === "qualified_identifier") {
+      const scope = n.childForFieldName("scope") ?? n.namedChildren[0];
+      return scope?.text ?? null;
+    }
+    if (!n.type.endsWith("declarator")) return null;
+    n = n.childForFieldName("declarator") ?? n.namedChildren.find((c) => c.type.endsWith("declarator") || c.type === "qualified_identifier");
+  }
+  return null;
+}
+
+/** C/C++ linkage: a `static` function is file-private; everything else is
+ * externally visible (C has no other visibility concept). */
+function cExported(node: Parser.SyntaxNode): boolean {
+  return !node.namedChildren.some((c) => c.type === "storage_class_specifier" && c.text === "static");
+}
+
+/** Whether a `.h` header uses C++-only constructs (so it should be parsed as C++
+ * rather than C). Deliberately conservative — bare C headers never match. */
+function looksLikeCpp(source: string): boolean {
+  return /\b(class|namespace|template)\b|\bpublic:|\bprivate:|\bprotected:|::/.test(source);
+}
+
 /** Java visibility: `public` (or `protected`) on the declaration's own modifier list.
  * A package-private or private member is not part of the API surface. Read off the
  * `modifiers` child's tokens, ignoring annotations, which live in the same node. */
@@ -1112,6 +1295,16 @@ function heritageEdges(node: Parser.SyntaxNode, classId: string, ctx: WalkCtx): 
     }
     return edges;
   }
+  if (ctx.lang === "cpp") {
+    const bases = node.namedChildren.find((c) => c.type === "base_class_clause");
+    for (const t of bases?.namedChildren ?? []) {
+      if (t.type === "type_identifier" || t.type === "qualified_identifier" || t.type === "template_type") {
+        const name = t.text.replace(/<[^]*>$/, "").replace(/^.*::/, "");
+        if (name) edges.push({ source: classId, relation: "extends", name, file: ctx.rel });
+      }
+    }
+    return edges;
+  }
   const heritage = node.namedChildren.find((c) => c.type === "class_heritage");
   for (const clause of heritage?.namedChildren ?? []) {
     const relation: Relation | null =
@@ -1173,6 +1366,7 @@ function calleeName(
   if (lang === "c_sharp") return csharpCallee(node);
   if (lang === "groovy") return groovyCallee(node);
   if (lang === "plsql") return plsqlCallee(node);
+  if (lang === "c" || lang === "cpp") return cCallee(node);
 
   const fn = node.childForFieldName("function");
   if (!fn) return null;
@@ -1337,6 +1531,7 @@ function isImport(node: Parser.SyntaxNode, lang: Language): boolean {
   if (lang === "php") return node.type === "namespace_use_clause";
   if (lang === "c_sharp") return node.type === "using_directive";
   if (lang === "groovy") return node.type === "groovy_import";
+  if (lang === "c" || lang === "cpp") return node.type === "preproc_include";
   return node.type === "import_statement" || node.type === "import_from_statement";
 }
 
@@ -1375,6 +1570,14 @@ function importSpecifier(node: Parser.SyntaxNode, lang: Language): string | null
   if (lang === "groovy") {
     const n = node.childForFieldName("import") ?? node.namedChildren.find((c) => c.type === "qualified_name" || c.type === "identifier");
     return n?.text ?? null;
+  }
+  if (lang === "c" || lang === "cpp") {
+    // A local `#include "x.h"` is a file dependency; a system `<...>` include is
+    // external noise, so it's dropped (no edge).
+    const s = node.namedChildren.find((c) => c.type === "string_literal");
+    if (!s) return null;
+    const frag = s.namedChildren.find((c) => c.type === "string_content");
+    return frag?.text ?? s.text.replace(/^"|"$/g, "");
   }
   const str = node.namedChildren.find((c) => c.type === "string");
   if (!str) return null;
@@ -1466,6 +1669,25 @@ function groovyCallee(node: Parser.SyntaxNode): { name: string; viaMember: boole
  * modifier hides one. */
 function groovyExported(node: Parser.SyntaxNode): boolean {
   return !node.namedChildren.some((c) => c.type === "modifier" && c.text === "private");
+}
+
+/** C/C++ call shapes: a free `foo()` (function = identifier); a member `obj.m()` /
+ * `p->m()` (field_expression, name = trailing field); a qualified `NS::f()`
+ * (qualified_identifier, name = trailing segment). Receiver typing isn't wired for
+ * C/C++, so member/qualified calls resolve by name only. */
+function cCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; receiver?: string } | null {
+  const fn = node.childForFieldName("function") ?? node.namedChildren[0];
+  if (!fn) return null;
+  if (fn.type === "identifier") return { name: fn.text, viaMember: false };
+  if (fn.type === "field_expression") {
+    const field = fn.childForFieldName("field") ?? fn.namedChildren.at(-1);
+    return field ? { name: field.text, viaMember: true } : null;
+  }
+  if (fn.type === "qualified_identifier") {
+    const name = fn.childForFieldName("name") ?? fn.namedChildren.at(-1);
+    return name ? { name: name.text, viaMember: true } : null;
+  }
+  return null;
 }
 
 /** PL/SQL call: a `ref_call` wraps a `referenced_element` whose `ref_name` is the
@@ -1635,4 +1857,156 @@ function markupNode(id: string, name: string, kind: Kind, rel: string, node: Par
     summary: null,
     crux: null,
   };
+}
+
+/** JSON: one node per object member key, scoped by object nesting
+ * (`scripts.build`), so a config's structure is queryable. Arrays and scalars
+ * carry no key, so they add no symbols; array elements are recursed for nested
+ * objects but not indexed. */
+function extractJson(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, scope: string[], parentId: string): void => {
+    if (node.type === "object") {
+      for (const pair of node.namedChildren) {
+        if (pair.type !== "pair") continue;
+        const keyNode = pair.childForFieldName("key") ?? pair.namedChildren[0];
+        const key = keyNode ? jsonString(keyNode) : null;
+        if (!key) continue;
+        const id = mintId(`${rel}#${[...scope, key].join(".")}`, minted);
+        nodes.push(markupNode(id, key, "variable", rel, pair));
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        const value = pair.childForFieldName("value") ?? pair.namedChildren.at(-1);
+        if (value) visit(value, [...scope, key], id);
+      }
+      return;
+    }
+    for (const child of node.namedChildren) visit(child, scope, parentId);
+  };
+  visit(root, [], rel);
+  return { nodes, rawEdges };
+}
+
+/** The text of a JSON string node without its surrounding quotes. */
+function jsonString(node: Parser.SyntaxNode): string | null {
+  if (node.type !== "string") return null;
+  const content = node.namedChildren.find((c) => c.type === "string_content");
+  return (content?.text ?? node.text.replace(/^"|"$/g, "")) || null;
+}
+
+/** YAML: one node per mapping key, scoped by nesting (`services.web.image`). */
+function extractYaml(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, scope: string[], parentId: string): void => {
+    if (node.type === "block_mapping_pair" || node.type === "flow_pair") {
+      const keyNode = node.childForFieldName("key") ?? node.namedChildren[0];
+      const key = keyNode ? yamlScalar(keyNode) : null;
+      if (key) {
+        const id = mintId(`${rel}#${[...scope, key].join(".")}`, minted);
+        nodes.push(markupNode(id, key, "variable", rel, node));
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        const value = node.childForFieldName("value");
+        if (value) visit(value, [...scope, key], id);
+        return;
+      }
+    }
+    for (const child of node.namedChildren) visit(child, scope, parentId);
+  };
+  visit(root, [], rel);
+  return { nodes, rawEdges };
+}
+
+/** The scalar text of a YAML key/flow node (`flow_node → plain_scalar → …`). */
+function yamlScalar(node: Parser.SyntaxNode): string | null {
+  let n: Parser.SyntaxNode | null = node;
+  const wrappers = new Set(["flow_node", "plain_scalar", "single_quote_scalar", "double_quote_scalar", "block_scalar"]);
+  while (n && n.namedChildCount > 0 && wrappers.has(n.type)) n = n.namedChildren[0];
+  return n ? n.text.replace(/^["']|["']$/g, "").trim() || null : null;
+}
+
+/** Markdown: one `heading` node per ATX/setext heading, named by its text and
+ * scoped under its ancestor headings (`Title.Section A.Sub`) via the section tree. */
+function extractMarkdown(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, scope: string[], parentId: string): void => {
+    if (node.type === "section") {
+      const h = node.namedChildren.find((c) => c.type === "atx_heading" || c.type === "setext_heading");
+      const text = h ? markdownHeadingText(h, source) : null;
+      if (text) {
+        const id = mintId(`${rel}#${[...scope, text].join(".")}`, minted);
+        nodes.push(markupNode(id, text, "heading", rel, h!));
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        for (const child of node.namedChildren) visit(child, [...scope, text], id);
+        return;
+      }
+    }
+    for (const child of node.namedChildren) visit(child, scope, parentId);
+  };
+  visit(root, [], rel);
+  return { nodes, rawEdges };
+}
+
+/** An ATX/setext heading's text (its `inline` content), whitespace-collapsed. */
+function markdownHeadingText(node: Parser.SyntaxNode, source: string): string | null {
+  const inline = node.namedChildren.find((c) => c.type === "inline" || c.type === "heading_content");
+  const raw = inline ? source.slice(inline.startIndex, inline.endIndex) : "";
+  return raw.replace(/\s+/g, " ").trim() || null;
+}
+
+/** SCSS: rules (by selector), mixins/functions (by name), top-level variables, and
+ * `@include name(...)` as a `calls` edge to the mixin — the one call-like relation
+ * style has. */
+function extractScss(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, parentId: string): void => {
+    const mint = (name: string, kind: Kind, n: Parser.SyntaxNode): string => {
+      const id = mintId(`${rel}#${name}`, minted);
+      nodes.push(markupNode(id, name, kind, rel, n));
+      rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+      return id;
+    };
+    let parentNext = parentId;
+    if (node.type === "rule_set") {
+      const sel = node.namedChildren.find((c) => c.type === "selectors");
+      const name = sel ? sel.text.replace(/\s+/g, " ").trim() : null;
+      if (name) parentNext = mint(name, "rule", node);
+    } else if (node.type === "mixin_statement" || node.type === "function_statement") {
+      const name = node.namedChildren.find((c) => c.type === "identifier")?.text;
+      if (name) parentNext = mint(name, "function", node);
+    } else if (node.type === "declaration" && parentId === rel) {
+      const prop = node.namedChildren.find((c) => c.type === "property_name");
+      if (prop?.text.startsWith("$")) mint(prop.text, "variable", node);
+    } else if (node.type === "include_statement") {
+      const name = node.namedChildren.find((c) => c.type === "identifier")?.text;
+      if (name) rawEdges.push({ source: parentId, relation: "calls", name, file: rel });
+    }
+    for (const child of node.namedChildren) visit(child, parentNext);
+  };
+  visit(root, rel);
+  return { nodes, rawEdges };
+}
+
+/** CSV: the header row's columns become one node each (`data.csv#id`), so a
+ * dataset's schema is queryable. Only the first row is treated as the header. */
+function extractCsv(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const header = root.namedChildren.find((c) => c.type === "row");
+  for (const field of header?.namedChildren ?? []) {
+    if (field.type !== "field") continue;
+    const name = field.text.replace(/^["']|["']$/g, "").trim();
+    if (!name) continue;
+    const id = mintId(`${rel}#${name}`, minted);
+    nodes.push(markupNode(id, name, "variable", rel, field));
+    rawEdges.push({ source: rel, relation: "contains", targetId: id, file: rel });
+  }
+  return { nodes, rawEdges };
 }

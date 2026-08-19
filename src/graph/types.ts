@@ -39,7 +39,8 @@ export type Kind =
   | "table"
   | "rule"
   | "element"
-  | "view";
+  | "view"
+  | "heading";
 
 /** How confident we are an edge is true, best-first. The hand-written AST
  * resolver assigns `extracted`/`inferred`; the opt-in LSP enrichment pass

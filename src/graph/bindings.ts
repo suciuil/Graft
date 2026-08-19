@@ -184,7 +184,14 @@ export function collectBindings(root: Parser.SyntaxNode, lang: Language): FileBi
     lang === "css" ||
     lang === "html" ||
     lang === "razor" ||
-    lang === "xml"
+    lang === "xml" ||
+    lang === "c" ||
+    lang === "cpp" ||
+    lang === "json" ||
+    lang === "yaml" ||
+    lang === "markdown" ||
+    lang === "scss" ||
+    lang === "csv"
   ) {
     return bindings;
   }
