@@ -18,7 +18,7 @@ import { walkDir } from "../ingest/fs.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
-import { readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { readExcludeDirs, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import { CODE_EXTENSIONS } from "./build.js";
 import { contextDirFor, readManifest, readNodes } from "./node-file.js";
 
@@ -63,6 +63,7 @@ export function checkContext(dir: string, opts: CheckOptions = {}): CheckResult 
   const current = new Map<string, string>(); // rel → hash
   for (const file of walkDir(root, readIncludeDirs(root), {
     followSubmodules: readFollowSubmodules(root),
+    excludes: readExcludeDirs(root),
   })) {
     if (file.startsWith(outDir)) continue;
     if (!exts.some((e) => file.toLowerCase().endsWith(e))) continue;

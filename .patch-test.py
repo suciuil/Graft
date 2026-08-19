@@ -1,0 +1,122 @@
+import io
+
+LF, CR, BS = chr(10), chr(13), chr(92)
+NL = BS + "n"  # the two-character escape \n as it must appear in TS source
+p = "test/graph-exclude-dir.test.ts"
+s = io.open(p, encoding="utf-8", newline="").read()
+crlf = CR + LF in s
+if crlf:
+    s = s.replace(CR + LF, LF)
+
+# The old test asserted that a path was rejected. Paths are now the precise
+# form of the feature, so that test is replaced by one asserting they work.
+old = LF.join([
+    'test("--exclude-dir rejects a path rather than a bare directory name", () => {',
+    '  const dir = mkdtempSync(join(tmpdir(), "graft-excl-bad-"));',
+    '  try {',
+    '    writeFileSync(join(dir, "main.ts"), "export const y = 1;' + NL + '");',
+    '    const r = runCliCapture(["build", dir, "--exclude-dir", "src/themes"]);',
+    '    assert.equal(r.status, 1);',
+    '    assert.match(r.stderr, /--exclude-dir/);',
+    '    assert.equal(readBuildConfig(dir), null, "a rejected value must not be persisted");',
+    '  } finally {',
+    '    rmSync(dir, { recursive: true, force: true });',
+    '  }',
+    '});',
+])
+new = LF.join([
+    '/* ---------- path form: one directory, not every directory of that name ---------- */',
+    '',
+    '/** Two `themes/` directories at different depths, so the two exclude shapes',
+    ' * are distinguishable: a bare name drops both, a path drops exactly one. */',
+    'function repoWithTwoThemes(prefix: string): string {',
+    '  const dir = mkdtempSync(join(tmpdir(), prefix));',
+    '  mkdirSync(join(dir, "src", "themes"), { recursive: true });',
+    '  mkdirSync(join(dir, "web", "themes"), { recursive: true });',
+    '  writeFileSync(join(dir, "src", "themes", "a.ts"), "export const srcTheme = 1;' + NL + '");',
+    '  writeFileSync(join(dir, "web", "themes", "b.ts"), "export const webTheme = 2;' + NL + '");',
+    '  writeFileSync(join(dir, "main.ts"), "export const main = 3;' + NL + '");',
+    '  return dir;',
+    '}',
+    '',
+    'test("a path-form exclusion drops only that directory, leaving same-named siblings indexed", () => {',
+    '  const dir = repoWithTwoThemes("graft-excl-path-");',
+    '  try {',
+    '    runCli(["build", dir, "--exclude-dir", "src/themes"]);',
+    '    const paths = pathsOf(dir);',
+    '    assert.ok(paths.some((x) => x.includes("main.ts")), "main.ts indexed");',
+    '    assert.ok(!paths.some((x) => x.includes("src/themes/")), "src/themes excluded");',
+    '    assert.ok(paths.some((x) => x.includes("web/themes/")), "web/themes must SURVIVE — the whole point of the path form");',
+    '  } finally {',
+    '    rmSync(dir, { recursive: true, force: true });',
+    '  }',
+    '});',
+    '',
+    'test("a bare name still drops every directory of that name, at every depth", () => {',
+    '  const dir = repoWithTwoThemes("graft-excl-name-");',
+    '  try {',
+    '    runCli(["build", dir, "--exclude-dir", "themes"]);',
+    '    const paths = pathsOf(dir);',
+    '    assert.ok(paths.some((x) => x.includes("main.ts")), "main.ts indexed");',
+    '    assert.ok(!paths.some((x) => x.includes("themes/")), "both themes/ directories excluded");',
+    '  } finally {',
+    '    rmSync(dir, { recursive: true, force: true });',
+    '  }',
+    '});',
+    '',
+    'test("a path-form exclusion excludes the subtree, not just the directory itself", () => {',
+    '  const dir = mkdtempSync(join(tmpdir(), "graft-excl-deep-"));',
+    '  try {',
+    '    mkdirSync(join(dir, "src", "themes", "dark", "parts"), { recursive: true });',
+    '    writeFileSync(join(dir, "src", "themes", "dark", "parts", "deep.ts"), "export const deep = 1;' + NL + '");',
+    '    writeFileSync(join(dir, "src", "keep.ts"), "export const keep = 2;' + NL + '");',
+    '',
+    '    runCli(["build", dir, "--exclude-dir", "src/themes"]);',
+    '    const paths = pathsOf(dir);',
+    '    assert.ok(paths.some((x) => x.includes("src/keep.ts")), "sibling source under src/ survives");',
+    '    assert.ok(!paths.some((x) => x.includes("themes/")), "everything below src/themes is gone");',
+    '  } finally {',
+    '    rmSync(dir, { recursive: true, force: true });',
+    '  }',
+    '});',
+    '',
+    '// Backslashes, a leading ./ and a trailing / are all things a hand-edited',
+    '// config or a Windows shell will produce; they must mean the same directory.',
+    'test("path-form entries are normalised: backslashes, leading ./ and trailing /", () => {',
+    '  for (const [i, spelling] of ["src' + BS + BS + 'themes', "./src/themes", "src/themes/"].entries()) {',
+    '    const dir = repoWithTwoThemes(`graft-excl-norm-${i}-`);',
+    '    try {',
+    '      mkdirSync(join(dir, ".graft"), { recursive: true });',
+    '      writeFileSync(join(dir, ".graft", "config.json"), JSON.stringify({ excludeDirs: [spelling] }));',
+    '      runCli(["build", dir]);',
+    '      const paths = pathsOf(dir);',
+    '      assert.ok(!paths.some((x) => x.includes("src/themes/")), `${spelling}: src/themes excluded`);',
+    '      assert.ok(paths.some((x) => x.includes("web/themes/")), `${spelling}: web/themes kept`);',
+    '    } finally {',
+    '      rmSync(dir, { recursive: true, force: true });',
+    '    }',
+    '  }',
+    '});',
+    '',
+    'test("--exclude-dir rejects an absolute path and a .. escape", () => {',
+    '  const dir = mkdtempSync(join(tmpdir(), "graft-excl-bad-"));',
+    '  try {',
+    '    writeFileSync(join(dir, "main.ts"), "export const y = 1;' + NL + '");',
+    '    for (const bad of ["C:' + BS + BS + 'themes', "/etc/themes", "../outside"]) {',
+    '      const r = runCliCapture(["build", dir, "--exclude-dir", bad]);',
+    '      assert.equal(r.status, 1, `${bad} must be rejected`);',
+    '      assert.match(r.stderr, /--exclude-dir/);',
+    '    }',
+    '    assert.equal(readBuildConfig(dir), null, "a rejected value must not be persisted");',
+    '  } finally {',
+    '    rmSync(dir, { recursive: true, force: true });',
+    '  }',
+    '});',
+])
+assert s.count(old) == 1, "old rejection test not found"
+s = s.replace(old, new)
+
+if crlf:
+    s = s.replace(LF, CR + LF)
+io.open(p, "w", encoding="utf-8", newline="").write(s)
+print("tests updated")

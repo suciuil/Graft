@@ -15,6 +15,7 @@ import {
   patchBuildConfig,
   readBuildConfig,
   readFollowSubmodules,
+  readExcludeDirs,
   readIncludeDirs,
   writeBuildConfig,
 } from "../src/util/state.js";
@@ -46,6 +47,26 @@ test("readIncludeDirs turns a persisted list into a Set; an empty persisted list
 
   writeBuildConfig(d, { includeDirs: [] });
   assert.equal(readIncludeDirs(d), undefined, "an empty list must read exactly like no list at all");
+});
+
+test("readExcludeDirs turns a persisted list into a Set; an empty list reads as undefined", () => {
+  const d = fresh();
+  writeBuildConfig(d, { excludeDirs: ["Documents", "themes"] });
+  assert.deepEqual(readExcludeDirs(d), new Set(["Documents", "themes"]));
+
+  writeBuildConfig(d, { excludeDirs: [] });
+  assert.equal(readExcludeDirs(d), undefined, "an empty list must read exactly like no list at all");
+});
+
+// The two lists are independent knobs on one file, and a user edits
+// .graft/config.json by hand as well — persisting one must not disturb the other.
+test("includeDirs and excludeDirs coexist in one config", () => {
+  const d = fresh();
+  writeBuildConfig(d, { includeDirs: ["build"] });
+  patchBuildConfig(d, { excludeDirs: ["Documents"] });
+  assert.deepEqual(readBuildConfig(d), { includeDirs: ["build"], excludeDirs: ["Documents"] });
+  assert.deepEqual(readIncludeDirs(d), new Set(["build"]));
+  assert.deepEqual(readExcludeDirs(d), new Set(["Documents"]));
 });
 
 test("followSubmodules round-trips true and explicit false", () => {

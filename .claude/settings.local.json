@@ -7,7 +7,24 @@
       "Bash(npm run *)",
       "Bash(node -e \"console.log\\('placeholder'\\)\")",
       "Bash(cd \"d:/!stuff/work_ChAIR/Graft\" && find . -maxdepth 4 -name \"*.superseded-*\" -not -path \"*/node_modules/*\" 2>/dev/null | head -20; echo \"=== count ===\"; find . -maxdepth 4 -name \"*.superseded-*\" -not -path \"*/node_modules/*\" 2>/dev/null | wc -l)",
-      "Read(//d/!stuff/work_ChAIR/Graft/**)"
+      "Read(//d/!stuff/work_ChAIR/Graft/**)",
+      "mcp__graft__graft_find_code",
+      "mcp__graft__graft_find_all",
+      "mcp__graft__graft_trace_calls",
+      "Bash(python -)",
+      "Bash(npx tsc *)",
+      "Bash(npx tsx *)",
+      "Bash(npm test *)",
+      "Bash(git checkout *)",
+      "Bash(python .patch-fs.py)",
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(python .patch-test.py)",
+      "Bash(rm -f .patch-test.py)",
+      "Bash(python .patch-glob.py)",
+      "Bash(sed -n '/function globToRegExp/,/^}/p' src/ingest/fs.ts)",
+      "Bash(grep -n \"generated\\\\`\" src/ingest/fs.ts)",
+      "Bash(rm -f .globprobe.mts)",
+      "Bash(echo \"tsc=$?\")"
     ]
   }
 }

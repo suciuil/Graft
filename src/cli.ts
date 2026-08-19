@@ -22,6 +22,7 @@ import { ensureFreshChildren, ensureFreshGraph, refreshNote } from "./graph/refr
 import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
 import { nearestGraftRoot } from "./graph/root.js";
 import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
+import { normalizeExcludeEntry } from "./ingest/fs.js";
 import { discoverWorkspaceChildren } from "./graph/scopes.js";
 import {
   runWorkspaceAsk,
@@ -199,6 +200,14 @@ program
     (val: string, prev: string[]) => [...prev, val],
     [] as string[],
   )
+  .option(
+    "--exclude-dir <name>",
+    "skip a directory — repeatable. A bare NAME (themes) skips it at any depth; a root-relative PATH " +
+      "(src/themes) skips only that one and its subtree. Persisted like --include-dir, and wins over it; " +
+      "edit .graft/config.json's excludeDirs to manage a long list",
+    (val: string, prev: string[]) => [...prev, val],
+    [] as string[],
+  )
   .action(async (
     dir: string,
     opts: {
@@ -208,6 +217,7 @@ program
       reuse?: boolean;
       lsp?: boolean;
       includeDir?: string[];
+      excludeDir?: string[];
       followSubmodules?: boolean;
     },
     command: Command,
@@ -239,6 +249,32 @@ program
         }
       }
       buildConfigPatch.includeDirs = opts.includeDir;
+    }
+    if (opts.excludeDir && opts.excludeDir.length > 0) {
+      // Two accepted shapes, unlike --include-dir's bare names only: a NAME
+      // (`themes`) excludes that segment at any depth, a root-relative PATH
+      // (`src/themes`) excludes exactly one directory and its subtree. Dot-names
+      // are accepted rather than rejected — they are already skipped, so naming
+      // one is redundant, not a mistake.
+      for (const name of opts.excludeDir) {
+        const value = normalizeExcludeEntry(name);
+        if (!value) {
+          console.error(`✗ --exclude-dir "${name}": empty after normalising — expected a directory name or a root-relative path`);
+          process.exit(1);
+        }
+        // An absolute path cannot be compared against a root-relative one, and
+        // `..` would reach outside the repo being indexed. Both are user error
+        // rather than something to silently never match.
+        if (/^[a-zA-Z]:/.test(value) || name.startsWith("/") || name.startsWith("\\")) {
+          console.error(`✗ --exclude-dir "${name}": expected a path relative to the repo root, not an absolute one`);
+          process.exit(1);
+        }
+        if (value.split("/").includes("..")) {
+          console.error(`✗ --exclude-dir "${name}": ".." cannot appear — the path must stay inside the repo`);
+          process.exit(1);
+        }
+      }
+      buildConfigPatch.excludeDirs = opts.excludeDir.map(normalizeExcludeEntry);
     }
     const followSubmodulesWasExplicit = command.getOptionValueSource("followSubmodules") === "cli";
     if (followSubmodulesWasExplicit && typeof opts.followSubmodules === "boolean") {
@@ -282,6 +318,7 @@ program
         childConfig: cliConfig(),
         override: buildGlobalDir,
         includeDirs: opts.includeDir,
+        excludeDirs: opts.excludeDir,
         followSubmodules: followSubmodulesWasExplicit ? opts.followSubmodules : undefined,
       });
       return;

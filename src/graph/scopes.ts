@@ -25,7 +25,7 @@ import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import { join, resolve } from "node:path";
 import { shouldSkipDir, walkDir } from "../ingest/fs.js";
 import { relPosix } from "../util/paths.js";
-import { readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { readExcludeDirs, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import type { GraphV1, ScopeV1 } from "./types.js";
 
 /** Project-marker files, checked in this order (also the order `markers` is built in). */
@@ -134,6 +134,7 @@ export function discoverScopes(
   root: string,
   repoFiles: string[] = walkDir(root, readIncludeDirs(resolve(root)), {
     followSubmodules: readFollowSubmodules(resolve(root)),
+    excludes: readExcludeDirs(resolve(root)),
   }),
 ): ScopeV1[] {
   const absRoot = resolve(root);
@@ -328,6 +329,7 @@ export function assertPrefixIndexed(graph: GraphV1, prefix: string): void {
 export function discoverWorkspaceChildren(root: string): string[] {
   const absRoot = resolve(root);
   const includes = readIncludeDirs(absRoot);
+  const excludes = readExcludeDirs(absRoot);
   let entries: Dirent[];
   try {
     entries = readdirSync(absRoot, { withFileTypes: true });
@@ -335,7 +337,7 @@ export function discoverWorkspaceChildren(root: string): string[] {
     return [];
   }
   return entries
-    .filter((e) => e.isDirectory() && !shouldSkipDir(e.name, includes) && existsSync(join(absRoot, e.name, ".git")))
+    .filter((e) => e.isDirectory() && !shouldSkipDir(e.name, includes, excludes) && existsSync(join(absRoot, e.name, ".git")))
     .map((e) => e.name);
 }
 

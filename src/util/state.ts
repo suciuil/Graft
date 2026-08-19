@@ -73,6 +73,12 @@ export interface BuildConfig {
    * no-flag build — and the fingerprint/refresh path, which never sees CLI
    * flags at all — behave identically to the invocation that set it. */
   includeDirs?: string[];
+  /** Directory names to drop from this repo's walks, on top of SKIP_DIRS —
+   * persisted for the same reason `includeDirs` is. Bare names matched per path
+   * segment at any depth, so `"Documents"` skips every `Documents/` in the tree.
+   * Takes precedence over {@link includeDirs}: an exclusion is a deliberate
+   * statement about this repo, while an inclusion only lifts a built-in default. */
+  excludeDirs?: string[];
   /** Whether initialized Git submodules are folded into this repo's graph.
    * Absent/false keeps the historical boundary at the superproject. */
   followSubmodules?: boolean;
@@ -120,6 +126,15 @@ export function patchBuildConfig(d: string, patch: BuildConfig): void {
  * a later no-flag rebuild, and the hooks/refresh path all agree. */
 export function readIncludeDirs(d: string): Set<string> | undefined {
   const dirs = readBuildConfig(d)?.includeDirs;
+  return dirs && dirs.length ? new Set(dirs) : undefined;
+}
+
+/** The persisted `--exclude-dir` list for repo `d`, as a Set — `undefined` when
+ * nothing was persisted (or the list is empty). Read at every walkDir call site
+ * alongside {@link readIncludeDirs}, so a build, a later no-flag rebuild and the
+ * hooks/refresh path all enumerate the same files. */
+export function readExcludeDirs(d: string): Set<string> | undefined {
+  const dirs = readBuildConfig(d)?.excludeDirs;
   return dirs && dirs.length ? new Set(dirs) : undefined;
 }
 

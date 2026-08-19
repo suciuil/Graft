@@ -36,6 +36,9 @@ export interface WorkspaceBuildOptions {
    * independent repos with their own local settings and can later be rebuilt
    * directly without seeing the parent invocation's flags. */
   includeDirs?: string[];
+  /** The CLI's `--exclude-dir` list, persisted into each child for the same
+   * reason as {@link includeDirs}: the child is the repo actually walked. */
+  excludeDirs?: string[];
   /** An explicit CLI submodule choice to persist into every child repo. */
   followSubmodules?: boolean;
 }
@@ -50,6 +53,9 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
     const childConfigPatch: BuildConfig = {};
     if (opts.includeDirs && opts.includeDirs.length > 0) {
       childConfigPatch.includeDirs = opts.includeDirs;
+    }
+    if (opts.excludeDirs && opts.excludeDirs.length > 0) {
+      childConfigPatch.excludeDirs = opts.excludeDirs;
     }
     if (opts.followSubmodules !== undefined) {
       childConfigPatch.followSubmodules = opts.followSubmodules;
