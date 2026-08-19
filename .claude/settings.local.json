@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(time node scripts/build-grammars.mjs --quiet)",
+      "Bash(time node scripts/build-grammars.mjs)",
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(node -e \"console.log\\('placeholder'\\)\")",
+      "Bash(cd \"d:/!stuff/work_ChAIR/Graft\" && find . -maxdepth 4 -name \"*.superseded-*\" -not -path \"*/node_modules/*\" 2>/dev/null | head -20; echo \"=== count ===\"; find . -maxdepth 4 -name \"*.superseded-*\" -not -path \"*/node_modules/*\" 2>/dev/null | wc -l)",
+      "Read(//d/!stuff/work_ChAIR/Graft/**)"
+    ]
+  }
+}

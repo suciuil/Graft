@@ -14,6 +14,7 @@ import Java from "tree-sitter-java";
 import PHP from "tree-sitter-php";
 import { basename, dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { readdirSync } from "node:fs";
 import { contentHash } from "../util/id.js";
 import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } from "./bindings.js";
@@ -74,41 +75,70 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
 const require = createRequire(import.meta.url);
 const optionalGrammarCache = new Map<string, unknown | null>();
 
+/** Graft's own package root. `src/graph/` while developing and `dist/graph/` once
+ * compiled both sit two levels below it, so one expression serves both layouts. */
+const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** Grammar key → the npm package that ships its binding. For tooling that has to
+ * bridge the two namings — the bundle packer keys its vendored directories by grammar
+ * key, because the package name is not a stable handle (the groovy grammar's package
+ * calls itself `@murtaza64/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`). */
+export function optionalGrammarPackages(): Record<string, string> {
+  return Object.fromEntries(Object.entries(OPTIONAL_GRAMMAR_PKG).map(([k, v]) => [k, v.pkg]));
+}
+
+/** The package root for an optional grammar, or null when it isn't installed. */
+function installedRoot(pkg: string): string | null {
+  try {
+    // Resolve `package.json` rather than the package main: it works even when the main
+    // is an ESM/top-level-await wrapper, which C#'s binding uses.
+    return dirname(require.resolve(`${pkg}/package.json`));
+  } catch {
+    return null;
+  }
+}
+
+/** Pull a grammar out of one candidate root: node-gyp-build first, since it knows the
+ * package's own layout, then a direct scan of the two places a built `.node` can sit.
+ * The scan is what makes a bundle work — it ships bare `.node` files with no
+ * package.json and no node-gyp-build to consult. */
+function grammarFromRoot(root: string, prop?: string): unknown | null {
+  try {
+    const ngb = createRequire(join(root, "package.json"))("node-gyp-build") as (r: string) => unknown;
+    const g = pickGrammar(ngb(root), prop);
+    if (g) return g;
+  } catch {
+    /* not an installed package (or no node-gyp-build) — fall through to the scan */
+  }
+  for (const dir of [join(root, "build", "Release"), join(root, "prebuilds", `${process.platform}-${process.arch}`)]) {
+    try {
+      const file = readdirSync(dir).find((f) => f.endsWith(".node"));
+      if (file) {
+        const g = pickGrammar(require(join(dir, file)), prop);
+        if (g) return g;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return null;
+}
+
 /** Load an optional native grammar synchronously, bypassing any ESM/top-level-await
- * index wrapper (C#'s binding uses one) by loading the built `.node` directly via
- * node-gyp-build, then falling back to scanning build/Release and prebuilds. Cached,
- * including the null (unavailable) result, so it probes the filesystem once. */
+ * index wrapper by loading the built `.node` directly. Two roots are tried in turn:
+ * the installed package, then `vendor/<key>/` inside graft itself — which is all a
+ * machine that installed the self-contained bundle has, the sibling grammar repos
+ * being local to the machine that built it. Cached, including the null (unavailable)
+ * result, so it probes the filesystem once. */
 function loadOptionalGrammar(key: string): unknown | null {
   if (optionalGrammarCache.has(key)) return optionalGrammarCache.get(key) ?? null;
   const spec = OPTIONAL_GRAMMAR_PKG[key];
   let grammar: unknown | null = null;
   if (spec) {
-    let root: string | null = null;
-    try {
-      root = dirname(require.resolve(`${spec.pkg}/package.json`));
-    } catch {
-      root = null;
-    }
-    if (root) {
-      try {
-        const ngb = createRequire(join(root, "package.json"))("node-gyp-build") as (r: string) => unknown;
-        grammar = pickGrammar(ngb(root), spec.prop);
-      } catch {
-        grammar = null;
-      }
-      if (!grammar) {
-        for (const dir of [join(root, "build", "Release"), join(root, "prebuilds", `${process.platform}-${process.arch}`)]) {
-          try {
-            const file = readdirSync(dir).find((f) => f.endsWith(".node"));
-            if (file) {
-              grammar = pickGrammar(require(join(dir, file)), spec.prop);
-              if (grammar) break;
-            }
-          } catch {
-            /* try next candidate */
-          }
-        }
-      }
+    for (const root of [installedRoot(spec.pkg), join(PKG_ROOT, "vendor", key)]) {
+      if (!root) continue;
+      grammar = grammarFromRoot(root, spec.prop);
+      if (grammar) break;
     }
   }
   optionalGrammarCache.set(key, grammar);

@@ -43,11 +43,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p viewer/tsconfig.json && node scripts/build-viewer.mjs",
+    "build": "npm run build:grammars && npm run build:ts",
+    "build:ts": "tsc -p tsconfig.json && tsc -p viewer/tsconfig.json && node scripts/build-viewer.mjs",
+    "build:grammars": "node scripts/build-grammars.mjs",
+    "pack:bundle": "node scripts/pack-bundle.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "cli": "tsx src/cli.ts",
     "test": "node scripts/run-tests.mjs",
-    "prepare": "npm run build",
+    "prepare": "npm run build:ts",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.mjs"
   },
