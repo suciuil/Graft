@@ -98,5 +98,15 @@ test("CSV breadth: header columns become variable nodes", { skip: grammarAvailab
 test("C++ header: a .h with a class is parsed as C++, not C", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   const graph = await build({ "widget.h": "class Widget {\npublic:\n  int area();\n};\n" });
   assert.equal(nodeById(graph, "widget.h#Widget")?.kind, "class");
+  // The banner label follows the same content sniff the extractor made — it used
+  // to read the extension only, so a C++-only header set reported as `c`.
+  assert.ok(graph.meta.languages.includes("cpp"), "languages include cpp");
+  assert.ok(!graph.meta.languages.includes("c"), "languages do NOT include c");
+});
+
+test("C header: a .h with no C++ constructs stays C", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({ "util.h": "int helper(int x);\nstruct Point { int x; };\n" });
+  assert.ok(graph.meta.languages.includes("c"), "languages include c");
+  assert.ok(!graph.meta.languages.includes("cpp"), "languages do NOT include cpp");
 });
 

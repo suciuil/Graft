@@ -246,9 +246,54 @@ export function languageOf(path: string): Language | null {
  * What to *call* the language of this file, for a banner or a repo map — or null when
  * the file isn't indexed at all, which is the distinction {@link languageOf} shares
  * and the one that matters to a reader checking coverage.
+ *
+ * Extension-only, so it cannot see through an ambiguous extension: prefer
+ * {@link languageLabelOfSource} wherever the file's text is already in hand.
  */
 export function languageLabelOf(path: string): string | null {
   return entryFor(path)?.label ?? null;
+}
+
+/**
+ * Extension routing is a guess wherever two languages share an extension, and `.h`
+ * is the case that bites: a C++-only header set uses it, and the C grammar cannot
+ * parse a class or a template. Content decides.
+ *
+ * The extractor and the build banner both read that decision HERE, from one
+ * function, because they used to decide separately: the sniff lived inside
+ * `extractFile`, so a C++ `.h` extracted correctly as C++ while the banner — which
+ * only ever looked at the extension — still reported the repo as containing `c`.
+ *
+ * Returns the override, or undefined to keep the extension's own entry. Requires
+ * the override's grammar to actually be built; without that guard a repo with the
+ * C grammar but not the C++ one would route these headers to a grammar that isn't
+ * there and get a symbol-less file node, where parsing them as C at least recovers
+ * the plain-C declarations.
+ */
+function contentOverride(
+  path: string,
+  grammar: Language,
+  source: string,
+): { grammar: Language; label: string } | undefined {
+  if (grammar === "c" && /\.h$/i.test(path) && looksLikeCpp(source) && grammarAvailable("cpp"))
+    return { grammar: "cpp", label: "cpp" };
+  return undefined;
+}
+
+/** {@link languageOf}, refined by the file's content where the extension is
+ * ambiguous — the grammar that will really parse it. */
+export function languageOfSource(path: string, source: string): Language | null {
+  const entry = entryFor(path);
+  if (!entry) return null;
+  return (contentOverride(path, entry.grammar, source) ?? entry).grammar;
+}
+
+/** {@link languageLabelOf}, refined by content exactly as {@link languageOfSource}
+ * is, so a banner names the language that actually parsed the file. */
+export function languageLabelOfSource(path: string, source: string): string | null {
+  const entry = entryFor(path);
+  if (!entry) return null;
+  return (contentOverride(path, entry.grammar, source) ?? entry).label;
 }
 
 /**
@@ -563,8 +608,9 @@ function parseSource(source: string): Parser.SyntaxNode {
 
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
   // A `.h` header carrying C++ constructs is really C++ — the C grammar can't
-  // parse classes/templates — so route it to the C++ extractor.
-  if (lang === "c" && /\.h$/i.test(rel) && looksLikeCpp(source)) lang = "cpp";
+  // parse classes/templates — so route it to the C++ extractor. Shared with the
+  // build banner's label so the two can never name different languages.
+  lang = contentOverride(rel, lang, source)?.grammar ?? lang;
   const grammar = grammarFor(lang);
   // An optional grammar that isn't built leaves the file indexed but symbol-less,
   // rather than throwing and marking it a parse error.

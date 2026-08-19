@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { walkDir } from "../ingest/fs.js";
 import { contextDirFor, ensureGitignored, ensureSearchable } from "../context/node-file.js";
-import { extractFile, languageLabelOf, languageOf, type RawEdge } from "./extract.js";
+import { extractFile, languageLabelOfSource, languageOf, type RawEdge } from "./extract.js";
 import { extractGeneric, genericLangOf, warmGenericGrammars } from "./generic.js";
 import { containerLangOf, extractContainer, warmContainerGrammars } from "./container.js";
 import { contentHash } from "../util/id.js";
@@ -206,7 +206,6 @@ export async function buildGraph(
     // breadth tier so a future grammar claiming .vue can't shadow it.
     const container = lang ? null : containerLangOf(f.abs);
     const generic = lang || container ? null : genericLangOf(f.abs);
-    const label = languageLabelOf(f.abs) ?? container?.name ?? generic?.name ?? "unknown";
     const cached = priorExtract.files[rel];
 
     // Every file is read and hashed, every build — only the *parse* is memoized.
@@ -235,6 +234,13 @@ export async function buildGraph(
       entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash: "", nodes: [], rawEdges: [] };
       return;
     }
+
+    // Labelled from the source, not the path: where an extension is shared, the
+    // extractor sniffs the content to pick the grammar (a C++ `.h` goes to the C++
+    // extractor), and the banner has to name that same language or it reports a
+    // C++ header set as `c`. Computed here, below the read, so both the reused and
+    // the freshly-parsed branch get the sniffed label.
+    const label = languageLabelOfSource(f.abs, source) ?? container?.name ?? generic?.name ?? "unknown";
 
     const hash = contentHash(source);
     if (cached && hash === cached.hash) {
