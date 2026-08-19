@@ -9,7 +9,7 @@
  * on top of each other. `claude/state.ts` re-exports all of this, so nothing
  * outside had to change when it moved.
  */
-import { readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 export interface Stats {
@@ -105,6 +105,48 @@ function ensureBuildConfigIgnored(d: string): void {
   const gap = current === '' ? '' : current.endsWith('\n') ? '\n' : '\n\n';
   const block = `${gap}# graft's local repository settings — not committed.\n/${BUILD_CONFIG_DIR}/\n`;
   try { writeFileSync(path, current + block); } catch { /* best-effort */ }
+}
+
+/**
+ * Every build option at its default, written by `graft init` so the file is
+ * discoverable rather than folklore — JSON has no comments and the options are
+ * otherwise only visible in `graft build --help`.
+ *
+ * Typed `Required<BuildConfig>` deliberately: adding a field to {@link BuildConfig}
+ * without adding it here is a compile error, so the scaffold cannot silently fall
+ * behind the options it claims to list.
+ */
+const DEFAULT_BUILD_CONFIG: Required<BuildConfig> = {
+  includeDirs: [],
+  excludeDirs: [],
+  followSubmodules: false,
+};
+
+/** One-line orientation, since a JSON file cannot carry a comment. Read back as
+ * an unknown key and preserved by {@link patchBuildConfig}, which spreads it. */
+const BUILD_CONFIG_NOTE =
+  "graft repository settings — see `graft build --help`. excludeDirs takes a NAME (themes), " +
+  "a root-relative PATH (src/themes), or a glob (src/themes*, src/themes/*, *src/themes).";
+
+/**
+ * Scaffold `.graft/config.json` with every option at its default, unless the repo
+ * already has one. Returns the path when it wrote, null when it left an existing
+ * file alone — an existing config is the user's, and init must never overwrite it.
+ */
+export function ensureDefaultBuildConfig(d: string): string | null {
+  const path = missingBuildConfigPath(d);
+  if (!path) return null;
+  ensureBuildConfigIgnored(d);
+  writeJsonAtomic(path, { "//": BUILD_CONFIG_NOTE, ...DEFAULT_BUILD_CONFIG });
+  return path;
+}
+
+/** The config path `graft init` would create for repo `d`, or null when one is
+ * already there. Lets `--dry-run` report exactly what the real run would write
+ * without duplicating the "only if absent" rule. */
+export function missingBuildConfigPath(d: string): string | null {
+  const path = buildConfigPath(d);
+  return existsSync(path) ? null : path;
 }
 
 export function readBuildConfig(d: string): BuildConfig | null { return readJson<BuildConfig>(buildConfigPath(d)); }

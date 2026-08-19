@@ -37,7 +37,7 @@ import { planInit, selectedWrites } from "./hosts/plan.js";
 import { formatNonInteractiveHelp, formatPlan, runPicker } from "./cli-picker.js";
 import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, runUpgrade } from "./cli-meta.js";
-import { patchBuildConfig, type BuildConfig } from "./util/state.js";
+import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 
 const program = new Command();
@@ -704,6 +704,12 @@ program
 
     if (opts.dryRun) {
       console.error(formatPlan(plan, ids, repo, home));
+      // wireTarget scaffolds this before touching any agent, so a dry run that
+      // listed only agent files would under-report what init writes.
+      for (const target of targets) {
+        const cfg = missingBuildConfigPath(target);
+        if (cfg) console.error(`\n  would write ${cfg} (repo build settings)`);
+      }
       for (const child of children)
         console.error(`\n— ${child}/ (workspace child)\n` + formatPlan(planInit(join(repo, child), { home }), ids, join(repo, child), home));
       return;
@@ -753,6 +759,12 @@ function wireTarget(
   },
 ): void {
     const { home, cliPath, plan, wantClaude, opts } = ctx;
+
+    // Before any agent wiring, and regardless of which agents were picked: the
+    // repo's own build settings. Written only when absent, so re-running init
+    // never discards an edited exclude list.
+    const configPath = ensureDefaultBuildConfig(repo);
+    if (configPath) console.error(`✓ wrote ${configPath}`);
 
     if (wantClaude) {
       const res = runInit(repo, { build: opts.build, cliPath });
