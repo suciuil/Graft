@@ -8,7 +8,7 @@
  * loses C#, Groovy, PL/SQL, C, C++, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS
  * and CSV. The output of this script has them baked in:
  *
- *     npm i -g ./nanonets-graft-<version>-win32-x64.tgz
+ *     npm i -g ./nanonets-graft-<version>-win32-x64.tgz --ignore-scripts
  *
  * What makes that possible is that a prebuilt grammar `.node` needs nothing around it
  * — `require()` it and hand the result to `parser.setLanguage()`. So the bundle ships
@@ -107,6 +107,15 @@ if (included.length === 0) die("no grammars could be bundled — is this the mac
 // paths do not exist, and npm would report a resolution failure for each. The grammars
 // are already inside, so the entries have no job left to do. devDependencies and the
 // build lifecycle scripts go for the same reason — nothing on the target compiles.
+//
+// `allowScripts` is dropped for a different reason: npm 12 skips the package.json layer
+// altogether when `npm.global` is set (its lib/utils/resolve-allow-scripts.js), so no
+// manifest field can pre-approve install scripts for an `npm i -g` of this tarball —
+// shipping one would only imply a promise npm never reads. The install line printed at
+// the end passes `--ignore-scripts` instead, which is a statement of fact rather than a
+// workaround: every binding in the dependency tree ships a prebuilt `.node`, so
+// `node-gyp-build` exits without compiling either way. The only thing skipped is graft's
+// own postinstall, which prints the `graft init` hint.
 const staged = { ...pkg };
 delete staged.optionalDependencies;
 delete staged.devDependencies;
@@ -133,4 +142,5 @@ if (missing.length > 0) {
   console.log(`  ${missing.length} not bundled:`);
   for (const m of missing) console.log(`    ${m}`);
 }
-console.log(`\n  Install on another ${PLATFORM} machine with:\n    npm i -g ./${finalName}\n`);
+console.log(`\n  Install on another ${PLATFORM} machine with:\n    npm i -g ./${finalName} --ignore-scripts\n`);
+console.log("  (--ignore-scripts: every binding in here is prebuilt, so nothing compiles on the\n   target. Without it npm 12 warns about unapproved install scripts, then installs anyway.)\n");
