@@ -183,7 +183,8 @@ export function collectBindings(root: Parser.SyntaxNode, lang: Language): FileBi
     lang === "plsql" ||
     lang === "css" ||
     lang === "html" ||
-    lang === "razor"
+    lang === "razor" ||
+    lang === "xml"
   ) {
     return bindings;
   }

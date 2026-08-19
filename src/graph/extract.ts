@@ -34,19 +34,22 @@ export type Language =
   | "plsql"
   | "css"
   | "html"
-  | "razor";
+  | "razor"
+  | "xml";
 
-/** Optional grammar key → the package that ships its native binding. Loaded
- * best-effort and cached: a missing/unbuildable binding leaves the language
- * unclaimed, so its files fall through to the breadth tier (or file-only)
- * instead of crashing the build. */
-const OPTIONAL_GRAMMAR_PKG: Record<string, string> = {
-  c_sharp: "tree-sitter-c-sharp",
-  groovy: "tree-sitter-groovy",
-  plsql: "tree-sitter-plsql",
-  css: "tree-sitter-css-in-js",
-  html: "tree-sitter-html",
-  razor: "tree-sitter-razor",
+/** Optional grammar key → the package that ships its native binding (and, when the
+ * package exports several grammars, the property to pick). Loaded best-effort and
+ * cached: a missing/unbuildable binding leaves the language unclaimed, so its files
+ * fall through to the breadth tier (or file-only) instead of crashing the build. */
+const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
+  c_sharp: { pkg: "tree-sitter-c-sharp" },
+  groovy: { pkg: "tree-sitter-groovy" },
+  plsql: { pkg: "tree-sitter-plsql" },
+  css: { pkg: "tree-sitter-css-in-js" },
+  html: { pkg: "tree-sitter-html" },
+  razor: { pkg: "tree-sitter-razor" },
+  // Monorepo grammar: its node binding exports { xml, dtd } — pick the XML one.
+  xml: { pkg: "@tree-sitter-grammars/tree-sitter-xml", prop: "xml" },
 };
 
 const require = createRequire(import.meta.url);
@@ -58,19 +61,19 @@ const optionalGrammarCache = new Map<string, unknown | null>();
  * including the null (unavailable) result, so it probes the filesystem once. */
 function loadOptionalGrammar(key: string): unknown | null {
   if (optionalGrammarCache.has(key)) return optionalGrammarCache.get(key) ?? null;
-  const pkg = OPTIONAL_GRAMMAR_PKG[key];
+  const spec = OPTIONAL_GRAMMAR_PKG[key];
   let grammar: unknown | null = null;
-  if (pkg) {
+  if (spec) {
     let root: string | null = null;
     try {
-      root = dirname(require.resolve(`${pkg}/package.json`));
+      root = dirname(require.resolve(`${spec.pkg}/package.json`));
     } catch {
       root = null;
     }
     if (root) {
       try {
         const ngb = createRequire(join(root, "package.json"))("node-gyp-build") as (r: string) => unknown;
-        grammar = pickGrammar(ngb(root));
+        grammar = pickGrammar(ngb(root), spec.prop);
       } catch {
         grammar = null;
       }
@@ -79,7 +82,7 @@ function loadOptionalGrammar(key: string): unknown | null {
           try {
             const file = readdirSync(dir).find((f) => f.endsWith(".node"));
             if (file) {
-              grammar = pickGrammar(require(join(dir, file)));
+              grammar = pickGrammar(require(join(dir, file)), spec.prop);
               if (grammar) break;
             }
           } catch {
@@ -93,9 +96,10 @@ function loadOptionalGrammar(key: string): unknown | null {
   return grammar;
 }
 
-function pickGrammar(mod: unknown): unknown | null {
+function pickGrammar(mod: unknown, prop?: string): unknown | null {
   if (!mod) return null;
-  const m = mod as { default?: unknown };
+  const m = mod as Record<string, unknown> & { default?: unknown };
+  if (prop) return m[prop] ?? null;
   return m.default ?? mod;
 }
 
@@ -167,6 +171,18 @@ const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label
   { ext: ".css", grammar: "css", label: "css" },
   { ext: ".html", grammar: "html", label: "html" },
   { ext: ".htm", grammar: "html", label: "html" },
+  { ext: ".xml", grammar: "xml", label: "xml" },
+  // .NET config: Web.config / App.config / packages.config all end in `.config`.
+  { ext: ".config", grammar: "xml", label: "xml" },
+  { ext: ".csproj", grammar: "xml", label: "xml" },
+  { ext: ".vbproj", grammar: "xml", label: "xml" },
+  { ext: ".fsproj", grammar: "xml", label: "xml" },
+  { ext: ".props", grammar: "xml", label: "xml" },
+  { ext: ".targets", grammar: "xml", label: "xml" },
+  { ext: ".nuspec", grammar: "xml", label: "xml" },
+  { ext: ".resx", grammar: "xml", label: "xml" },
+  // XAML is XML; parsed by the same grammar but labelled distinctly.
+  { ext: ".xaml", grammar: "xml", label: "xaml" },
 ];
 
 function entryFor(path: string): { ext: string; grammar: Language; label: string } | undefined {
@@ -374,6 +390,7 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   css: {},
   html: {},
   razor: {},
+  xml: {},
 };
 
 /**
@@ -407,6 +424,7 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   css: new Set<string>(),
   html: new Set<string>(),
   razor: new Set<string>(),
+  xml: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -480,6 +498,7 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   // for Razor (embedded C# is opaque here), a file node only.
   if (lang === "css") return extractCss(rel, source, root);
   if (lang === "html") return extractHtml(rel, source, root);
+  if (lang === "xml") return extractXml(rel, source, root);
   if (lang === "razor") return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   const bindings = collectBindings(root, lang);
   const importedSymbols = collectImportedSymbols(root, lang);
@@ -1545,8 +1564,61 @@ function htmlElementId(element: Parser.SyntaxNode): string | null {
   return null;
 }
 
-/** A markup symbol node (CSS rule / HTML element): its source span, searchable
- * body, and the selector/id as both name and signature. */
+/** XML, incl. .NET config (Web.config/App.config) and MSBuild files (.csproj/.props/
+ * .targets). One `element` node per identifiable element — named by its
+ * `name`/`key`/`id`/`Include` attribute (config entries like `<add key="ApiUrl"/>`,
+ * `<PackageReference Include="X"/>`), or, for a container element with child
+ * elements, by its tag (`configuration`, `appSettings`). Leaf elements with
+ * neither are transparent; symbols nest under their enclosing element. */
+function extractXml(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const visit = (node: Parser.SyntaxNode, scope: string[], parentId: string): void => {
+    let scopeNext = scope;
+    let parentNext = parentId;
+    if (node.type === "element") {
+      const name = xmlElementName(node);
+      if (name) {
+        const id = mintId(`${rel}#${[...scope, name].join(".")}`, minted);
+        nodes.push(markupNode(id, name, "element", rel, node));
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        scopeNext = [...scope, name];
+        parentNext = id;
+      }
+    }
+    for (const child of node.namedChildren) visit(child, scopeNext, parentNext);
+  };
+  visit(root, [], rel);
+  return { nodes, rawEdges };
+}
+
+/** An XML element's symbol name: its `name`/`key`/`id`/`Include` attribute value
+ * (the identifier a config entry or MSBuild item is keyed by), else its tag name
+ * when it contains child elements, else null (a plain leaf carries no symbol). */
+function xmlElementName(element: Parser.SyntaxNode): string | null {
+  const tag = element.namedChildren.find((c) => c.type === "STag" || c.type === "EmptyElemTag");
+  if (!tag) return null;
+  for (const want of ["name", "key", "id", "include"]) {
+    for (const attr of tag.namedChildren) {
+      if (attr.type !== "Attribute") continue;
+      const an = attr.namedChildren.find((c) => c.type === "Name");
+      // Compare the LOCAL name so XAML's namespaced `x:Name`/`x:Key` still match.
+      if (an?.text.toLowerCase().replace(/^[^:]*:/, "") !== want) continue;
+      const av = attr.namedChildren.find((c) => c.type === "AttValue");
+      const val = av?.text.replace(/^["']|["']$/g, "").trim();
+      if (val) return val;
+    }
+  }
+  const content = element.namedChildren.find((c) => c.type === "content");
+  if (content?.namedChildren.some((c) => c.type === "element")) {
+    return tag.namedChildren.find((c) => c.type === "Name")?.text ?? null;
+  }
+  return null;
+}
+
+/** A markup symbol node (CSS rule / HTML element / XML element): its source span,
+ * searchable body, and the selector/id/name as both name and signature. */
 function markupNode(id: string, name: string, kind: Kind, rel: string, node: Parser.SyntaxNode): NodeV1 {
   return {
     id,
