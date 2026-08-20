@@ -25,3 +25,6 @@ transcripts/
 vendor/
 build-bundle/
 *.tgz
+
+# graft's local repository settings — not committed.
+/.graft/

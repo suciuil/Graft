@@ -13,7 +13,7 @@ function fresh(): string { return tmpRepo('plan'); }
 /** A home with every CLI graft can detect installed. */
 function fullHome(): string {
   const home = fresh();
-  for (const d of ['.codex', '.cursor', '.gemini', '.kiro', '.adal', join('.codeium', 'windsurf'), join('.config', 'opencode')]) {
+  for (const d of ['.codex', '.cursor', '.gemini', '.kilo', '.kiro', '.adal', join('.codeium', 'windsurf'), join('.config', 'opencode')]) {
     mkdirSync(join(home, d), { recursive: true });
   }
   return home;

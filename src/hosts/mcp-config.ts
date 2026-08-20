@@ -68,7 +68,11 @@ export function serverEntry(opts: { onPath?: boolean } = {}): { command: string;
 }
 
 
-function opencodeEntry(): object {
+/**
+ * The `{type:'local', command:[…]}` form: one flat argv array instead of
+ * `{command, args}`. OpenCode and Kilo Code both take servers in this shape.
+ */
+export function localServerEntry(): object {
   const { command, args } = serverEntry();
   return { type: 'local', command: [command, ...args], enabled: true };
 }
@@ -166,10 +170,12 @@ export function mcpTargets(
           });
         }
         if (dirExists(join(home, '.config', 'opencode'))) {
-          out.push(jsonTarget(id, 'opencode', join(repo, 'opencode.json'), 'mcp', opencodeEntry()));
+          out.push(jsonTarget(id, 'opencode', join(repo, 'opencode.json'), 'mcp', localServerEntry()));
         }
         break;
       default:
+        // 'kilo' is absent on purpose: its server lives in the same
+        // kilo.jsonc as its instruction registration, written by hosts/kilo.ts.
         break; // copilot / windsurf / adal: no MCP target in this phase
     }
   }

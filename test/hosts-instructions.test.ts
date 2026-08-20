@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { instructionBody, cursorRule, kiroSteering, windsurfRule } from '../src/hosts/instructions.js';
+import { instructionBody, cursorRule, kiloRule, kiroSteering, windsurfRule } from '../src/hosts/instructions.js';
 
 test('canonical body names the three essentials', () => {
   const b = instructionBody();
@@ -32,4 +32,10 @@ test('kiro steering has inclusion: always frontmatter and the body', () => {
 
 test('windsurf rule is the plain body', () => {
   assert.ok(windsurfRule().includes(instructionBody()));
+});
+
+test('kilo rule is the plain body — no frontmatter to confuse the loader', () => {
+  const r = kiloRule();
+  assert.ok(r.includes(instructionBody()));
+  assert.ok(!r.startsWith('---'));
 });

@@ -11,6 +11,7 @@ import { upsertSection } from './sections.js';
 import { registerMcpConfigs, type McpWrite } from './mcp-config.js';
 import { installCodexHooks, type HookWrite } from './codex-hooks.js';
 import { installAntigravitySkill } from './antigravity.js';
+import { writeKiloConfig } from './kilo.js';
 
 export interface HostsInitResult {
   written: { id: string; path: string; action: string }[];
@@ -71,6 +72,10 @@ export function runHostsInit(
         : upsertSection(path, host.content()).action;
     written.push({ id: host.id, path, action });
   }
+  // Kilo's rule file is inert until kilo.jsonc lists it in `instructions`, so
+  // the config merge is part of writing the instruction file, not of MCP — it
+  // still runs under --no-mcp, just without the server half.
+  if (selected.some((h) => h.id === 'kilo')) written.push(writeKiloConfig(repo, { mcp: opts.mcp }));
   const skipped = HOSTS.filter((h) => !selected.includes(h)).map((h) => h.id);
   const mcp =
     opts.mcp === false

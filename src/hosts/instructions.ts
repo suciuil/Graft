@@ -62,6 +62,15 @@ ${instructionBody()}
 `;
 }
 
+/**
+ * Kilo Code rule files are plain markdown — no frontmatter. They are loaded by
+ * being listed in `instructions` in kilo.jsonc, which hosts/kilo.ts writes.
+ */
+export function kiloRule(): string {
+  return `${instructionBody()}
+`;
+}
+
 export function windsurfRule(): string {
   return `${instructionBody()}
 `;

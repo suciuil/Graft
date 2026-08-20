@@ -14,6 +14,7 @@ import { HOSTS, detectHosts, type DetectProbe, type HostTarget } from './registr
 import { mcpTargets } from './mcp-config.js';
 import { hookTargets } from './codex-hooks.js';
 import { antigravitySkillTargets } from './antigravity.js';
+import { kiloConfigTargets } from './kilo.js';
 import { claudeTargets } from '../claude/init.js';
 
 /** Where a write lands. 'global' = outside the repo, affects every project. */
@@ -79,6 +80,7 @@ export function planInit(repo: string, opts: { home?: string; ids?: string[] } =
         ...mcpTargets(repo, [host.id], { home }),
         ...(host.id === 'agents' ? hookTargets(home) : []),
         ...(host.id === 'antigravity' ? antigravitySkillTargets(home) : []),
+        ...(host.id === 'kilo' ? kiloConfigTargets(repo) : []),
       ],
     })),
   ];
