@@ -7,7 +7,8 @@
  * kind: 'owned'   → graft owns the whole file; overwrite it each run.
  */
 import { join } from 'node:path';
-import { instructionBody, cursorRule, kiroSteering, windsurfRule } from './instructions.js';
+import { instructionBody, cursorRule, kiloRule, kiroSteering, windsurfRule } from './instructions.js';
+import { KILO_RULE_REL } from './kilo.js';
 import { skillTemplate } from '../claude/skill-template.js';
 
 export interface DetectProbe {
@@ -83,6 +84,22 @@ export const HOSTS: HostTarget[] = [
     relPath: join('.github', 'copilot-instructions.md'),
     content: instructionBody,
     detect: (p) => p.dirExists(join(p.repo, '.github')),
+  },
+  {
+    id: 'kilo',
+    name: 'Kilo Code',
+    kind: 'owned',
+    // Already posix-separated for the `instructions` entry in kilo.jsonc that
+    // makes this file load at all; `join()` normalizes it back to native.
+    relPath: KILO_RULE_REL,
+    content: kiloRule,
+    // `~/.config/kilo/` holds the global kilo.jsonc; `.kilocode/` is the
+    // pre-rename project dir, still auto-loaded by the extension.
+    detect: (p) =>
+      p.dirExists(join(p.home, '.kilo')) ||
+      p.dirExists(join(p.home, '.config', 'kilo')) ||
+      p.dirExists(join(p.repo, '.kilo')) ||
+      p.dirExists(join(p.repo, '.kilocode')),
   },
   {
     id: 'kiro',

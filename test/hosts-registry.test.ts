@@ -15,7 +15,7 @@ function probeFor(home: string, repo: string): DetectProbe {
 function fresh(): string { return mkdtempSync(join(tmpdir(), 'graft-registry-')); }
 
 test('registry exposes the known hosts', () => {
-  assert.deepEqual(hostIds().sort(), ['adal', 'agents', 'antigravity', 'copilot', 'cursor', 'gemini', 'kiro', 'windsurf']);
+  assert.deepEqual(hostIds().sort(), ['adal', 'agents', 'antigravity', 'copilot', 'cursor', 'gemini', 'kilo', 'kiro', 'windsurf']);
   for (const h of HOSTS) {
     assert.ok(h.relPath.length > 0);
     assert.ok(h.content().length > 0);
@@ -41,6 +41,14 @@ test('repo-local markers also light up hosts', () => {
   mkdirSync(join(repo, '.kiro'));
   const ids = detectHosts(probeFor(home, repo)).map((h) => h.id).sort();
   assert.deepEqual(ids, ['copilot', 'kiro']);
+});
+
+test('kilo code is detected from ~/.kilo, ~/.config/kilo, or a repo .kilo/.kilocode', () => {
+  for (const [where, dir] of [['home', '.kilo'], ['home', join('.config', 'kilo')], ['repo', '.kilo'], ['repo', '.kilocode']] as const) {
+    const home = fresh(); const repo = fresh();
+    mkdirSync(join(where === 'home' ? home : repo, dir), { recursive: true });
+    assert.deepEqual(detectHosts(probeFor(home, repo)).map((h) => h.id), ['kilo'], `${where}/${dir}`);
+  }
 });
 
 test('~/.adal lights up the adal host', () => {

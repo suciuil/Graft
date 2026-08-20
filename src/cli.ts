@@ -15,6 +15,7 @@ import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
 import { buildGraphIfMissing, runInit } from "./claude/init.js";
 import { runHostsInit } from "./hosts/init.js";
+import { KILO_RULE_REL } from "./hosts/kilo.js";
 import { hostIds } from "./hosts/registry.js";
 import { contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
@@ -792,8 +793,23 @@ function wireTarget(
         hooks: opts.hooks,
         global: opts.global,
       });
-      for (const w of r.written) console.error(`✓ ${w.id}: ${w.path} (${w.action})`);
-      for (const m of r.mcp) console.error(`✓ mcp ${m.id}: ${m.path} (${m.action})`);
+      // A config graft could not parse is left untouched rather than clobbered —
+      // say so instead of reporting it as written. Kilo's kilo.jsonc is the common
+      // case: JSONC comments are not JSON, and rewriting would delete them.
+      const report = (label: string, w: { id: string; path: string; action: string }) =>
+        console.error(
+          w.action === "skipped-unparseable"
+            ? `⚠ ${label}${w.id}: ${w.path} left unchanged (not valid JSON — // comments count) — add graft's entries by hand`
+            : `✓ ${label}${w.id}: ${w.path} (${w.action})`,
+        );
+      for (const w of r.written) {
+        report("", w);
+        // The one config graft can't auto-merge often enough to be worth naming
+        // the exact keys for: a JSONC kilo.jsonc the user has commented.
+        if (w.id === "kilo-config" && w.action === "skipped-unparseable")
+          console.error(`  → add "${KILO_RULE_REL}" to "instructions", and a "graft" server under "mcp"`);
+      }
+      for (const m of r.mcp) report("mcp ", m);
       for (const h of r.hooks) console.error(`✓ hook ${h.id}: ${h.path} (${h.action})`);
       // Only worth saying when there was actually something out-of-repo to skip.
       if (opts.global === false && selectedWrites(plan, ids).some((w) => w.scope === "global"))
