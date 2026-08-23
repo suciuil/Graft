@@ -78,13 +78,23 @@ const SYMBOLS_SCHEMA = {
 /** Cap the file text sent per request so one huge file can't blow the context. */
 const MAX_CODE_CHARS = 18_000;
 
-function numberLines(source: string): string {
-  const clipped =
-    source.length > MAX_CODE_CHARS ? `${source.slice(0, MAX_CODE_CHARS)}\n… (truncated)` : source;
-  return clipped
-    .split("\n")
-    .map((line, i) => `${i + 1}\t${line}`)
-    .join("\n");
+function numberLines(source: string, nodes: NodeRef[]): string {
+  const lines = source.split("\n");
+  const first = Math.max(1, Math.min(...nodes.map((n) => n.startLine)));
+  const last = Math.min(lines.length, Math.max(...nodes.map((n) => n.endLine)));
+  const excerpt = lines.slice(first - 1, last);
+  let chars = 0;
+  const numbered: string[] = [];
+  for (let i = 0; i < excerpt.length; i++) {
+    const line = `${first + i}\t${excerpt[i]}`;
+    if (chars + line.length + 1 > MAX_CODE_CHARS) {
+      numbered.push("… (excerpt truncated)");
+      break;
+    }
+    numbered.push(line);
+    chars += line.length + 1;
+  }
+  return numbered.join("\n");
 }
 
 function userContent(input: FileCruxInput): string {
@@ -95,7 +105,7 @@ function userContent(input: FileCruxInput): string {
         (n.signature ? ` | ${n.signature}` : ""),
     )
     .join("\n");
-  return `FILE: ${input.path}\n\n${numberLines(input.source)}\n\nTARGETS:\n${targets}`;
+  return `FILE: ${input.path}\n\n${numberLines(input.source, input.nodes)}\n\nTARGETS:\n${targets}`;
 }
 
 /** Normalize the tool's parsed argument object into a {@link NodeCrux} list. */

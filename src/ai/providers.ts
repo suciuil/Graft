@@ -18,13 +18,15 @@ export interface EngineConfig {
   /** Where the graph lives. Env: GRAFT_DIR. Default: `<repo>/.context`. */
   contextDir?: string;
 
-  /** Wire format / SDK. Env: GRAFT_PROVIDER. Default: `openai`. */
+  /** Wire format / SDK. Env: GRAFT_PROVIDER. Default: `anthropic`. */
   provider?: ProviderKind;
-  /** API key for the chosen provider. Env: GRAFT_API_KEY (legacy: OPENROUTER_API_KEY). */
+  /** API key for the chosen provider. Env: GRAFT_API_KEY, then provider-specific
+   * ANTHROPIC_API_KEY (legacy OpenAI-compatible fallback: OPENROUTER_API_KEY). */
   apiKey?: string;
   /** Model id. Env: GRAFT_MODEL. Provider-specific default. */
   model?: string;
-  /** Base URL for OpenAI-compatible endpoints. Env: GRAFT_BASE_URL. */
+  /** Endpoint URL. Env: GRAFT_BASE_URL, then ANTHROPIC_BASE_URL for the Anthropic
+   * provider (legacy OpenAI-compatible fallback: OPENROUTER_BASE_URL). */
   baseUrl?: string;
 
   // --- advanced: bring your own components ---
@@ -59,12 +61,12 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 /** Per-provider default model. */
 export const DEFAULT_MODELS: Record<ProviderKind, string> = {
   openai: "openai/gpt-4o-mini",
-  anthropic: "claude-sonnet-5",
+  anthropic: "gpt-5.6-luna",
 };
 
 export const DEFAULTS = {
-  provider: "openai" as ProviderKind,
-  model: DEFAULT_MODELS.openai,
+  provider: "anthropic" as ProviderKind,
+  model: DEFAULT_MODELS.anthropic,
 } as const;
 
 /** Merge user config with environment variables and defaults. */
@@ -73,14 +75,18 @@ export function resolveConfig(config: EngineConfig = {}): ResolvedConfig {
   const provider = config.provider ?? (env.GRAFT_PROVIDER as ProviderKind | undefined) ?? DEFAULTS.provider;
 
   const explicitKey = config.apiKey ?? env.GRAFT_API_KEY;
-  const legacyKey = env.OPENROUTER_API_KEY;
-  const apiKey = explicitKey ?? legacyKey;
-  const usedLegacyEnv = !explicitKey && !!legacyKey;
+  const anthropicKey = provider === "anthropic" ? env.ANTHROPIC_API_KEY : undefined;
+  const legacyKey = provider === "openai" ? env.OPENROUTER_API_KEY : undefined;
+  const apiKey = explicitKey ?? anthropicKey ?? legacyKey;
+  const usedLegacyEnv = !explicitKey && !anthropicKey && !!legacyKey;
 
   const model =
-    config.model ?? env.GRAFT_MODEL ?? env.GRAFT_OPENROUTER_MODEL ?? DEFAULT_MODELS[provider];
+    config.model ?? env.GRAFT_MODEL ?? (provider === "openai" ? env.GRAFT_OPENROUTER_MODEL : undefined) ?? DEFAULT_MODELS[provider];
 
-  let baseUrl = config.baseUrl ?? env.GRAFT_BASE_URL ?? env.OPENROUTER_BASE_URL;
+  let baseUrl =
+    config.baseUrl ??
+    env.GRAFT_BASE_URL ??
+    (provider === "anthropic" ? env.ANTHROPIC_BASE_URL : env.OPENROUTER_BASE_URL);
   // Back-compat: an existing setup with only OPENROUTER_API_KEY keeps hitting
   // OpenRouter without any config change.
   if (!baseUrl && provider === "openai" && usedLegacyEnv) baseUrl = OPENROUTER_BASE_URL;

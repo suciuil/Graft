@@ -49,8 +49,8 @@ program
   .option("--dir <path>", "context graph directory (default: <repo>/graft)")
   .option("--provider <name>", "LLM wire format: openai | anthropic (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
-  .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
-  .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)");
+  .option("--api-key <key>", "provider API key (env GRAFT_API_KEY; default Anthropic: ANTHROPIC_API_KEY)")
+  .option("--base-url <url>", "provider endpoint URL (env GRAFT_BASE_URL; default Anthropic: ANTHROPIC_BASE_URL)");
 
 interface GlobalOpts {
   dir?: string;
@@ -233,8 +233,9 @@ program
       deep = false;
       console.error(
         "⚠ no API key set — falling back to the structural build (no LLM summaries).\n" +
-          "  Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL for your\n" +
-          "  provider) and re-run `graft build --deep` to add concept nodes and summaries.",
+          "  Set ANTHROPIC_API_KEY (and optional ANTHROPIC_BASE_URL) for the default\n" +
+          "  provider, or configure GRAFT_PROVIDER / GRAFT_API_KEY / GRAFT_BASE_URL /\n" +
+          "  GRAFT_MODEL, then re-run `graft build --deep`.",
       );
     }
     if (deep && resolved.usedLegacyEnv) {

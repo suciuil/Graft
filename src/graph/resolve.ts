@@ -73,10 +73,10 @@ export function resolveEdges(
         const dir = posix.dirname(toPosixPath(n.path));
         push(goFilesByDir, dir, n.id);
       }
-      if (n.path.endsWith(".java")) {
+      if (n.path.endsWith(".java") || n.path.endsWith(".kt") || n.path.endsWith(".kts")) {
         // Index every directory-boundary suffix, since the source root is unknown:
-        // `src/main/java/com/acme/Foo.java` is reachable as `com/acme/Foo.java`,
-        // `acme/Foo.java`, and so on. The import's own FQN picks the right depth.
+        // `src/main/kotlin/com/acme/Foo.kt` is reachable as `com/acme/Foo.kt`,
+        // `acme/Foo.kt`, and so on. Java follows the same convention with `.java`.
         const parts = toPosixPath(n.path).split("/");
         for (let i = 0; i < parts.length; i++) push(javaFilesBySuffix, parts.slice(i).join("/"), n.id);
       }
@@ -134,8 +134,8 @@ export function resolveEdges(
       const target =
         hasGoModules && e.file.endsWith(".go")
           ? resolveGoImport(e.specifier, opts.goModules!, goFilesByDir)
-          : e.file.endsWith(".java")
-            ? resolveJavaImport(e.specifier, javaFilesBySuffix)
+          : e.file.endsWith(".java") || e.file.endsWith(".kt") || e.file.endsWith(".kts")
+            ? resolveJvmImport(e.specifier, javaFilesBySuffix)
             : C_EXT.test(e.file)
               ? resolveCInclude(e.specifier, e.file, byId, cFilesBySuffix)
               : e.file.endsWith(".rs")
@@ -160,11 +160,13 @@ export function resolveEdges(
         if (candidates.length === 1) add(e.source, candidates[0].id, "references", "extracted");
       } else if (byId.get(e.source)?.origin === "generic") {
         // Breadth tier: a bare-name structural reference (extends / implements /
-        // object-creation / module alias) the grammar marked but cannot type. Resolve
-        // to a type-like definition, drop-rather-than-guess, never a self-loop. Gated on
-        // generic origin so depth-tier references (which always carry a specifier) are
-        // provably untouched.
-        const refKinds: Kind[] = ["class", "interface", "struct", "enum", "type", "module"];
+        // object-creation / module alias / XML entity) the grammar marked but cannot
+        // type. XML entity declarations are constants; other generic references target
+        // type-like definitions. Both stay precision-safe: same-file first, unique
+        // cross-file only, ambiguous dropped, never a self-loop.
+        const refKinds: Kind[] = e.file.endsWith(".xml") || e.file.endsWith(".dtd")
+          ? ["constant", "type"]
+          : ["class", "interface", "struct", "enum", "type", "module"];
         const hit = resolveName(e.name, e.file, refKinds, perFileName, globalName);
         if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       }
@@ -194,7 +196,7 @@ export function resolveEdges(
       const callKinds: Kind[] =
         srcOrigin === "generic"
           ? ["function", "method"]
-          : e.file.endsWith(".java")
+          : e.file.endsWith(".java") || e.file.endsWith(".kt") || e.file.endsWith(".kts")
             ? ["class", "struct", "enum", "interface"]
             : ["function"];
       const hit = resolveName(e.name!, e.file, callKinds, perFileName, globalName);
@@ -338,11 +340,11 @@ function resolveImport(spec: string, file: string, byId: Map<string, NodeV1>): s
  * A suffix shared by two files (the same FQN under two source roots, e.g. a
  * duplicated test tree) is ambiguous, so it stays unresolved rather than guessing.
  */
-function resolveJavaImport(spec: string, filesBySuffix: Map<string, string[]>): string {
+function resolveJvmImport(spec: string, filesBySuffix: Map<string, string[]>): string {
   const hit = (fqn: string): string | null => {
-    const suffix = `${fqn.split(".").join("/")}.java`;
-    const files = filesBySuffix.get(suffix);
-    return files && files.length === 1 ? files[0] : null;
+    const stem = fqn.split(".").join("/");
+    const files = [".java", ".kt", ".kts"].flatMap((ext) => filesBySuffix.get(`${stem}${ext}`) ?? []);
+    return files.length === 1 ? files[0] : null;
   };
   const direct = hit(spec);
   if (direct) return direct;

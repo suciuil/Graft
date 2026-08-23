@@ -43,6 +43,7 @@ const FN_VALUE_TYPES = new Set(["arrow_function", "function", "function_expressi
  * same scope key extract.ts's walk will look it up with), or null if `node`
  * isn't a definition. */
 export function defName(node: Parser.SyntaxNode, lang: Language): string | null {
+  if (lang === "kotlin") return null;
   if (lang === "java") {
     return JAVA_DEF_TYPES.has(node.type) ? (node.childForFieldName("name")?.text ?? null) : null;
   }

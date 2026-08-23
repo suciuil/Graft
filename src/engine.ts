@@ -118,8 +118,8 @@ export class Graft {
     if (this._chatModel) return this._chatModel;
     if (!this.cfg.apiKey) {
       throw new Error(
-        "No API key. Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL " +
-          "for your provider) to build or summarize the graph.",
+        "No API key. Set ANTHROPIC_API_KEY for the default provider, or GRAFT_API_KEY " +
+          "with GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL, to build or summarize the graph.",
       );
     }
     this._chatModel = createChatModel({

@@ -25,8 +25,10 @@ import type { Crux, NodeV1 } from "./types.js";
 /** Cap on the stored crux: an over-long pick is trimmed to its leading slice. */
 const MAX_CRUX_LINES = 12;
 
-/** Files summarized at once. Each is an independent LLM call; order is preserved. */
+/** Files summarized at once. Each file is independent; order is preserved. */
 const DEFAULT_CONCURRENCY = 5;
+/** Keep forced-tool responses bounded; large generated Kotlin files can expose 800+ symbols. */
+const MAX_TARGETS_PER_REQUEST = 40;
 
 export interface EnrichOptions {
   /** When present, (re)compute meaning for stale/pending nodes. Absent → cache only. */
@@ -111,8 +113,8 @@ export async function enrichGraph(
       return { id: n.id, kind: n.kind, signature: n.signature, startLine, endLine };
     });
 
-    const { results, error } = await collectFileCrux(summarizer, path, source, refs);
-    if (error) stats.errors.push(`${path}: ${error}`);
+    const { results, errors } = await collectFileCrux(summarizer, path, source, refs);
+    for (const error of errors) stats.errors.push(`${path}: ${error}`);
 
     for (const node of fileNodes) {
       const r = results.size > 0 ? results.get(node.id) : undefined;
@@ -154,30 +156,44 @@ async function mapWithConcurrency<T, R>(
 }
 
 /**
- * Describe every requested definition in a file, re-asking for any the model
- * omits (it sometimes drops entries from a batch). Returns whatever it collected
- * plus the last error, if any — partial results are kept, not discarded.
+ * Describe every requested definition in a file in bounded batches, re-asking
+ * once for entries omitted from each batch. Partial results survive a failed
+ * batch, so one oversized generated file cannot strand every symbol in it.
  */
 async function collectFileCrux(
   summarizer: CruxSummarizer,
   path: string,
   source: string,
   refs: NodeRef[],
-): Promise<{ results: Map<string, NodeCrux>; error?: string }> {
+): Promise<{ results: Map<string, NodeCrux>; errors: string[] }> {
   const results = new Map<string, NodeCrux>();
-  let missing = refs;
-  let error: string | undefined;
-  for (let attempt = 0; attempt < 2 && missing.length > 0; attempt++) {
-    try {
-      const list = await summarizer.describeFile({ path, source, nodes: missing });
-      for (const r of list) if (!results.has(r.id)) results.set(r.id, r);
-      missing = refs.filter((r) => !results.has(r.id));
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-      break;
+  const errors: string[] = [];
+  const fileRefs = refs.filter((ref) => ref.kind === "file");
+  const symbolRefs = refs.filter((ref) => ref.kind !== "file");
+  const batches = [...fileRefs.map((ref) => [ref]), ...chunk(symbolRefs, MAX_TARGETS_PER_REQUEST)];
+
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    let missing = batch;
+    for (let attempt = 0; attempt < 2 && missing.length > 0; attempt++) {
+      try {
+        const list = await summarizer.describeFile({ path, source, nodes: missing });
+        for (const r of list) if (!results.has(r.id)) results.set(r.id, r);
+        missing = batch.filter((r) => !results.has(r.id));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        errors.push(`batch ${batchIndex + 1}/${batches.length}: ${detail}`);
+        break;
+      }
     }
   }
-  return { results, error };
+  return { results, errors };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
 }
 
 /**

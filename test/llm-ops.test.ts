@@ -67,6 +67,20 @@ test("ChatCruxSummarizer forces record_symbols and normalizes numbers", async ()
   assert.deepEqual(out, [{ id: "sym1", summary: "does x", crux_start: 3, crux_end: 5 }]);
 });
 
+test("ChatCruxSummarizer sends the source excerpt around the requested targets with absolute line numbers", async () => {
+  const m = new FakeChatModel({ toolCalls: [] });
+  const source = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+  await new ChatCruxSummarizer(m).describeFile({
+    path: "large.kt",
+    source,
+    nodes: [{ id: "late", kind: "function", signature: "late()", startLine: 9, endLine: 11 }],
+  });
+
+  const prompt = m.last?.messages[1].content ?? "";
+  assert.match(prompt, /9\tline 9/);
+  assert.match(prompt, /11\tline 11/);
+  assert.doesNotMatch(prompt, /1\tline 1(?:\D|$)/);
+});
 test("structured ops degrade gracefully when the model returns no tool call", async () => {
   const empty = new FakeChatModel({ toolCalls: [] });
   assert.deepEqual(await new ChatSynthesizer(empty).synthesize([{ path: "a.ts", summary: "x" }]), []);

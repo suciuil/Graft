@@ -19,6 +19,7 @@ import { walkDir } from "../ingest/fs.js";
 import { contextDirFor, ensureGitignored, ensureSearchable } from "../context/node-file.js";
 import { extractFile, languageLabelOf, languageOf, type RawEdge } from "./extract.js";
 import { extractGeneric, genericLangOf, warmGenericGrammars } from "./generic.js";
+import { warmKotlinGrammar } from "./kotlin.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
@@ -183,9 +184,12 @@ export async function buildGraph(
   // Breadth tier: WASM grammars load asynchronously, so warm the ones this repo
   // needs ONCE here (buildGraph is async) before the synchronous parse loop below
   // can call extractGeneric. Depth-tier (native) grammars need no warmup.
-  await warmGenericGrammars(
-    new Set(files.map((f) => genericLangOf(f.abs)?.name).filter((n): n is string => !!n)),
-  );
+  await Promise.all([
+    warmGenericGrammars(
+      new Set(files.map((f) => genericLangOf(f.abs)?.name).filter((n): n is string => !!n)),
+    ),
+    files.some((f) => languageOf(f.abs) === "kotlin") ? warmKotlinGrammar() : Promise.resolve(),
+  ]);
 
   files.forEach((f, i) => {
     const rel = f.rel;

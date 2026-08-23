@@ -42,3 +42,19 @@ for (const f of readdirSync(scmSrc)) {
   }
 }
 console.log(`grammar queries → dist/graph/queries/ (${scmCount} .scm)`);
+
+// Kotlin is a depth-tier extractor, but its grammar is WASM so installs remain
+// native-build-free. The vendored artifact is compiled from fwcd/tree-sitter-kotlin
+// 0.4.0; ship it beside kotlin.js where the runtime resolves it.
+const grammarOut = join(root, "dist", "graph", "grammars");
+mkdirSync(grammarOut, { recursive: true });
+copyFileSync(
+  join(root, "vendor", "tree-sitter-kotlin", "tree-sitter-kotlin.wasm"),
+  join(grammarOut, "tree-sitter-kotlin.wasm"),
+);
+console.log("Kotlin grammar → dist/graph/grammars/tree-sitter-kotlin.wasm");
+
+for (const grammar of ["tree-sitter-xml.wasm", "tree-sitter-dtd.wasm"]) {
+  copyFileSync(join(root, "vendor", "tree-sitter-xml", grammar), join(grammarOut, grammar));
+}
+console.log("XML grammars → dist/graph/grammars/ (XML + DTD)");

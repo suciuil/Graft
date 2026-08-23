@@ -32,6 +32,11 @@ function openAiResp(over: Partial<any> = {}): any {
 
 const REJECTED_OBJECT_TOOL_CHOICE = "Invalid tool_choice type: 'object'. Supported string values: none, auto, required";
 
+test("openai: production client allows five retries for transient HTTP failures", () => {
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x" });
+  assert.equal((m as any).client.maxRetries, 5);
+});
+
 test("openai: plain text — system/user map to strings, usage is uncached-only", async () => {
   const { client, box } = fakeOpenAI(openAiResp());
   const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client });
@@ -197,6 +202,11 @@ function anthropicResp(over: Partial<any> = {}): any {
     ...over,
   };
 }
+
+test("anthropic: production client allows five retries for transient HTTP failures", () => {
+  const m = new AnthropicChatModel({ apiKey: "x", model: "claude-x" });
+  assert.equal((m as any).client.maxRetries, 5);
+});
 
 test("anthropic: system is hoisted, temperature dropped, max_tokens defaulted", async () => {
   const { client, box } = fakeAnthropic(anthropicResp());

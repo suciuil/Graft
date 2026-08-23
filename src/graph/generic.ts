@@ -36,6 +36,8 @@ export interface GenericLang {
   name: string;
   exts: string[];
   wasm: string;
+  /** Vendored grammar asset for languages not shipped by tree-sitter-wasms. */
+  asset?: string;
 }
 
 /** The breadth registry. Add a row + a queries/<name>.scm to support a language.
@@ -50,7 +52,6 @@ export const GENERIC_LANGS: readonly GenericLang[] = [
   { name: "c_sharp", exts: [".cs"], wasm: "c_sharp" },
   // These ship a tags.scm (calls + symbols); ocaml/zig have none and use the
   // node-kind walker fallback (symbols only) — still one row, zero query.
-  { name: "kotlin", exts: [".kt", ".kts"], wasm: "kotlin" },
   { name: "scala", exts: [".scala", ".sc"], wasm: "scala" },
   { name: "swift", exts: [".swift"], wasm: "swift" },
   { name: "elixir", exts: [".ex", ".exs"], wasm: "elixir" },
@@ -58,8 +59,9 @@ export const GENERIC_LANGS: readonly GenericLang[] = [
   { name: "ocaml", exts: [".ml", ".mli"], wasm: "ocaml" },
   { name: "zig", exts: [".zig"], wasm: "zig" },
   { name: "dart", exts: [".dart"], wasm: "dart" }, // surfaced by PR #38 (@muneebshere)
+  { name: "xml", exts: [".xml", ".svg", ".xsd", ".xslt", ".xsl", ".rng"], wasm: "xml", asset: "tree-sitter-xml.wasm" },
+  { name: "dtd", exts: [".dtd"], wasm: "dtd", asset: "tree-sitter-dtd.wasm" },
 ];
-
 const byExt = new Map<string, GenericLang>();
 for (const l of GENERIC_LANGS) for (const e of l.exts) byExt.set(e, l);
 
@@ -90,10 +92,20 @@ const loaded = new Map<string, Loaded>();
 let tsMod: typeof import("web-tree-sitter") | null = null;
 let initPromise: Promise<void> | null = null;
 
-function requireWasm(wasm: string): Buffer | null {
+function requireWasm(row: GenericLang): Buffer | null {
+  if (row.asset) {
+    const paths = [
+      join(HERE, "grammars", row.asset),
+      join(HERE, "..", "..", "vendor", "tree-sitter-xml", row.asset),
+    ];
+    for (const path of paths) {
+      try { return readFileSync(path); } catch { /* try source fallback */ }
+    }
+    return null;
+  }
   // Resolve the grammar wasm from the tree-sitter-wasms bundle.
   try {
-    const p = require.resolve(`tree-sitter-wasms/out/tree-sitter-${wasm}.wasm`);
+    const p = require.resolve(`tree-sitter-wasms/out/tree-sitter-${row.wasm}.wasm`);
     return readFileSync(p);
   } catch {
     return null;
@@ -131,7 +143,7 @@ export async function warmGenericGrammars(langNames: Iterable<string>): Promise<
   const { Language, Query } = tsMod;
   for (const name of need) {
     const row = GENERIC_LANGS.find((l) => l.name === name)!;
-    const bytes = requireWasm(row.wasm);
+    const bytes = requireWasm(row);
     if (!bytes) continue;
     try {
       const language = await Language.load(bytes);

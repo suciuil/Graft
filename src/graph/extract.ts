@@ -11,12 +11,13 @@ import TypeScript from "tree-sitter-typescript";
 import Python from "tree-sitter-python";
 import Go from "tree-sitter-go";
 import Java from "tree-sitter-java";
+import { extractKotlinFile } from "./kotlin.js";
 import { basename } from "node:path";
 import { contentHash } from "../util/id.js";
 import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } from "./bindings.js";
 import type { Kind, NodeV1, Relation } from "./types.js";
 
-export type Language = "typescript" | "tsx" | "python" | "go" | "java";
+export type Language = "typescript" | "tsx" | "python" | "go" | "java" | "kotlin";
 
 /**
  * Extension → the tree-sitter grammar that parses it, and the label a human expects
@@ -46,6 +47,8 @@ const EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label: string 
   { ext: ".py", grammar: "python", label: "python" },
   { ext: ".go", grammar: "go", label: "go" },
   { ext: ".java", grammar: "java", label: "java" },
+  { ext: ".kts", grammar: "kotlin", label: "kotlin" },
+  { ext: ".kt", grammar: "kotlin", label: "kotlin" },
 ];
 
 function entryFor(path: string): (typeof EXTENSIONS)[number] | undefined {
@@ -184,6 +187,7 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   python: PY_KINDS,
   go: GO_KINDS,
   java: JAVA_KINDS,
+  kotlin: {},
 };
 
 /**
@@ -199,6 +203,7 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   python: new Set(["call"]),
   go: new Set(["call_expression"]),
   java: new Set(["method_invocation", "object_creation_expression"]),
+  kotlin: new Set(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -215,6 +220,9 @@ const GRAMMARS: Record<Language, unknown> = {
   python: Python,
   go: Go,
   java: Java,
+  // Kotlin is parsed by the warmed WASM grammar in kotlin.ts; this entry only
+  // keeps the exhaustive language registry typed and is never selected below.
+  kotlin: Java,
 };
 
 export interface WalkCtx {
@@ -253,6 +261,7 @@ function parseSource(source: string): Parser.SyntaxNode {
 }
 
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
+  if (lang === "kotlin") return extractKotlinFile(rel, source);
   parser.setLanguage(GRAMMARS[lang] as never);
   const root = parseSource(source);
   const bindings = collectBindings(root, lang);
