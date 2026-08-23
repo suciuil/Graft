@@ -15,13 +15,12 @@
  *     signatures survive a multi-turn loop.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { transportRetries } from "./types.js";
 import type { ChatModel, ChatRequest, ChatResponse, Message, ToolCall, ToolSpec, Usage } from "./types.js";
 
 const PROVIDER = "anthropic";
 const JSON_TOOL = "emit_json";
 const DEFAULT_MAX_TOKENS = 4096;
-/** Deep builds make hundreds of independent calls; outlive brief gateway stalls. */
-const REQUEST_MAX_RETRIES = 5;
 
 export interface AnthropicChatModelOptions {
   apiKey: string;
@@ -45,7 +44,7 @@ export class AnthropicChatModel implements ChatModel {
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
     this.client =
       opts.client ??
-      new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseUrl, maxRetries: REQUEST_MAX_RETRIES });
+      new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseUrl, maxRetries: transportRetries() });
   }
 
   async create(req: ChatRequest): Promise<ChatResponse> {

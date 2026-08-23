@@ -10,13 +10,12 @@
  * input count so {@link Usage.input} is uncached-only.
  */
 import OpenAI from "openai";
+import { transportRetries } from "./types.js";
 import type { ChatModel, ChatRequest, ChatResponse, Message, ToolCall, ToolSpec, Usage } from "./types.js";
 
 const PROVIDER = "openai";
 /** Synthetic tool used to coerce a plain JSON object out of `{ kind: "json" }`. */
 const JSON_TOOL = "emit_json";
-/** Deep builds make hundreds of independent calls; outlive brief gateway stalls. */
-const REQUEST_MAX_RETRIES = 5;
 
 export interface OpenAIChatModelOptions {
   apiKey: string;
@@ -100,7 +99,7 @@ export class OpenAIChatModel implements ChatModel {
         apiKey: opts.apiKey,
         baseURL: opts.baseUrl,
         defaultHeaders: opts.headers,
-        maxRetries: REQUEST_MAX_RETRIES,
+        maxRetries: transportRetries(),
       });
   }
 
