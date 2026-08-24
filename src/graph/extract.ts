@@ -82,7 +82,7 @@ const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** Grammar key → the npm package that ships its binding. For tooling that has to
  * bridge the two namings — the bundle packer keys its vendored directories by grammar
  * key, because the package name is not a stable handle (the groovy grammar's package
- * calls itself `@murtaza64/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`). */
+ * calls itself `@bootswithdefer/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`). */
 export function optionalGrammarPackages(): Record<string, string> {
   return Object.fromEntries(Object.entries(OPTIONAL_GRAMMAR_PKG).map(([k, v]) => [k, v.pkg]));
 }
@@ -557,8 +557,12 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   ]),
   // C#: `f()` (invocation) and `new T()` (object creation), mirroring Java.
   c_sharp: new Set(["invocation_expression", "object_creation_expression"]),
-  // Groovy: `foo(...)` / `obj.foo(...)` are both `function_call`.
-  groovy: new Set(["function_call"]),
+  // Groovy: `foo(...)` / `obj.foo(...)` are both `function_call`. A call whose only
+  // argument is a trailing closure is written without parens — `items.collect { it.name }`,
+  // `items.each { … }`, and every bare Jenkins step — and parses as `juxt_function_call`.
+  // It carries the same `function` field shape, so groovyCallee reads it unchanged; leaving
+  // it out drops over half the call edges in closure-heavy Groovy and Jenkinsfiles.
+  groovy: new Set(["function_call", "juxt_function_call"]),
   // PL/SQL: a sub-program call is a `ref_call` (a referenced_element with args).
   plsql: new Set(["ref_call"]),
   // Markup/style languages have no call graph — extracted by custom walkers.

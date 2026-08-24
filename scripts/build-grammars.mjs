@@ -299,7 +299,7 @@ for (const { name, dir } of targets) {
     continue;
   }
   // The tarball is named after the package's OWN name, which is not always the
-  // dependency key graft uses: the groovy grammar publishes as @murtaza64/…
+  // dependency key graft uses: the groovy grammar publishes as @bootswithdefer/…
   const pkgName = meta.name ?? name;
   const version = meta.version ?? "0.0.0";
   const tarballBase = `${pkgName.replace(/^@/, "").replace(/\//g, "-")}-`;
