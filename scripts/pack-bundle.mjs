@@ -19,7 +19,7 @@
  *
  * Keyed by graft's grammar key (`cpp`, `xml`, …) rather than package name, because the
  * package name is not a stable handle: the groovy grammar publishes itself as
- * `@murtaza64/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`.
+ * `@bootswithdefer/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`.
  *
  * Usage: node scripts/pack-bundle.mjs [--skip-build]
  *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first
