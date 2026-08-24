@@ -2,6 +2,13 @@
 
 ## 0.12.0
 
+### Added
+
+- **Kilo Code integration.** `graft init` now detects Kilo Code, exposes it as
+  the `kilo` host, installs the Graft skill at
+  `.kilo/skills/graft/SKILL.md`, and safely merges the local MCP server into
+  `.kilo/kilo.json`. Use `graft init --agents kilo` for non-interactive setup.
+
 ### Changed
 
 - **graft now collects anonymous usage stats, and the README no longer says it

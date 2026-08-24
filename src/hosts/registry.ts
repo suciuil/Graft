@@ -14,6 +14,7 @@ export interface DetectProbe {
   home: string;
   repo: string;
   dirExists(path: string): boolean;
+  fileExists?(path: string): boolean;
 }
 
 export interface HostTarget {
@@ -91,6 +92,21 @@ export const HOSTS: HostTarget[] = [
     relPath: join('.kiro', 'steering', 'graft.md'),
     content: kiroSteering,
     detect: (p) => p.dirExists(join(p.home, '.kiro')) || p.dirExists(join(p.repo, '.kiro')),
+  },
+  {
+    id: 'kilo',
+    name: 'Kilo Code',
+    kind: 'owned',
+    relPath: join('.kilo', 'skills', 'graft', 'SKILL.md'),
+    content: skillTemplate,
+    detect: (p) =>
+      p.dirExists(join(p.home, '.config', 'kilo')) ||
+      p.dirExists(join(p.home, '.kilo')) ||
+      p.dirExists(join(p.home, '.kilocode')) ||
+      p.dirExists(join(p.repo, '.kilo')) ||
+      p.dirExists(join(p.repo, '.kilocode')) ||
+      p.fileExists?.(join(p.repo, 'kilo.json')) === true ||
+      p.fileExists?.(join(p.repo, 'kilo.jsonc')) === true,
   },
   {
     id: 'windsurf',

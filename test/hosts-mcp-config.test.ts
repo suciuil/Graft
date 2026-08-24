@@ -21,6 +21,23 @@ test('cursor/gemini/kiro get repo-local JSON entries', () => {
   assert.ok(existsSync(join(repo, '.kiro', 'settings', 'mcp.json')));
 });
 
+test('kilo gets a repo-local local-server entry and preserves existing config', () => {
+  const repo = fresh(); const home = fresh();
+  mkdirSync(join(repo, '.kilo'), { recursive: true });
+  writeFileSync(join(repo, '.kilo', 'kilo.json'), JSON.stringify({ model: 'anthropic/claude-sonnet', mcp: { other: { enabled: false } } }));
+  const w = registerMcpConfigs(repo, ['kilo'], { home });
+  assert.deepEqual(w.map((x) => x.action), ['updated']);
+  const cfg = JSON.parse(readFileSync(join(repo, '.kilo', 'kilo.json'), 'utf8'));
+  assert.equal(cfg.model, 'anthropic/claude-sonnet');
+  assert.deepEqual(cfg.mcp.other, { enabled: false });
+  assert.deepEqual(cfg.mcp.graft, {
+    type: 'local',
+    command: ['npx', '-y', '@nanonets/graft', 'mcp'],
+    enabled: true,
+  });
+  assert.deepEqual(registerMcpConfigs(repo, ['kilo'], { home }).map((x) => x.action), ['unchanged']);
+});
+
 test('existing config keys are preserved; re-run is unchanged', () => {
   const repo = fresh(); const home = fresh();
   mkdirSync(join(repo, '.cursor'), { recursive: true });

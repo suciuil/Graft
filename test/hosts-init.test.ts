@@ -34,7 +34,7 @@ test('explicit agents list overrides detection and flags unknown ids', () => {
 test('all writes every host and re-run converges (idempotent)', () => {
   const home = fresh(); const repo = fresh();
   const first = runHostsInit(repo, { home, all: true });
-  assert.equal(first.written.length, 8);
+  assert.equal(first.written.length, 9);
   const second = runHostsInit(repo, { home, all: true });
   assert.ok(second.written.every((w) => w.action === 'unchanged'));
   // `agents` and `antigravity` share AGENTS.md, but the fenced section is written once
@@ -60,6 +60,18 @@ test('CLI: graft init --agents gemini writes GEMINI.md and exits 0', () => {
     encoding: 'utf8',
   });
   assert.ok(readFileSync(join(repo, 'GEMINI.md'), 'utf8').includes('graft ask'));
+});
+
+test('CLI: graft init --agents kilo writes the Kilo skill and MCP config', () => {
+  const repo = fresh();
+  const result = runCli(['init', repo, '--no-build', '--agents', 'kilo']);
+  assert.equal(result.status, 0, result.describe());
+  const skill = readFileSync(join(repo, '.kilo', 'skills', 'graft', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^---\nname: graft/m);
+  const cfg = JSON.parse(readFileSync(join(repo, '.kilo', 'kilo.json'), 'utf8'));
+  assert.deepEqual(cfg.mcp.graft.command, ['npx', '-y', '@nanonets/graft', 'mcp']);
+  assert.match(result.stderr ?? '', /git add \.kilo/);
+  assert.doesNotMatch(result.stderr ?? '', /git add \.claude/);
 });
 
 test('CLI: unknown agent id exits non-zero', () => {

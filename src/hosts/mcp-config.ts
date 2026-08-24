@@ -68,7 +68,7 @@ export function serverEntry(opts: { onPath?: boolean } = {}): { command: string;
 }
 
 
-function opencodeEntry(): object {
+function localMcpEntry(): object {
   const { command, args } = serverEntry();
   return { type: 'local', command: [command, ...args], enabled: true };
 }
@@ -156,6 +156,9 @@ export function mcpTargets(
       case 'kiro':
         out.push(jsonTarget(id, id, join(repo, '.kiro', 'settings', 'mcp.json'), 'mcpServers', entry));
         break;
+      case 'kilo':
+        out.push(jsonTarget(id, id, join(repo, '.kilo', 'kilo.json'), 'mcp', localMcpEntry()));
+        break;
       case 'agents':
         // Guarded on the CLI actually being installed, so a plan only ever
         // lists files a real run would touch.
@@ -166,7 +169,7 @@ export function mcpTargets(
           });
         }
         if (dirExists(join(home, '.config', 'opencode'))) {
-          out.push(jsonTarget(id, 'opencode', join(repo, 'opencode.json'), 'mcp', opencodeEntry()));
+          out.push(jsonTarget(id, 'opencode', join(repo, 'opencode.json'), 'mcp', localMcpEntry()));
         }
         break;
       default:

@@ -79,11 +79,21 @@ test('postinstall prints the nudge in a fresh dir', () => {
   const d = fresh();
   const out = runPostinstall({ INIT_CWD: d, CI: '' });
   assert.match(out, /npx graft init/);
+  assert.match(out, /Kilo Code/);
 });
 
 test('postinstall is silent when already initialized', () => {
   const d = fresh();
   runInit(d, { build: false });
+  const out = runPostinstall({ INIT_CWD: d, CI: '' });
+  assert.equal(out.trim(), '');
+});
+
+test('postinstall is silent when Kilo Code is already initialized', () => {
+  const d = fresh();
+  const skill = join(d, '.kilo', 'skills', 'graft', 'SKILL.md');
+  mkdirSync(join(d, '.kilo', 'skills', 'graft'), { recursive: true });
+  writeFileSync(skill, '---\nname: graft\n---\n');
   const out = runPostinstall({ INIT_CWD: d, CI: '' });
   assert.equal(out.trim(), '');
 });
@@ -120,6 +130,12 @@ test('formatInitEpilogue: graph not built shows "build the graph" as step 1, no 
   // identically whether there are 3 or 4 numbered steps.
   const col = (text: string, marker: string) => text.split('\n').find((l) => l.includes(marker))!.indexOf('a new session');
   assert.equal(col(built, 'restart your agent'), col(notBuilt, 'restart your agent'));
+});
+
+test('formatInitEpilogue: share guidance names the selected agent files', () => {
+  const out = formatInitEpilogue({ graphBuilt: false, sharePaths: ['.kilo', 'AGENTS.md'] });
+  assert.ok(out.includes('git add .kilo AGENTS.md'));
+  assert.ok(!out.includes('git add .claude'));
 });
 
 test('CLI: graft init epilogue has the wordmark + next steps, and never mentions OPENROUTER', () => {

@@ -24,6 +24,7 @@ function probeFor(home: string, repo: string): DetectProbe {
   return {
     home, repo,
     dirExists: (p) => { try { return statSync(p).isDirectory(); } catch { return false; } },
+    fileExists: (p) => { try { return statSync(p).isFile(); } catch { return false; } },
   };
 }
 

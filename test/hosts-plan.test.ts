@@ -13,7 +13,7 @@ function fresh(): string { return tmpRepo('plan'); }
 /** A home with every CLI graft can detect installed. */
 function fullHome(): string {
   const home = fresh();
-  for (const d of ['.codex', '.cursor', '.gemini', '.kiro', '.adal', join('.codeium', 'windsurf'), join('.config', 'opencode')]) {
+  for (const d of ['.codex', '.cursor', '.gemini', '.kiro', '.adal', join('.codeium', 'windsurf'), join('.config', 'opencode'), join('.config', 'kilo')]) {
     mkdirSync(join(home, d), { recursive: true });
   }
   return home;
@@ -75,6 +75,14 @@ test('adal is an instruction-only host — no MCP target', () => {
   assert.equal(adal.writes.length, 1);
   assert.equal(adal.writes[0].kind, 'instruction');
   assert.match(toPosixPath(adal.writes[0].path), /\.adal\/skills\/graft\/SKILL\.md$/);
+});
+
+test('kilo plans a repo-local skill and MCP config', () => {
+  const kilo = planInit(fresh(), { home: fullHome(), ids: ['kilo'] })[0];
+  assert.deepEqual(kilo.writes.map((w) => w.kind), ['instruction', 'mcp']);
+  assert.match(toPosixPath(kilo.writes[0].path), /\.kilo\/skills\/graft\/SKILL\.md$/);
+  assert.match(toPosixPath(kilo.writes[1].path), /\.kilo\/kilo\.json$/);
+  assert.ok(kilo.writes.every((w) => w.scope === 'repo'));
 });
 
 // The assertion that keeps the plan honest: whatever a real run writes must be

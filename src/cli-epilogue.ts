@@ -37,12 +37,14 @@ export interface InitEpilogueOptions {
   nodes?: number;
   /** Edge count from the built graph — only meaningful when `graphBuilt`. */
   edges?: number;
+  /** Repo-relative files or directories containing the generated agent wiring. */
+  sharePaths?: string[];
 }
 
 /** Renders the `graft init` next-steps epilogue (no trailing newline — the
  * caller's `console.error` adds the one trailing newline). */
 export function formatInitEpilogue(opts: InitEpilogueOptions): string {
-  const { graphBuilt, nodes, edges } = opts;
+  const { graphBuilt, nodes, edges, sharePaths = ['.claude'] } = opts;
   const tty = Boolean(process.stderr.isTTY);
 
   const wordmark = WORDMARK_LINES.map((l) => (tty ? indigo(l) : l));
@@ -79,7 +81,7 @@ export function formatInitEpilogue(opts: InitEpilogueOptions): string {
     }
   });
 
-  const closing = `${indent}share it: git add .claude && git commit — teammates run \`graft build\` for their own local graph`;
+  const closing = `${indent}share it: git add ${sharePaths.join(' ')} && git commit — teammates run \`graft build\` for their own local graph`;
 
   return [...wordmark, "", ...stepLines, "", closing].join("\n");
 }

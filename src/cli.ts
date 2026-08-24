@@ -912,12 +912,23 @@ program
     const graphs = (children.length ? children.map((c) => join(repo, c)) : [repo])
       .map((d) => loadGraphCached(contextDirFor(d, children.length ? undefined : globalDir)))
       .filter((g): g is NonNullable<typeof g> => g !== null);
+    const sharePaths = [...new Set(
+      selectedWrites(plan, ids)
+        .filter((w) =>
+          w.scope === "repo" &&
+          (opts.mcp !== false || w.kind !== "mcp" || w.hostId === "claude") &&
+          (opts.hooks !== false || w.kind !== "hook" || w.hostId === "claude"),
+        )
+        .map((w) => relative(repo, w.path).split(/[\\/]/)[0])
+        .filter(Boolean),
+    )];
     console.error(
       "\n" +
         formatInitEpilogue({
           graphBuilt: graphs.length > 0,
           nodes: graphs.reduce((n, g) => n + g.meta.nodeCount, 0),
           edges: graphs.reduce((n, g) => n + g.meta.edgeCount, 0),
+          sharePaths,
         }),
     );
     // Sorted so `claude,cursor` and `cursor,claude` aggregate as one value.
