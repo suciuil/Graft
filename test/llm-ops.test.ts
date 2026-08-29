@@ -82,6 +82,103 @@ test("ChatCruxSummarizer sends the source excerpt around the requested targets w
   assert.match(prompt, /11\tline 11/);
   assert.doesNotMatch(prompt, /1\tline 1(?:\D|$)/);
 });
+test("ChatCruxSummarizer recovers ids echoed back as the whole target descriptor", async () => {
+  // Observed with a real gateway: the model copies the prompt's
+  // `- id=<id> | <kind> | lines L1-L14` line verbatim into `id`. Exact matching
+  // dropped every entry, so enrich saw a total miss, the failure gate counted
+  // the file, and a run of them aborted the whole --deep pass.
+  const m = new FakeChatModel({
+    toolCalls: [
+      {
+        id: "1",
+        name: "record_symbols",
+        args: {
+          symbols: [
+            // The shape seen in the wild: fields echoed, bullet and `id=` dropped.
+            { id: "a.kt | file | lines L1-L14", summary: "the file", crux_start: 0, crux_end: 0 },
+            // The full prompt line verbatim, including the `- ` marker and a
+            // signature that itself contains the `|` field separator.
+            {
+              id: "- id=a.kt#Foo | class | lines L2-L3 | fun f(): String | null",
+              summary: "a class",
+              crux_start: 2,
+              crux_end: 3,
+            },
+            { id: "id=a.kt#Bar", summary: "another", crux_start: 3, crux_end: 3 },
+            { id: "a.kt#Ghost", summary: "hallucinated", crux_start: 1, crux_end: 1 },
+          ],
+        },
+      },
+    ],
+  });
+  const out = await new ChatCruxSummarizer(m).describeFile({
+    path: "a.kt",
+    source: "l1\nl2\nl3\nl4\n",
+    nodes: [
+      { id: "a.kt", kind: "file", signature: null, startLine: 1, endLine: 4 },
+      { id: "a.kt#Foo", kind: "class", signature: "fun f(): String | null", startLine: 2, endLine: 3 },
+      { id: "a.kt#Bar", kind: "class", signature: null, startLine: 3, endLine: 3 },
+    ],
+  });
+  assert.deepEqual(out, [
+    { id: "a.kt", summary: "the file", crux_start: 0, crux_end: 0 },
+    { id: "a.kt#Foo", summary: "a class", crux_start: 2, crux_end: 3 },
+    { id: "a.kt#Bar", summary: "another", crux_start: 3, crux_end: 3 },
+  ]);
+});
+
+test("ChatCruxSummarizer does not let a blank summary claim its target id", async () => {
+  // enrich treats a blank summary as `pending` and collectFileCrux re-asks for
+  // whatever is still missing, so a blank entry must NOT occupy the target id —
+  // doing so spends the retry and can strand the file at applied === 0 (#172).
+  const m = new FakeChatModel({
+    toolCalls: [
+      {
+        id: "1",
+        name: "record_symbols",
+        args: {
+          symbols: [
+            { id: "a.kt | file | lines L1-L4", summary: "   ", crux_start: 0, crux_end: 0 },
+            { id: "a.kt#Foo", summary: "", crux_start: 0, crux_end: 0 },
+          ],
+        },
+      },
+    ],
+  });
+  const out = await new ChatCruxSummarizer(m).describeFile({
+    path: "a.kt",
+    source: "l1\nl2\nl3\nl4\n",
+    nodes: [
+      { id: "a.kt", kind: "file", signature: null, startLine: 1, endLine: 4 },
+      { id: "a.kt#Foo", kind: "class", signature: null, startLine: 2, endLine: 3 },
+    ],
+  });
+  assert.deepEqual(out, []);
+});
+
+test("ChatCruxSummarizer keeps the first entry when a target is echoed twice", async () => {
+  const m = new FakeChatModel({
+    toolCalls: [
+      {
+        id: "1",
+        name: "record_symbols",
+        args: {
+          symbols: [
+            { id: "a.kt", summary: "kept", crux_start: 1, crux_end: 2 },
+            { id: "a.kt | file | lines L1-L4", summary: "duplicate", crux_start: 0, crux_end: 0 },
+          ],
+        },
+      },
+    ],
+  });
+  const out = await new ChatCruxSummarizer(m).describeFile({
+    path: "a.kt",
+    source: "l1\nl2\nl3\nl4\n",
+    nodes: [{ id: "a.kt", kind: "file", signature: null, startLine: 1, endLine: 4 }],
+  });
+  assert.deepEqual(out, [{ id: "a.kt", summary: "kept", crux_start: 1, crux_end: 2 }]);
+});
+
 test("structured ops degrade gracefully when the model returns no tool call", async () => {
   const empty = new FakeChatModel({ toolCalls: [] });
   const { err } = await withCapturedError(async () => {

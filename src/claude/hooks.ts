@@ -11,6 +11,7 @@ import { runUpkeep } from '../upkeep-run.js';
 import { runningVersion } from '../upkeep.js';
 import { flushClosedSessions } from '../telemetry/sessions.js';
 import { hasSavingsTally, lastAssistantTurn } from './tally.js';
+import { handlePreTool } from './gate.js';
 import { scopeOf, scopesOfGraph } from '../graph/scopes.js';
 
 /** Prompts shorter than this never trigger retrieval — they are almost always
@@ -304,6 +305,11 @@ function handleStop(input: any, dir: string): void {
 export async function main(event: string): Promise<void> {
   const input = readStdin();
   const dir = projectDir(input);
+
+  // First, and returning before anything else can run: this is the only hook on
+  // the agent's critical path — the tool call it guards is stalled until this
+  // process exits — so it does its string work and leaves.
+  if (event === 'pre-tool') { handlePreTool(input, dir); return; }
 
   if (event === 'session-start') {
     // Before anything is emitted: refresh this repo's wiring if it was written by

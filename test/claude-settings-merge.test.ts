@@ -10,9 +10,15 @@ test('empty settings gets the full Graft blocks', () => {
   assert.equal(merged.subagentStatusLine.command, SL);
   assert.ok(Array.isArray(merged.hooks.PostToolUse));
   assert.equal(merged.hooks.PostToolUse[0].matcher, 'Write|Edit|MultiEdit');
-  for (const e of ['PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']) {
+  for (const e of ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Stop']) {
     assert.ok(merged.hooks[e][0].hooks[0].command.includes('graft-hooks.cjs'), `${e} wired`);
   }
+  // The gate: narrowly matched to the three tools that have a graft equivalent,
+  // and on a short budget because the agent's tool call is blocked on it.
+  const gate = merged.hooks.PreToolUse[0];
+  assert.equal(gate.matcher, 'Read|Grep|Bash');
+  assert.ok(gate.hooks[0].command.includes('pre-tool'), 'gate hook wired');
+  assert.ok(gate.hooks[0].timeout <= 5000, 'gate stays off the critical path');
   // PostToolUse carries a second graft block: the tokens-saved accumulator over
   // the retrieval tools (Bash `graft …` + the graft_* MCP tools).
   const savings = merged.hooks.PostToolUse[1];

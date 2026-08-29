@@ -18,6 +18,15 @@ function hookCmd(arg: string): string {
 }
 function graftBlocks(): Record<string, Json[]> {
   return {
+    // The gate (src/claude/gate.ts) — the only hook that can answer a tool call
+    // with "no, run this instead", and so the only place graft's guidance binds
+    // instead of merely advising. Matched narrowly to the three tools that have
+    // a graft equivalent; a short timeout because the agent is blocked on it,
+    // and a hook that times out is treated as no opinion, which is the same
+    // fail-open default every path inside it takes.
+    PreToolUse: [
+      { matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: hookCmd('pre-tool'), timeout: 5000 }] },
+    ],
     PostToolUse: [
       { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: hookCmd('post-edit'), timeout: 10000 }] },
       // A retrieval tool (CLI `graft …` via Bash, or the `graft_*` MCP tools) prints a

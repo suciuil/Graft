@@ -253,9 +253,7 @@ async function collectFileCrux(
 ): Promise<{ results: Map<string, NodeCrux>; errors: string[] }> {
   const results = new Map<string, NodeCrux>();
   const errors: string[] = [];
-  const fileRefs = refs.filter((ref) => ref.kind === "file");
-  const symbolRefs = refs.filter((ref) => ref.kind !== "file");
-  const batches = [...fileRefs.map((ref) => [ref]), ...chunk(symbolRefs, MAX_TARGETS_PER_REQUEST)];
+  const batches = planBatches(refs);
 
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
@@ -281,6 +279,25 @@ async function collectFileCrux(
     );
   }
   return { results, errors };
+}
+
+/**
+ * Split a file's targets into requests.
+ *
+ * A file that fits stays ONE request: that is the batching this module was built
+ * on (N definitions cost one call, and the model sees each symbol's neighbours),
+ * and splitting it would add a round trip to every file in every repo for no
+ * benefit. Only once a file exceeds the per-request cap is it divided, and then
+ * the file node gets its own request — it is the one target whose summary is
+ * about the whole file rather than a span, so it should not be crowded out of a
+ * chunk of 40 unrelated symbols.
+ */
+function planBatches(refs: NodeRef[]): NodeRef[][] {
+  if (refs.length === 0) return [];
+  if (refs.length <= MAX_TARGETS_PER_REQUEST) return [refs];
+  const fileRefs = refs.filter((ref) => ref.kind === "file");
+  const symbolRefs = refs.filter((ref) => ref.kind !== "file");
+  return [...fileRefs.map((ref) => [ref]), ...chunk(symbolRefs, MAX_TARGETS_PER_REQUEST)];
 }
 
 function chunk<T>(items: T[], size: number): T[][] {

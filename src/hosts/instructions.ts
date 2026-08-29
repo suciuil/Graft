@@ -41,6 +41,21 @@ range before finalizing. Only open source files when a node genuinely lacks a
 needed detail, and then at the exact file:line the node points to — never
 re-read whole files.
 
+### The rule, stated as a rule
+
+- Searching for a literal → \`graft grep "<literal>"\`. Not \`grep -rn\`, not
+  \`rg\`, not the host's Grep tool.
+- "What is in this file" → \`graft skeleton <file>\`. Not reading it whole.
+- "Who calls this / what breaks if I change it" → \`graft callers <symbol>\`.
+  Not a text search.
+- Raw grep and whole-file reads are for what graft does NOT index: docs,
+  config, lockfiles, files created this session — and for opening an exact
+  \`file:line\` range graft just handed you.
+
+This is a rule, not a preference: every one of those substitutions returns the
+same answer for a fraction of the tokens, and the graph edges behind
+\`callers\` are not reconstructible by reading at all.
+
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }

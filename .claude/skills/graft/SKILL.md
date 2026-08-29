@@ -136,6 +136,26 @@ is already capped and states what it dropped; clipping it costs you hits you
 asked for, and it silently drops the savings line the statusline's running
 total is parsed from.
 
+## The gate
+
+On this host graft installs a `PreToolUse` hook. It refuses **once** per distinct
+call when a tool call has a graft equivalent — a Grep/`rg`/`grep -rn` repo
+search, or a whole-file `Read`/`cat` of an indexed file — and its message names
+the command to run instead.
+
+- **Do the redirect.** The refusal is not a permission problem to route around;
+  the named command answers the same question for a fraction of the tokens.
+- **A ranged read is never refused.** `Read` with an offset/limit, `head`,
+  `tail`, `sed -n '10,40p'` — opening the exact span graft pointed at is the
+  behaviour the gate exists to produce.
+- **Re-issuing the identical call overrides it.** That is deliberate, and it is
+  the right move when graft genuinely has no answer: an unindexed file, a doc, a
+  lockfile, something created this session. It is the wrong move as a reflex —
+  if you override without trying the named command, you paid the round trip for
+  nothing.
+
+`GRAFT_NO_GATE=1` disables it entirely (a human's switch, not a workaround).
+
 ## When graft isn't enough
 - Span truncated ("+N more lines"): open the file at that exact range.
 - A node lacks a detail: ask a more specific question; only then read source at

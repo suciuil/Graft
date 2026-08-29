@@ -37,7 +37,7 @@ export function hookTargets(home: string): PlannedWrite[] {
     {
       hostId: 'agents', id: 'codex-hooks',
       path: join(base, 'hooks.json'),
-      scope: 'global', kind: 'hook', what: 'SessionStart / UserPromptSubmit / PostToolUse / Stop',
+      scope: 'global', kind: 'hook', what: 'SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop',
     },
   ];
 }
@@ -62,18 +62,23 @@ function isGraftEntry(entry: unknown): boolean {
  * The graft hook entries Codex should carry, mirroring the Claude Code set:
  *   - SessionStart → orientation from `graft/INDEX.md`
  *   - UserPromptSubmit → the coupling-seed retrieval pack (the accuracy hook)
+ *   - PreToolUse (a search or whole-file read) → refuse once, name the graft
+ *     equivalent (the gate; see `claude/gate.ts`)
  *   - PostToolUse (an edit) → blast radius + mark the graph dirty
  *   - Stop → one background graph sync at turn end (not after every edit)
  * `matcher` is omitted where Codex ignores it (UserPromptSubmit, Stop). The edit
  * matcher includes `apply_patch` — Codex's native edit tool — alongside the
  * Claude Code edit-tool names, and `hooks.ts`'s `editedFilePath` reads the touched
- * file out of either shape.
+ * file out of either shape. The gate matcher does the same for the read side:
+ * `shell`/`read_file` are the Codex-family spellings of `Bash`/`Read`, and
+ * `gate.ts` normalizes tool names so one handler covers every vocabulary.
  */
 interface DesiredEntry { event: string; matcher?: string; sub: string; timeout: number; }
 function desiredEntries(): DesiredEntry[] {
   return [
     { event: 'SessionStart', matcher: 'startup|resume|compact', sub: 'session-start', timeout: 10000 },
     { event: 'UserPromptSubmit', sub: 'prompt', timeout: 15000 },
+    { event: 'PreToolUse', matcher: 'shell|local_shell|Bash|Read|read_file|Grep|grep', sub: 'pre-tool', timeout: 5000 },
     { event: 'PostToolUse', matcher: 'apply_patch|Write|Edit|MultiEdit', sub: 'post-edit', timeout: 10000 },
     { event: 'Stop', sub: 'stop', timeout: 10000 },
   ];

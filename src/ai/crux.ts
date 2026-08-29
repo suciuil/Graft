@@ -147,6 +147,36 @@ function argsFromResponse(res: { text: string; toolCalls: { name: string; args: 
   return recovered as { symbols?: unknown } | undefined;
 }
 
+/**
+ * Map a returned `id` back onto a real target id.
+ *
+ * The targets are listed to the model as `- id=<id> | <kind> | lines L1-L14 | <sig>`,
+ * and some models echo that whole descriptor line back as the id instead of the
+ * bare value. Exact-matching those entries drops them, and a file where EVERY
+ * entry is echoed that way then looks like a total miss — enrich reports "model
+ * returned no usable symbol summaries", the failure gate counts the file, and a
+ * run of them aborts the whole `--deep` pass, discarding summaries that were
+ * perfectly good. Recover the intended target instead: strip an `id=` prefix and
+ * anything from the first field separator on. Null when it still matches nothing,
+ * so a genuinely hallucinated id is still dropped.
+ */
+function resolveTargetId(raw: string, valid: ReadonlySet<string>): string | null {
+  const direct = raw.trim();
+  if (valid.has(direct)) return direct;
+  // Peel one layer at a time, re-checking after each: the list marker `userContent`
+  // writes (`- `), then the `id=` label, then the trailing ` | kind | lines …`
+  // fields. Checking between steps means an id that legitimately contains one of
+  // these characters is matched before the next peel can corrupt it.
+  let s = direct.replace(/^[-*\u2022]\s+/, "");
+  if (valid.has(s)) return s;
+  s = s.replace(/^id\s*=\s*/, "");
+  if (valid.has(s)) return s;
+  const bar = s.indexOf("|");
+  if (bar >= 0) s = s.slice(0, bar);
+  s = s.trim();
+  return valid.has(s) ? s : null;
+}
+
 /** Crux summarizer backed by any {@link ChatModel} via forced tool calling. */
 export class ChatCruxSummarizer implements CruxSummarizer {
   constructor(private model: ChatModel) {}
@@ -169,6 +199,22 @@ export class ChatCruxSummarizer implements CruxSummarizer {
         { role: "user", content: userContent(input) },
       ],
     });
-    return parseResults(argsFromResponse(res));
+    const valid = new Set(input.nodes.map((n) => n.id));
+    const seen = new Set<string>();
+    const out: NodeCrux[] = [];
+    for (const entry of parseResults(argsFromResponse(res))) {
+      const id = resolveTargetId(entry.id, valid);
+      if (!id || seen.has(id)) continue;
+      // A blank summary is not a result — enrich leaves such a node `pending`
+      // (#172). Do NOT claim the target id for one: `collectFileCrux` keys its
+      // re-ask off `results.has(id)`, so claiming it here would silently spend
+      // the retry that would otherwise fetch a real summary.
+      if (!entry.summary.trim()) continue;
+      // Keep the first usable entry per target: a model that echoes one id two
+      // ways must not overwrite a good summary with a worse duplicate.
+      seen.add(id);
+      out.push({ ...entry, id });
+    }
+    return out;
   }
 }

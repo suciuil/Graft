@@ -61,6 +61,18 @@ export const SAVINGS_TURN_NUDGE =
   ' At the end of your reply, tell the user the total graft tokens saved this ' +
   'turn — sum each such line across your graft calls — e.g. "🌱 graft saved ~N tokens this turn".';
 
+/**
+ * Group a token count for display, always in en-US.
+ *
+ * Pinned, not machine-locale: a bare `toLocaleString()` renders 1970 as "1.970"
+ * on a de/ro/etc. machine, which reads as a decimal to both the human and the
+ * agent that is asked to sum these numbers — and it broke the savings tests on
+ * any non-en-US developer box. `cli-epilogue.ts` already pins the same way.
+ */
+export function formatCount(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
 /** The one-line savings estimate for a command's text output, so the agent gets
  * the number for free — no extra tool call. `body` is the exact rendered output
  * the agent reads (the pack). Returns "" when there's nothing honest to claim:
@@ -74,9 +86,9 @@ export function savingsLine(body: string, saved: Savings | undefined): string {
   const delta = base - pack;
   const pct = Math.round((delta / base) * 100);
   return (
-    `[graft] tokens saved ≈ ${delta.toLocaleString()} (${pct}%) — this output ≈ ` +
-    `${pack.toLocaleString()} tok vs reading the ${saved.files} file(s) it covers whole ≈ ` +
-    `${base.toLocaleString()} tok (estimate).` +
+    `[graft] tokens saved ≈ ${formatCount(delta)} (${pct}%) — this output ≈ ` +
+    `${formatCount(pack)} tok vs reading the ${saved.files} file(s) it covers whole ≈ ` +
+    `${formatCount(base)} tok (estimate).` +
     SAVINGS_TURN_NUDGE
   );
 }

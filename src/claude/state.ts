@@ -49,6 +49,12 @@ export interface SessionState {
   /** `uuid` of the last assistant reply already examined, so a Stop that fires
    * without new prose (or fires twice) can't count one reply as two turns. */
   lastTallyUuid?: string;
+  /** Calls the PreToolUse gate has already refused this session, as short
+   * hashes of the call itself (see `gate.ts`). A key present here is never
+   * refused again: re-issuing a refused call IS the override, which is what
+   * keeps the gate a redirect rather than a wall. Optional so session files
+   * written before the gate existed still parse. */
+  gateDenied?: string[];
   /** Set once this session has been rolled up into a `session_summary`
    * telemetry event, so a resumed or long-lived session is counted once.
    * A flag rather than deleting the file: the file still holds `lastQuery` and

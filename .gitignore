@@ -17,6 +17,11 @@ graft/
 # Session transcripts and prompt traces — local analysis, not product.
 transcripts/
 
+# tree-sitter CLI, fetched ad hoc to regenerate a vendored WASM grammar. A ~20MB
+# platform-specific binary: keep it out of history, it is not a build input.
+tree-sitter
+tree-sitter.exe
+
 # Claude Code settings — regenerated per machine by `graft init`, never shared
 # and never part of a PR diff (the hook helpers/skills alongside them stay tracked).
 .claude/settings.json
