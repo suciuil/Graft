@@ -192,12 +192,16 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
 
 - **Full-fidelity** — hand-written extractors with scope-aware, cross-file call
   and import resolution:
-  **TypeScript / JavaScript** (incl. JSX & TSX), **Python**, **Go**, **Java**.
+  **TypeScript / JavaScript** (incl. JSX & TSX), **Python**, **Go**, **Java**,
+  **Kotlin**, **PHP**, **Swift** (classes, structs, enums, actors, protocols;
+  extension members attach to the extended type), **R** (`.R`/`.r` — plain
+  functions, S3/S4/R6 classes and methods, roxygen `@export`,
+  `library()`/`source()` imports).
 
 - **Broad** — symbols (functions, classes, methods, types, …) plus name-resolved
   call edges via a generic tree-sitter extractor, one grammar per language:
-  **Rust, C, C++, C#, Ruby, PHP, Kotlin, Scala, Swift, Elixir, Solidity,
-  OCaml, Zig, Dart, Clojure**.
+  **Rust, C, C++, C#, Ruby, Scala, Elixir, Solidity,
+  OCaml, Zig, Dart, Clojure, Nix, Lua**.
 
 - **Compiler-grade edges (opt-in)** — `graft build --lsp` adds precise
   `lsp_resolved` call edges (member calls the static pass can't type) when a
@@ -205,7 +209,7 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
   **gopls** (Go), **pyright** (Python), **typescript-language-server** (TS/JS).
   It's best-effort — with no server installed the graph is unchanged.
 
-Twenty-one languages in total. A file whose language isn't listed is skipped, not
+Twenty-three languages in total. A file whose language isn't listed is skipped, not
 indexed. Adding a broad-tier language is a small contribution — see
 [CREDITS.md](CREDITS.md) for the folks who added the current set.
 
@@ -253,13 +257,13 @@ npx @nanonets/graft init
 # Claude Code additionally gets the live statusline + hooks below
 ```
 
-On a terminal, `init` shows you every agent it knows about — flagging the ones it detected (via their config directories) and listing the exact files each would write — and wires only the ones you select. Claude Code is pre-selected; nothing else is. Selected agents get a marker-fenced Graft section in their shared instruction file — `AGENTS.md` (Codex, OpenCode and other CLIs that read it), `GEMINI.md`, `.github/copilot-instructions.md` — or a wholly-owned rule/skill file for the agents that use one: `.claude/skills/graft/SKILL.md`, `.kilo/skills/graft/SKILL.md`, `.cursor/rules/graft.mdc`, `.kiro/steering/graft.md`, `.windsurf/rules/graft.md`, `.adal/skills/graft/SKILL.md` for [AdaL](https://adal.sylph.ai). Claude Code is in the second group: `init` writes its own skill file and never touches your `CLAUDE.md`. Re-running only updates Graft's own section (or replaces the owned file) and never touches the rest of your content.
+On a terminal, `init` shows you every agent it knows about — flagging the ones it detected (via their config directories) and listing the exact files each would write — and wires only the ones you select. Claude Code is pre-selected; nothing else is. Selected agents get a marker-fenced Graft section in their shared instruction file — `AGENTS.md` (Codex, OpenCode and other CLIs that read it), `GEMINI.md`, `.github/copilot-instructions.md` — or a wholly-owned rule/skill file for the agents that use one: `.claude/skills/graft/SKILL.md`, `.kilo/skills/graft/SKILL.md`, `.cursor/rules/graft.mdc`, `.kiro/steering/graft.md`, `.windsurf/rules/graft.md`, `.grok/skills/graft/SKILL.md` for Grok (xAI), `.adal/skills/graft/SKILL.md` for [AdaL](https://adal.sylph.ai). Claude Code is in the second group: `init` writes its own skill file and never touches your `CLAUDE.md`. Re-running only updates Graft's own section (or replaces the owned file) and never touches the rest of your content.
 
 With no TTY to prompt on — CI, a Dockerfile, a piped shell — `init` writes **nothing** and prints the command to run instead. Pass `--agents <ids>` or `--yes` to make a scripted run explicit.
 
 | Flag | Effect |
 |---|---|
-| `--agents <ids...>` | wire only these, no prompt — ids: `agents`, `cursor`, `gemini`, `copilot`, `kiro`, `kilo`, `windsurf`, `adal`, `claude` |
+| `--agents <ids...>` | wire only these, no prompt — ids: `agents`, `cursor`, `gemini`, `grok`, `copilot`, `kiro`, `kilo`, `windsurf`, `adal`, `claude` |
 | `--yes`, `-y` | skip the prompt and wire every **detected** agent |
 | `--dry-run` | print every file `init` would touch, then exit without writing |
 | `--all-agents` | write instruction files for every known agent, detected or not |
@@ -333,6 +337,8 @@ graft build --extensions .ts .py     # only include these code extensions
 graft build --no-reuse               # re-parse every file instead of replaying unchanged ones from cache
 graft build --follow-submodules      # include initialized submodules; persist the choice for builds + MCP refresh
 graft build --no-follow-submodules   # exclude submodules again and persist that choice (the default)
+graft build --follow-nested-repos    # include nested git clones the index doesn't track; persist the choice
+graft build --no-follow-nested-repos # exclude nested clones again and persist that choice (the default)
 
 graft ask "<task>" [dir]             # query the graph — ranked nodes + exact file:line (no LLM, no key)
 graft ask "<task>" --json            # machine-readable result
@@ -356,6 +362,7 @@ graft blast --base origin/main       # diff against the merge base with HEAD —
 graft blast --format markdown        # a PR comment: the areas a change can reach, per-symbol detail collapsed under it
 graft blast --base origin/main --name  # name those areas with one cached LLM call, instead of a full --deep build
 graft blast --export-viz site/       # also write the interactive page for this radius (what a PR comment links to)
+graft blast --no-owners              # skip "who to tag" — by default git history names the people behind each area
 graft blast --depth all --format json  # the full transitive closure, machine-readable
 
 graft check [dir]                    # fail (exit 1) if graft/ has drifted from the code (never auto-refreshes — it's the drift report)
@@ -372,12 +379,17 @@ graft viz --export site/ --title "PR #12"  # one self-contained index.html — f
 
 graft init [dir]                     # pick which agents to wire (prompts on a terminal; writes nothing until you choose)
 graft init --dry-run                 # list every file it would touch, then exit
-graft init --agents cursor kilo      # wire only these agents, no prompt (ids: agents, cursor, gemini, copilot, kiro, kilo, windsurf, adal, claude)
+graft init --agents cursor kilo      # wire only these agents, no prompt (ids: agents, cursor, gemini, grok, copilot, kiro, kilo, windsurf, adal, claude)
 graft init --yes                     # no prompt; wire every detected agent
 graft init --no-global               # skip writes outside this repo (~/.codex/ config + hooks)
 graft init --no-build                # wire the files only; don't build the graph
 graft init --all-agents              # wire every known agent, detected or not
 graft init --list-agents             # list known agent ids and exit
+
+graft uninstall [dir]                # remove every file and config entry graft wrote here (the inverse of init)
+graft uninstall -y                   # actually remove (without -y it prints what it would remove and exits)
+graft uninstall --keep-cache         # wiring only; leave graft/ and the .gitignore entry
+graft uninstall --no-global          # leave out-of-repo files alone (~/.codex, ~/.gemini)
 
 graft version                        # print the installed + latest published npm version
 graft upgrade                        # npm install -g the latest published version
@@ -445,6 +457,7 @@ Graft supports these layouts:
   is saved in `.graft/config.json`, so later no-flag builds and MCP automatic
   refreshes behave the same way. Run `graft build --no-follow-submodules` to
   restore and persist the default boundary.
+- **A git repo with other repos cloned inside it** (no gitlink, no index entry) — the shape multi-repo manifest tools like `west`, `repo`, `gclient` and `tsrc` check dependencies out into, and the shape you get by cloning an upstream into the tree to patch it locally. `--follow-submodules` cannot reach these: they have no `160000` index entry to follow. Run `graft build --follow-nested-repos` to fold them into one graph, prefixing child paths (for example, `external/parser/src/index.ts`) while honoring each clone's own Git ignore rules. A clone at a git-ignored path stays absent, since Git never reports it. The choice is saved in `.graft/config.json` and is independent of `--follow-submodules` — neither flag implies the other. Run `graft build --no-follow-nested-repos` to restore and persist the default boundary. Prefer this over the multi-repo split below when the nested repos import from each other and you want those edges in one graph; prefer the split when you want each repo scored and refreshed on its own.
 - **A folder of separate git repos** (no `.git` at the top) — `graft build`
   auto-splits: each child gets its own (git-ignored) `graft/`, and the parent
   gets a `graft/workspace.json` index. Queries from the parent federate across

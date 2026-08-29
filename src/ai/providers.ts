@@ -62,6 +62,8 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const DEFAULT_MODELS: Record<ProviderKind, string> = {
   openai: "openai/gpt-4o-mini",
   anthropic: "gpt-5.6-luna",
+  // Provider-prefixed so the LiteLLM proxy routes it; override with GRAFT_MODEL.
+  litellm: "openai/gpt-4o-mini",
 };
 
 export const DEFAULTS = {
