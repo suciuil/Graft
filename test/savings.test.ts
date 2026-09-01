@@ -48,7 +48,9 @@ test('savingsLine: reports saved tokens and percent when the output is smaller',
   assert.match(footer, /tokens saved ≈ [\d,]+ \(\d+%\)/);
   assert.match(footer, /2 file\(s\)/);
   const base = toTokens(8000);
-  assert.ok(footer.includes((base - toTokens(body.length)).toLocaleString()));
+  // en-US like the assertions above (`[\d,]+`) and like savingsLine itself: a
+  // bare toLocaleString() here made this test pass only on en-US machines.
+  assert.ok(footer.includes((base - toTokens(body.length)).toLocaleString('en-US')));
   // The nudge rides along so the agent reports the turn total without SKILL.md.
   assert.match(footer, /end of your reply/i);
   assert.match(footer, /graft saved ~N tokens this turn/);

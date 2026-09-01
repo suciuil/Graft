@@ -41,9 +41,14 @@ test('writes shim + hooks.json entry, idempotent on re-run', () => {
   assert.equal(sub('UserPromptSubmit'), 'prompt', 'the coupling-seed retrieval hook');
   assert.equal(sub('SessionStart'), 'session-start', 'orientation hook');
   assert.equal(sub('PostToolUse'), 'post-edit', 'edit hook (sync split out to Stop)');
+  assert.equal(sub('PreToolUse'), 'pre-tool', 'the gate');
   assert.equal(sub('Stop'), 'stop', 'background-sync hook');
   // the edit matcher must include Codex's native edit tool
   assert.match(cfg.hooks.PostToolUse[0].matcher, /apply_patch/);
+  // the gate matcher must include Codex's native shell/read tool names, not just
+  // the Claude Code spellings — gate.ts normalizes both onto one handler
+  assert.match(cfg.hooks.PreToolUse[0].matcher, /shell/);
+  assert.match(cfg.hooks.PreToolUse[0].matcher, /read_file/);
   // Codex ignores matcher for these, so we omit it rather than write a dead field
   assert.ok(!('matcher' in cfg.hooks.UserPromptSubmit[0]), 'no matcher on UserPromptSubmit');
   assert.ok(!('matcher' in cfg.hooks.Stop[0]), 'no matcher on Stop');
@@ -51,7 +56,7 @@ test('writes shim + hooks.json entry, idempotent on re-run', () => {
   const again = installCodexHooks(home);
   assert.deepEqual(again.map((x) => x.action), ['unchanged', 'unchanged'], 'idempotent');
   const after = JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8'));
-  for (const ev of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop'])
+  for (const ev of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'])
     assert.equal(after.hooks[ev].length, 1, `${ev} not duplicated on re-run`);
 });
 
