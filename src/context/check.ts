@@ -18,7 +18,7 @@ import { walkDir } from "../ingest/fs.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
-import { readExcludeDirs, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import { CODE_EXTENSIONS } from "./build.js";
 import { contextDirFor, readManifest, readNodes } from "./node-file.js";
 
@@ -64,6 +64,7 @@ export function checkContext(dir: string, opts: CheckOptions = {}): CheckResult 
   for (const file of walkDir(root, readIncludeDirs(root), {
     followSubmodules: readFollowSubmodules(root),
     excludes: readExcludeDirs(root),
+    followNestedRepos: readFollowNestedRepos(root),
   })) {
     if (file.startsWith(outDir)) continue;
     if (!exts.some((e) => file.toLowerCase().endsWith(e))) continue;

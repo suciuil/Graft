@@ -25,7 +25,7 @@ import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import { join, resolve } from "node:path";
 import { shouldSkipDir, walkDir } from "../ingest/fs.js";
 import { relPosix } from "../util/paths.js";
-import { readExcludeDirs, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import type { GraphV1, ScopeV1 } from "./types.js";
 
 /** Project-marker files, checked in this order (also the order `markers` is built in). */
@@ -135,6 +135,7 @@ export function discoverScopes(
   repoFiles: string[] = walkDir(root, readIncludeDirs(resolve(root)), {
     followSubmodules: readFollowSubmodules(resolve(root)),
     excludes: readExcludeDirs(resolve(root)),
+    followNestedRepos: readFollowNestedRepos(resolve(root)),
   }),
 ): ScopeV1[] {
   const absRoot = resolve(root);
