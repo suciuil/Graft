@@ -10,9 +10,14 @@ name: Blast radius
 # instead, from a token that belongs to the base repo. What stays here is the part
 # only this workflow can do: run the PR's OWN build, and fail if the code in the PR
 # cannot produce a comment body at all — the rendered body lands in the step summary.
+# DISABLED IN THIS FORK. The upstream pull_request trigger is kept verbatim but
+# commented out so nothing runs automatically; `workflow_dispatch` keeps the file
+# a valid workflow that can still be started by hand. Re-enable by uncommenting
+# the block below.
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  # pull_request:
+  #   branches: [main]
 
 permissions:
   contents: read
