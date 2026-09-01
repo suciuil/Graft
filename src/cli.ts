@@ -14,6 +14,7 @@ import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
 import { buildGraphIfMissing, runInit } from "./claude/init.js";
+import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { KILO_RULE_REL } from "./hosts/kilo.js";
 import { hostIds } from "./hosts/registry.js";
@@ -41,6 +42,7 @@ import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, runUpgrade } from "./cli-meta.js";
 import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
+import { latestSession, formatSessionStats } from "./claude/session-metrics.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   errorCode,
@@ -91,7 +93,7 @@ program
   .description("Build a repo's context graph as linked markdown, and keep it in sync with the code.")
   .version(currentVersion, "-v, --version")
   .option("--dir <path>", "context graph directory (default: <repo>/graft)")
-  .option("--provider <name>", "LLM wire format: openai | anthropic (env GRAFT_PROVIDER)")
+  .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
   .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)");
@@ -341,7 +343,8 @@ program
   )
   .option(
     "--only-dir <path>",
-    "only index files under this repo-relative path — repeatable; persisted, so a later build " +
+    "only index files under this repo-relative path — repeatable; the wiring walk and the --deep " +
+      "concept pass both honor it. Recorded in the graph fingerprint so a later build " +
       "(and the hooks/refresh path) walks the same set; everything outside the list is skipped",
     (val: string, prev: string[]) => [...prev, val],
     [] as string[],
@@ -500,6 +503,7 @@ program
     if (deep) {
       const c = await engine.init(dir, {
         extensions: opts.extensions,
+        onlyDirs,
         onProgress: ({ phase, index, total, file }) =>
           process.stderr.write(
             `\r${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
@@ -694,6 +698,24 @@ program
     }
 
     if (bothMissing || markdownFail || wiringFail) process.exit(1);
+  });
+
+program
+  .command("stats")
+  .description("Show this agent session's graft-vs-source usage mix and tokens saved")
+  .argument(...DIR_ARG)
+  .option("--json", "output the session stats as JSON")
+  .action((dirArg: string | undefined, opts: { json?: boolean }) => {
+    // Reads local session JSON only — no graph, no network. This is how a Cursor
+    // user (no statusline) sees the numbers the Claude Code bar would show, and it
+    // works under DO_NOT_TRACK because it never touches telemetry.
+    const dir = queryRoot(dirArg);
+    const s = latestSession(dir);
+    if (opts.json) {
+      console.log(JSON.stringify(s, null, 2));
+      return;
+    }
+    console.log(formatSessionStats(s));
   });
 
 program
@@ -934,10 +956,11 @@ program
   .option("--list-agents", "list known agent ids and exit")
   .option("--no-mcp", "skip MCP server registration for other agents")
   .option("--no-hooks", "skip hook installation for other agents")
+  .option("--no-statusline", "skip writing Claude Code statusLine (keep a user-defined one)")
   .option("--dry-run", "print every file init would touch, then exit without writing")
   .option("-y, --yes", "skip the picker and wire every detected agent (the pre-0.8 default)")
   .option("--no-global", "skip writes outside this repo (the ~/.codex/ config + hooks)")
-  .action(async (dir: string, opts: { build?: boolean; agents?: string[]; allAgents?: boolean; listAgents?: boolean; mcp?: boolean; hooks?: boolean; dryRun?: boolean; yes?: boolean; global?: boolean }) => {
+  .action(async (dir: string, opts: { build?: boolean; agents?: string[]; allAgents?: boolean; listAgents?: boolean; mcp?: boolean; hooks?: boolean; statusline?: boolean; dryRun?: boolean; yes?: boolean; global?: boolean }) => {
     if (opts.listAgents) {
       for (const id of [...hostIds(), "claude"]) console.log(id);
       return;
@@ -1065,10 +1088,11 @@ function wireTarget(
     cliPath: string;
     plan: ReturnType<typeof planInit>;
     wantClaude: boolean;
-    opts: { build?: boolean; mcp?: boolean; hooks?: boolean; global?: boolean };
+    opts: { build?: boolean; mcp?: boolean; hooks?: boolean; global?: boolean; statusline?: boolean };
   },
 ): void {
     const { home, cliPath, plan, wantClaude, opts } = ctx;
+    const wantStatusline = statuslineWanted({ statusline: opts.statusline });
 
     // Before any agent wiring, and regardless of which agents were picked: the
     // repo's own build settings. Written only when absent, so re-running init
@@ -1088,7 +1112,7 @@ function wireTarget(
     for (const r of retracted) console.error(`- removed ${r.path} (${r.what}) — agent not selected`);
 
     if (wantClaude) {
-      const res = runInit(repo, { build: opts.build, cliPath });
+      const res = runInit(repo, { build: opts.build, cliPath, statusline: wantStatusline });
       console.error(`✓ wrote ${res.settingsPath}`);
       for (const s of res.shims) console.error(`✓ wrote ${s}`);
       console.error(`✓ wrote ${res.skill}`);
@@ -1099,6 +1123,7 @@ function wireTarget(
       else
         console.error(`✓ mcp claude: ${res.mcp.path} (${res.mcp.action}) — restart Claude Code to load the graft MCP server`);
       console.error(res.built ? "✓ built the graph (graft build)" : "· skipped graph build");
+      if (!wantStatusline) console.error("· skipped Claude Code statusLine (--no-statusline)");
       for (const w of res.warnings) console.error(`⚠ ${w}`);
     }
 
@@ -1145,6 +1170,7 @@ function wireTarget(
       global: opts.global !== false,
       mcp: opts.mcp !== false,
       hooks: opts.hooks !== false,
+      statusline: wantStatusline,
     });
 
     // Every host's wiring points at graft/, so the graph is built whatever was
