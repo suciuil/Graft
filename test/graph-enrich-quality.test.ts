@@ -184,3 +184,61 @@ test("#235: blank parsed summaries name empty-parsed and stay pending", async ()
   assert.equal(nodes[0].summary_state, "pending");
   assert.equal(nodes[0].summary, null);
 });
+
+/**
+ * `userContent` lists targets as `- id=<id> | <kind> | lines L1-L3 | <sig>`, and
+ * some models echo that whole line back as the id. Exact-matching drops those
+ * entries, so a file where every entry is echoed reads as a total miss and the
+ * failure gate counts a file whose summaries were perfectly good.
+ */
+test("an echoed descriptor line is recovered back onto the real target id", async () => {
+  const summarizer = new ChatCruxSummarizer(
+    new CannedModel({
+      toolCalls: [
+        {
+          id: "1",
+          name: "record_symbols",
+          args: {
+            symbols: [
+              {
+                id: "- id=f0.ts#run | function | lines L1-L3 | run()",
+                summary: "Runs the thing.",
+                crux_start: 2,
+                crux_end: 2,
+              },
+            ],
+          },
+        },
+      ],
+      stopReason: "stop",
+    }),
+  );
+  const { stats, nodes } = await oneFile(summarizer);
+  assert.equal(stats.failedFiles, 0, "a recoverable id is not a failure");
+  assert.equal(stats.computed, 1);
+  assert.equal(nodes[0].summary_state, "ready");
+  assert.equal(nodes[0].summary, "Runs the thing.");
+});
+
+test("a hallucinated id is still dropped, and a duplicate never overwrites the first", async () => {
+  const summarizer = new ChatCruxSummarizer(
+    new CannedModel({
+      toolCalls: [
+        {
+          id: "1",
+          name: "record_symbols",
+          args: {
+            symbols: [
+              { id: "f0.ts#run", summary: "First wins.", crux_start: 2, crux_end: 2 },
+              { id: "- id=f0.ts#run | function", summary: "Duplicate loses.", crux_start: 2, crux_end: 2 },
+              { id: "f0.ts#neverExisted", summary: "Hallucinated.", crux_start: 1, crux_end: 1 },
+            ],
+          },
+        },
+      ],
+      stopReason: "stop",
+    }),
+  );
+  const { nodes } = await oneFile(summarizer);
+  assert.equal(nodes[0].summary, "First wins.");
+});

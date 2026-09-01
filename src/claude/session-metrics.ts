@@ -31,7 +31,7 @@
  */
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { sumSavingsFooters } from '../context/savings.js';
+import { formatCount, sumSavingsFooters } from '../context/savings.js';
 import { readSession, writeSession, sessionDir, listSessionIds, type SessionState } from './state.js';
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
@@ -180,7 +180,7 @@ export function formatSessionStats(s: SessionSummary | null): string {
     `  graft reads:   ${graft}`,
     `  source reads:  ${source}   (Read / Grep / Glob)`,
     `  mix:           ${mix}`,
-    `  tokens saved:  ~${saved.toLocaleString()}`,
+    `  tokens saved:  ~${formatCount(saved)}`,
   ];
   if (s.lastQuery) lines.push(`  last query:    ${s.lastQuery}`);
   return lines.join('\n');
