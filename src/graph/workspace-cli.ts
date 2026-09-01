@@ -41,6 +41,8 @@ export interface WorkspaceBuildOptions {
   excludeDirs?: string[];
   /** An explicit CLI submodule choice to persist into every child repo. */
   followSubmodules?: boolean;
+  /** An explicit CLI nested-clone choice to persist into every child repo. */
+  followNestedRepos?: boolean;
 }
 
 /** Build every git child into its own committable `graft/`, then replace the
@@ -59,6 +61,9 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
     }
     if (opts.followSubmodules !== undefined) {
       childConfigPatch.followSubmodules = opts.followSubmodules;
+    }
+    if (opts.followNestedRepos !== undefined) {
+      childConfigPatch.followNestedRepos = opts.followNestedRepos;
     }
     if (Object.keys(childConfigPatch).length > 0) {
       patchBuildConfig(childDir, childConfigPatch);

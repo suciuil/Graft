@@ -28,3 +28,8 @@ build-bundle/
 
 # graft's local repository settings — not committed.
 /.graft/
+
+# Claude Code settings — regenerated per machine by `graft init`, never shared
+# and never part of a PR diff (the hook helpers/skills alongside them stay tracked).
+.claude/settings.json
+.claude/settings.local.json

@@ -35,7 +35,7 @@ test('all writes every host and re-run converges (idempotent)', () => {
   const home = fresh(); const repo = fresh();
   const first = runHostsInit(repo, { home, all: true });
   // One per host, plus kilo.jsonc (Kilo's rule file needs registering to load).
-  assert.equal(first.written.length, 10);
+  assert.equal(first.written.length, 12);
   const second = runHostsInit(repo, { home, all: true });
   assert.ok(second.written.every((w) => w.action === 'unchanged'));
   // `agents` and `antigravity` share AGENTS.md, but the fenced section is written once
