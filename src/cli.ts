@@ -719,7 +719,7 @@ program
       console.log(JSON.stringify(s, null, 2));
       return;
     }
-    console.log(formatSessionStats(s));
+    console.log(formatSessionStats(s, sessionInputRate(dir)));
   });
 
 program

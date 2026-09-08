@@ -32,7 +32,8 @@
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatCount, sumSavingsFooters } from '../context/savings.js';
-import { dollarsSaved, formatDollars } from '../context/price.js';
+import { blendedRate, declaredRate, formatDollars, valueSaved, type InputRate } from '../context/price.js';
+import { readDeclaredModel } from '../util/state.js';
 import { readSession, writeSession, sessionDir, listSessionIds, type SessionState } from './state.js';
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
@@ -167,24 +168,25 @@ export function latestSession(dir: string): SessionSummary | null {
  * Reads local JSON only; sends nothing.
  */
 /**
- * What this repo's most recent session has actually been paying per million
- * input tokens, or null when no turn has been billed yet.
+ * What this repo's most recent session pays per million input tokens, and
+ * whether that was measured or declared.
+ *
+ * Prefers the session's own blended rate; falls back to the rate the user
+ * declared, which is the only number available on a host that reports no
+ * billing (Copilot, Kilo, Codex, Cursor). Null when neither exists, so the
+ * caller renders the token count alone.
  *
  * `latestSession` rather than a session id because the callers are CLI and MCP
  * processes answering one query: they know the repo, never the host's session
  * id. The rate belongs to the repo's current session, which is the one whose
  * reply the number is about to appear in.
  */
-export function sessionInputRate(dir: string): number | null {
+export function sessionInputRate(dir: string): InputRate | null {
   const s = latestSession(dir);
-  if (!s?.inputCostMicros || !s?.inputTokensBilled) return null;
-  // Micro-dollars per token and dollars per million tokens are the same number:
-  // both divide by 1e6 once. Returned as $/Mtok because that is the unit the
-  // price table is written in and the one a reader can sanity-check against it.
-  return s.inputCostMicros / s.inputTokensBilled;
+  return blendedRate(s?.inputCostMicros, s?.inputTokensBilled) ?? declaredRate(readDeclaredModel(dir));
 }
 
-export function formatSessionStats(s: SessionSummary | null): string {
+export function formatSessionStats(s: SessionSummary | null, rate: InputRate | null = null): string {
   if (s === null) {
     return 'graft stats: no session recorded yet — use graft in an agent session, then look again.';
   }
@@ -201,11 +203,14 @@ export function formatSessionStats(s: SessionSummary | null): string {
     `  mix:           ${mix}`,
     `  tokens saved:  ~${formatCount(saved)}`,
   ];
-  // Omitted, not zeroed, when no turn has been billed yet: a host whose hooks
-  // name no transcript can't know what a token costs here, and a made-up rate
-  // would be worse than the silence.
-  const usd = dollarsSaved(saved, s.inputCostMicros, s.inputTokensBilled);
-  if (usd !== null) lines.push(`  value saved:   ~${formatDollars(usd)}`);
+  // Omitted, not zeroed, when there is no rate at all: a host whose hooks name
+  // no transcript can't know what a token costs here, and unless the user has
+  // declared a price, a made-up rate would be worse than the silence.
+  const value = valueSaved(saved, blendedRate(s.inputCostMicros, s.inputTokensBilled) ?? rate);
+  if (value !== null) {
+    const note = value.measured ? '' : '   (list rate — this host reports no billing)';
+    lines.push(`  value saved:   ~${formatDollars(value.usd)}${note}`);
+  }
   if (s.lastQuery) lines.push(`  last query:    ${s.lastQuery}`);
   return lines.join('\n');
 }

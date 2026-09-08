@@ -92,10 +92,23 @@ test('the turn nudge carries no dollar figure until a rate is set', () => {
 test('the turn nudge prices this call once a rate is set', () => {
   // $5/Mtok: a 1,000-token saving is worth half a cent, which must read as
   // "<$0.01" rather than "$0.00" — see formatDollars.
-  setInputRate(5);
+  setInputRate({ usdPerMtok: 5, measured: true });
   const footer = savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
   assert.match(footer, /worth <\$0\.01/);
+  assert.match(footer, /rate this session is actually paying/);
   assert.match(footer, /~\$X.*this turn/, 'the example shows the dollar-bearing form');
+  setInputRate(null);
+});
+
+test('a declared rate is priced but never described as what the session paid', () => {
+  // The hosts that reach this branch (Copilot, Kilo, Codex, Cursor) report no
+  // billing, so there is no cache discount to observe and the figure is an
+  // upper bound. Wording it as the measured rate would be a lie.
+  setInputRate({ usdPerMtok: 5, measured: false });
+  const footer = savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
+  assert.match(footer, /worth <\$0\.01/);
+  assert.match(footer, /list input-token rate configured for this repo/);
+  assert.doesNotMatch(footer, /actually paying/);
   setInputRate(null);
 });
 
@@ -103,7 +116,7 @@ test('a priced nudge still leaves exactly one number for the accumulator', () =>
   // The nudge must never grow a second `[graft] tokens saved ≈ <n>` — the
   // PostToolUse accumulator sums every match, so an example carrying the
   // pattern would double-count the call.
-  setInputRate(5);
+  setInputRate({ usdPerMtok: 5, measured: true });
   const footer = savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
   assert.equal((footer.match(/\[graft\] tokens saved ≈ [\d,]+/g) ?? []).length, 1);
   setInputRate(null);
@@ -117,7 +130,7 @@ test('a priced nudge still matches the reported-turns tally regex', () => {
 
 test('setInputRate refuses a rate that would render as $NaN', () => {
   for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
-    setInputRate(bad);
+    setInputRate({ usdPerMtok: bad, measured: true });
     const footer = savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
     assert.doesNotMatch(footer, /\$/, `rate ${bad} must price nothing`);
   }
