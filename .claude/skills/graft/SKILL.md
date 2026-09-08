@@ -131,10 +131,36 @@ tally summing those numbers across every graft call you made, e.g.
 skip it. This is the per-turn figure; the statusline carries the running
 session total.
 
+Once a turn has been billed, each line also states what that call was worth in
+dollars, at the rate this session is actually paying for input tokens — include
+that total alongside the tokens, e.g. `🌱 graft saved ~12,400 tokens (~$0.04)
+this turn`. When a line carries no dollar figure, report tokens alone rather
+than pricing them yourself.
+
 **Never pipe a graft command through `head`, `tail`, or `sed -n`.** Every tool
 is already capped and states what it dropped; clipping it costs you hits you
 asked for, and it silently drops the savings line the statusline's running
 total is parsed from.
+
+## The gate
+
+On this host graft installs a `PreToolUse` hook. It refuses **once** per distinct
+call when a tool call has a graft equivalent — a Grep/`rg`/`grep -rn` repo
+search, or a whole-file `Read`/`cat` of an indexed file — and its message names
+the command to run instead.
+
+- **Do the redirect.** The refusal is not a permission problem to route around;
+  the named command answers the same question for a fraction of the tokens.
+- **A ranged read is never refused.** `Read` with an offset/limit, `head`,
+  `tail`, `sed -n '10,40p'` — opening the exact span graft pointed at is the
+  behaviour the gate exists to produce.
+- **Re-issuing the identical call overrides it.** That is deliberate, and it is
+  the right move when graft genuinely has no answer: an unindexed file, a doc, a
+  lockfile, something created this session. It is the wrong move as a reflex —
+  if you override without trying the named command, you paid the round trip for
+  nothing.
+
+`GRAFT_NO_GATE=1` disables it entirely (a human's switch, not a workaround).
 
 ## When graft isn't enough
 - Span truncated ("+N more lines"): open the file at that exact range.
