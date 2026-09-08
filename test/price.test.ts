@@ -14,6 +14,10 @@ import {
   turnInputTokens,
   dollarsSaved,
   formatDollars,
+  blendedRate,
+  declaredRate,
+  valueSaved,
+  RATE_ENV,
 } from '../src/context/price.js';
 
 test('inputUsdPerMtok: known families are priced, anything else is null', () => {
@@ -25,6 +29,19 @@ test('inputUsdPerMtok: known families are priced, anything else is null', () => 
   assert.equal(inputUsdPerMtok('claude-fable-5-1'), 10);
   assert.equal(inputUsdPerMtok('gpt-5'), null);
   assert.equal(inputUsdPerMtok(undefined), null);
+});
+
+test('inputUsdPerMtok: the non-Anthropic families are priced at short-context list', () => {
+  assert.equal(inputUsdPerMtok('gpt-5.6-sol'), 4);
+  assert.equal(inputUsdPerMtok('gpt-5.6-terra'), 2);
+  assert.equal(inputUsdPerMtok('gpt-5.6-luna'), 0.2);
+  assert.equal(inputUsdPerMtok('gemini-3.7-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3.8-flash'), 0.75);
+  // The `.` in a version is escaped, so a neighbouring family cannot be priced
+  // by a pattern that was never written for it.
+  assert.equal(inputUsdPerMtok('gpt-546-sol'), null);
+  assert.equal(inputUsdPerMtok('gemini-3.6-flash'), null);
+  assert.equal(inputUsdPerMtok('gpt-5.6-cyber'), null);
 });
 
 test('turnInputCostMicros: fresh tokens cost list price', () => {
@@ -89,4 +106,62 @@ test('dollarsSaved: a non-finite accumulator never reaches a rendered surface', 
   assert.equal(dollarsSaved(100_000, Number.NaN, 1_000_000), null);
   assert.equal(dollarsSaved(100_000, 600_000, Number.NaN), null);
   assert.equal(dollarsSaved(Number.POSITIVE_INFINITY, 600_000, 1_000_000), null);
+});
+
+// ── the declared rate: the only number available on a host that measures none ──
+
+test('declaredRate: a known model prices at list, and is marked unmeasured', () => {
+  delete process.env[RATE_ENV];
+  assert.deepEqual(declaredRate('gemini-3.8-flash'), { usdPerMtok: 0.75, measured: false });
+  assert.deepEqual(declaredRate('gpt-5.6-sol'), { usdPerMtok: 4, measured: false });
+});
+
+test('declaredRate: nothing declared, or a model with no price, stays null', () => {
+  delete process.env[RATE_ENV];
+  assert.equal(declaredRate(null), null, 'no model configured');
+  assert.equal(declaredRate(''), null, 'the scaffolded empty default');
+  assert.equal(declaredRate('some-future-model'), null, 'a model this table never priced');
+});
+
+test('declaredRate: the env override wins over the configured model', () => {
+  process.env[RATE_ENV] = '0.30';
+  try {
+    assert.deepEqual(declaredRate('gpt-5.6-sol'), { usdPerMtok: 0.3, measured: false });
+    assert.deepEqual(declaredRate(null), { usdPerMtok: 0.3, measured: false });
+  } finally {
+    delete process.env[RATE_ENV];
+  }
+});
+
+test('declaredRate: a malformed override prices nothing rather than falling through', () => {
+  // Falling back to the model here would quietly bill at a different number
+  // than the one the user typed, which is the failure mode this module exists
+  // to avoid. Silence sends them back to fix the typo.
+  for (const bad of ['abc', '0', '-1', 'NaN', 'Infinity']) {
+    process.env[RATE_ENV] = bad;
+    try {
+      assert.equal(declaredRate('gpt-5.6-sol'), null, `override ${bad} must price nothing`);
+    } finally {
+      delete process.env[RATE_ENV];
+    }
+  }
+});
+
+test('blendedRate: a measured rate is the session cost over the tokens it bought', () => {
+  assert.deepEqual(blendedRate(600_000, 1_000_000), { usdPerMtok: 0.6, measured: true });
+  assert.equal(blendedRate(undefined, undefined), null, 'turn one of a session');
+  assert.equal(blendedRate(0, 0), null, 'a host that exposes no transcript');
+});
+
+test('valueSaved: the measured flag travels with the number', () => {
+  const measured = valueSaved(100_000, { usdPerMtok: 0.6, measured: true });
+  assert.equal(measured?.measured, true);
+  assert.ok(Math.abs(measured!.usd - 0.06) < 1e-9, `got ${measured?.usd}`);
+
+  const declared = valueSaved(100_000, { usdPerMtok: 0.75, measured: false });
+  assert.equal(declared?.measured, false);
+  assert.ok(Math.abs(declared!.usd - 0.075) < 1e-9, `got ${declared?.usd}`);
+
+  assert.equal(valueSaved(100_000, null), null, 'no rate, no figure');
+  assert.equal(valueSaved(0, { usdPerMtok: 5, measured: true }), null, 'nothing saved');
 });

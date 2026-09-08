@@ -108,6 +108,11 @@ export interface BuildConfig {
    * checkout someone parked in the tree. Absent/false keeps the historical
    * boundary. */
   followNestedRepos?: boolean;
+  /** The model this repo's agent runs, used ONLY to price saved tokens on a
+   * host that reports no billing of its own (see `context/price.ts`). Never
+   * consulted when the session has a measured rate, and never a default: absent
+   * means the dollar figure is omitted rather than estimated. */
+  model?: string;
 }
 
 /** Local, Git-ignored repository configuration. Kept outside generated
@@ -147,13 +152,16 @@ const DEFAULT_BUILD_CONFIG: Required<BuildConfig> = {
   excludeDirs: [],
   followSubmodules: false,
   followNestedRepos: false,
+  model: '',
 };
 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as
  * an unknown key and preserved by {@link patchBuildConfig}, which spreads it. */
 const BUILD_CONFIG_NOTE =
   "graft repository settings — see `graft build --help`. excludeDirs takes a NAME (themes), " +
-  "a root-relative PATH (src/themes), or a glob (src/themes*, src/themes/*, *src/themes).";
+  "a root-relative PATH (src/themes), or a glob (src/themes*, src/themes/*, *src/themes). " +
+  "model names the model your agent runs (e.g. gemini-3.8-flash), so savings can be priced " +
+  "on hosts that report no billing; leave empty to show token counts alone.";
 
 /**
  * Scaffold `.graft/config.json` with every option at its default, unless the repo
@@ -215,6 +223,14 @@ export function readFollowSubmodules(d: string): boolean {
 /** Missing and explicit false both retain the backwards-compatible default. */
 export function readFollowNestedRepos(d: string): boolean {
   return readBuildConfig(d)?.followNestedRepos === true;
+}
+
+/** The model the user declared for repo `d`, or null when the field is absent
+ * or blank — the scaffolded default is `""`, which must read as "not declared"
+ * rather than as a model name no price table will ever match. */
+export function readDeclaredModel(d: string): string | null {
+  const model = readBuildConfig(d)?.model;
+  return typeof model === 'string' && model.trim() !== '' ? model.trim() : null;
 }
 // Best-effort read-modify-write; not atomic across concurrent processes, but acceptable
 // for episodic hook writes (worst case is a lost update, not corruption).

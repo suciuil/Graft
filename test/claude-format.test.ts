@@ -228,3 +228,23 @@ test('renderStatusline shows tokens alone until a turn has been billed', () => {
   assert.match(line, /~100,000 tok saved/);
   assert.doesNotMatch(line, /\$/);
 });
+
+test('renderStatusline falls back to a declared rate, and labels it list', () => {
+  // A host that reports no billing: the user declared the model, so the figure
+  // is real — but it is a list rate with no cache discount folded in, and the
+  // bar has to say so rather than pass an upper bound off as the bill.
+  const stats = { ...emptyStats(), nodeCount: 1, edgeCount: 0, totalCount: 1 };
+  const s = { ...freshSession(), savedTokens: 100_000 };
+  const rate = { usdPerMtok: 4, measured: false };
+  const line = strip(renderStatusline(stats, s as any, { ctxPct: null, rate })[0]);
+  assert.match(line, /~100,000 tok saved · ~\$0\.40 list/);
+});
+
+test('renderStatusline prefers the measured rate over the declared one', () => {
+  const stats = { ...emptyStats(), nodeCount: 1, edgeCount: 0, totalCount: 1 };
+  const s = { ...freshSession(), savedTokens: 100_000, inputCostMicros: 600_000, inputTokensBilled: 1_000_000 };
+  const rate = { usdPerMtok: 5, measured: false };
+  const line = strip(renderStatusline(stats, s as any, { ctxPct: null, rate })[0]);
+  assert.match(line, /~\$0\.06/, 'the measured rate wins');
+  assert.doesNotMatch(line, /list/);
+});

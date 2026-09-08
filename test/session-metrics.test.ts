@@ -208,3 +208,24 @@ test('formatSessionStats omits the dollar line rather than claiming zero', () =>
   assert.doesNotMatch(out, /value saved/);
   assert.doesNotMatch(out, /\$/);
 });
+
+test('formatSessionStats prices an unbilled session at the declared rate, marked as list', () => {
+  // Copilot / Kilo: no billing surface at all, so the declared rate is the only
+  // number there is. It gets shown, and it gets labelled.
+  const out = formatSessionStats({
+    id: 'abc', lastQuery: null, perAgentQuery: {},
+    graftReads: 8, sourceReads: 2, savedTokens: 100_000,
+  }, { usdPerMtok: 4, measured: false });
+  assert.match(out, /value saved:\s+~\$0\.40/);
+  assert.match(out, /list rate — this host reports no billing/);
+});
+
+test('formatSessionStats prefers the measured rate and drops the list caveat', () => {
+  const out = formatSessionStats({
+    id: 'abc', lastQuery: null, perAgentQuery: {},
+    graftReads: 8, sourceReads: 2, savedTokens: 100_000,
+    inputCostMicros: 600_000, inputTokensBilled: 1_000_000,
+  }, { usdPerMtok: 5, measured: false });
+  assert.match(out, /value saved:\s+~\$0\.06/);
+  assert.doesNotMatch(out, /list rate/);
+});

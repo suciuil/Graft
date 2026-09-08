@@ -6,7 +6,7 @@ import type { GraphV1, EdgeV1 } from '../graph/types.js';
 // question in both places, and one set of calibrated numbers beats two.
 import { HIGH_FLOOR, STRONG_FLOOR } from '../ask/fuse.js';
 import { formatCount } from '../context/savings.js';
-import { dollarsSaved, formatDollars } from '../context/price.js';
+import { blendedRate, formatDollars, valueSaved, type InputRate } from '../context/price.js';
 
 const C = {
   indigo: (s: string) => `\x1b[38;2;84;111;255m${s}\x1b[0m`,
@@ -26,7 +26,7 @@ export function freshnessSegment(s: Stats): string {
 export function renderStatusline(
   stats: Stats | null,
   session: SessionState | null,
-  ctx: { ctxPct: number | null },
+  ctx: { ctxPct: number | null; rate?: InputRate | null },
 ): string[] {
   if (!stats) {
     return [C.muted('◤ graft · not built · run ') + C.text('graft build')];
@@ -35,11 +35,13 @@ export function renderStatusline(
   top.push(freshnessSegment(stats));
   const saved = session?.savedTokens ?? 0;
   if (saved > 0) {
-    // Dollars only once a turn has actually been billed — see context/price.ts.
-    // Until then (turn one, or a host with no transcript) the token count
-    // stands alone rather than carrying a rate nobody measured.
-    const usd = dollarsSaved(saved, session?.inputCostMicros, session?.inputTokensBilled);
-    const money = usd === null ? '' : ` · ~${formatDollars(usd)}`;
+    // Dollars only once a rate exists — see context/price.ts. Until then (turn
+    // one, or a host with no transcript and no declared model) the token count
+    // stands alone rather than carrying a rate nobody measured. A declared rate
+    // is flagged `list` so the bar never passes an upper bound off as the bill.
+    const measured = blendedRate(session?.inputCostMicros, session?.inputTokensBilled);
+    const value = valueSaved(saved, measured ?? ctx.rate ?? null);
+    const money = value === null ? '' : ` · ~${formatDollars(value.usd)}${value.measured ? '' : ' list'}`;
     top.push(C.indigo(`~${formatCount(saved)} tok saved${money}`));
   }
 

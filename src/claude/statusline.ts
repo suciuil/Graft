@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { renderStatusline, renderSubagent } from './format.js';
 import { readStats, readSession, emptyStats, type Stats } from './state.js';
 import { readWiring, computeStats } from './stats.js';
+import { declaredRate } from '../context/price.js';
+import { readDeclaredModel } from '../util/state.js';
 
 /**
  * The statusline's fast path is the hook-maintained cache (graft/.cache/stats.json).
@@ -31,5 +33,6 @@ export function main(): void {
   const stats = resolveStats(dir);
   const raw = input?.context_window?.used_percentage;
   const ctxPct = typeof raw === 'number' ? Math.round(raw) : null;
-  process.stdout.write(renderStatusline(stats, session, { ctxPct }).join('\n'));
+  const rate = declaredRate(readDeclaredModel(dir));
+  process.stdout.write(renderStatusline(stats, session, { ctxPct, rate }).join('\n'));
 }
