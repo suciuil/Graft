@@ -43,7 +43,8 @@ import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurren
 import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
 import { latestSession, formatSessionStats, sessionInputRate } from "./claude/session-metrics.js";
-import { setInputRate } from "./context/savings.js";
+import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel } from "./claude/ledger.js";
+import { claimedSavings, setInputRate } from "./context/savings.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   errorCode,
@@ -100,7 +101,11 @@ program
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
-  .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)");
+  .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)")
+  .option(
+    "--agent-model <id>",
+    "model YOU are running, to price saved tokens (env GRAFT_AGENT_MODEL) — not --model",
+  );
 
 interface GlobalOpts {
   dir?: string;
@@ -108,6 +113,7 @@ interface GlobalOpts {
   model?: string;
   apiKey?: string;
   baseUrl?: string;
+  agentModel?: string;
 }
 
 /** Config drawn from the global CLI flags (env + defaults fill the rest). */
@@ -213,6 +219,10 @@ const UPKEEP_SKIP = new Set(["version", "upgrade", "_update-check", "mcp"]);
  * cache filler for the hooks, which are not allowed to touch the network.
  */
 program.hook("preAction", (_parent, action) => {
+  // Ahead of the skip check: `mcp` is skipped here but is exactly the command
+  // that needs this. Its process is long-lived, so one `--agent-model` in the
+  // host's .mcp.json args prices every tool call the server goes on to serve.
+  setAgentModel(program.opts<GlobalOpts>().agentModel);
   if (UPKEEP_SKIP.has(action.name())) return;
   maybeRefreshInBackground();
   const nudge = formatUpdateNudge(currentVersion, readUpdateCache()?.latest);
@@ -234,6 +244,18 @@ program.hook("preAction", (_parent, action) => {
  */
 program.hook("postAction", (_parent, action) => {
   const name = action.name();
+  // The ledger's third writer, alongside the Claude hooks and the MCP server.
+  // Without it a host that drives graft from a TERMINAL — Copilot, Kilo and
+  // anything else with neither a hook surface nor the MCP server wired — prints
+  // every saving and files none, leaving `graft savings` permanently empty.
+  // `mcp` is excluded because that server files each call as it serves it.
+  if (name !== "mcp" && queryNote.repo) {
+    const claimed = claimedSavings();
+    if (claimed > 0) {
+      const repo = queryNote.repo;
+      recordSavedTokens(repo, currentModel(repo, latestSession(repo)?.model), claimed);
+    }
+  }
   if (!isTrackedCommand(name)) return;
   track("query", { command: name, surface: "cli", hit: queryNote.hit }, { repo: queryNote.repo });
 });
@@ -720,6 +742,53 @@ program
       return;
     }
     console.log(formatSessionStats(s, sessionInputRate(dir)));
+  });
+
+program
+  .command("savings")
+  .description(
+    "Cumulated savings for this repo, per model — all time, or for one period: `graft savings 2026`, `graft savings 2026-09`, `graft savings 2026-09-08`",
+  )
+  .argument("[period]", "yyyy | yyyy-mm | yyyy-mm-dd (default: every day on record)")
+  .argument(...DIR_ARG)
+  .option("--json", "output the rolled-up savings as JSON")
+  .addHelpText(
+    "after",
+    [
+      "",
+      "Examples:",
+      "  graft savings              every day on record, per model and in total",
+      "  graft savings 2026         that year",
+      "  graft savings 2026-09      that month",
+      "  graft savings 2026-09-08   that day",
+      "",
+      "Dollars appear per model wherever a rate is known — this repo's own billing when",
+      "the host reports it, else the model's list price. A model with no price at all is",
+      "reported in saved input tokens alone, never at a guessed rate.",
+    ].join("\n"),
+  )
+  .action((periodArg: string | undefined, dirArg: string | undefined, opts: { json?: boolean }) => {
+    // A lone argument is a period when it looks like a date and the repo
+    // otherwise — `graft savings ../api` must not be read as a malformed date,
+    // and `graft savings 2026-13` must not be read as a directory.
+    let period = periodArg;
+    let dirName = dirArg;
+    if (period !== undefined && !isPeriod(period)) {
+      if (dirName !== undefined || /^[\d-]+$/.test(period)) {
+        console.error(`✗ not a period: ${period} — expected yyyy, yyyy-mm or yyyy-mm-dd`);
+        process.exit(1);
+      }
+      dirName = period;
+      period = undefined;
+    }
+    // Local ledger JSON only — no graph, no network, same as `graft stats`.
+    const dir = queryRoot(dirName);
+    const report = aggregateSavings(readLedger(dir), period);
+    if (opts.json) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    console.log(formatSavingsReport(report));
   });
 
 program

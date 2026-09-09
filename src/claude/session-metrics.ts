@@ -33,7 +33,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatCount, sumSavingsFooters } from '../context/savings.js';
 import { blendedRate, declaredRate, formatDollars, valueSaved, type InputRate } from '../context/price.js';
-import { readDeclaredModel } from '../util/state.js';
+import { currentModel, recordSavedTokens } from './ledger.js';
 import { readSession, writeSession, sessionDir, listSessionIds, type SessionState } from './state.js';
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
@@ -112,6 +112,10 @@ export interface ToolUse {
   /** The host recording this use. Stamped on the session file (once) so the
    * `session_summary` is attributed correctly no matter which host later flushes it. */
   host?: AgentHost;
+  /** This call went through graft's own MCP server, which files its own ledger
+   * entry for it (see `mcp/tools.ts`). The session counters below still want it;
+   * the lifetime ledger would count it twice. */
+  viaMcp?: boolean;
 }
 
 /**
@@ -133,7 +137,14 @@ export function recordToolUse(dir: string, sessionId: string, use: ToolUse): voi
   const s = readSession(dir, id);
   if (use.kind === 'graft') s.graftReads = (s.graftReads ?? 0) + 1;
   else if (use.kind === 'source') s.sourceReads = (s.sourceReads ?? 0) + 1;
-  if (saved > 0) s.savedTokens = (s.savedTokens ?? 0) + saved;
+  if (saved > 0) {
+    s.savedTokens = (s.savedTokens ?? 0) + saved;
+    // Also into the repo's lifetime ledger, under whichever model is running:
+    // the session file is what `graft stats` reads, the ledger what `graft
+    // savings` reads back months later. MCP calls are excluded because the MCP
+    // server already filed them — it runs on every host, hooks only on two.
+    if (!use.viaMcp) recordSavedTokens(dir, currentModel(dir, s.model), saved);
+  }
   // A graft use owes a tally in this turn's reply; the Stop hook (countTallyTurn)
   // resolves whether it got one and clears the flag. A flag, not a count — a turn
   // with several graft calls is still one reply to the user.
@@ -176,6 +187,11 @@ export function latestSession(dir: string): SessionSummary | null {
  * billing (Copilot, Kilo, Codex, Cursor). Null when neither exists, so the
  * caller renders the token count alone.
  *
+ * The fallback goes through {@link currentModel}, not the config file alone: a
+ * host that names its model only in `--agent-model` or `GRAFT_AGENT_MODEL`
+ * would otherwise be priced at nothing while the savings ledger — which does
+ * read them — prices the same tokens fine.
+ *
  * `latestSession` rather than a session id because the callers are CLI and MCP
  * processes answering one query: they know the repo, never the host's session
  * id. The rate belongs to the repo's current session, which is the one whose
@@ -183,7 +199,7 @@ export function latestSession(dir: string): SessionSummary | null {
  */
 export function sessionInputRate(dir: string): InputRate | null {
   const s = latestSession(dir);
-  return blendedRate(s?.inputCostMicros, s?.inputTokensBilled) ?? declaredRate(readDeclaredModel(dir));
+  return blendedRate(s?.inputCostMicros, s?.inputTokensBilled) ?? declaredRate(currentModel(dir, s?.model));
 }
 
 export function formatSessionStats(s: SessionSummary | null, rate: InputRate | null = null): string {

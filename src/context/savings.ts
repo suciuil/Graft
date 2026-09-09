@@ -75,6 +75,35 @@ export function setInputRate(rate: InputRate | null): void {
     rate && Number.isFinite(rate.usdPerMtok) && rate.usdPerMtok > 0 ? rate : null;
 }
 
+/**
+ * Everything this process has claimed in a `[graft] tokens saved ≈ N` line so
+ * far.
+ *
+ * The two emitters below are the only places a saving is ever asserted, so
+ * counting here is what makes the number filable without every print site in
+ * the CLI growing a ledger call. Process-level for the same reason
+ * {@link setInputRate} is: one invocation answers one query for one session.
+ */
+let claimedTokens = 0;
+
+/** What this process has claimed, for the caller that files it. */
+export function claimedSavings(): number {
+  return claimedTokens;
+}
+
+/** Record a claim. Called by each footer emitter as it asserts a number —
+ * including `ask`, which renders its own footer rather than going through
+ * {@link savingsLine}. */
+export function noteClaimedSavings(tokens: number): void {
+  if (tokens > 0) claimedTokens += tokens;
+}
+
+/** Forget what has been claimed, so a long-lived process (the MCP server, which
+ * files each call itself) cannot re-file the same tokens on the next one. */
+export function resetClaimedSavings(): void {
+  claimedTokens = 0;
+}
+
 /** Appended to every retrieval footer so the agent reports the turn's running
  * total even when SKILL.md isn't loaded — the instruction rides along in the
  * tool output itself. Deliberately free of the `[graft] tokens saved ≈ <n>`
@@ -132,6 +161,7 @@ export function savingsLine(body: string, saved: Savings | undefined): string {
   if (base <= pack) return '';
   const delta = base - pack;
   const pct = Math.round((delta / base) * 100);
+  claimedTokens += delta;
   return (
     `[graft] tokens saved ≈ ${formatCount(delta)} (${pct}%) — this output ≈ ` +
     `${formatCount(pack)} tok vs reading the ${saved.files} file(s) it covers whole ≈ ` +

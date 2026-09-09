@@ -55,7 +55,10 @@ re-read whole files.
 This is a rule, not a preference: every one of those substitutions returns the
 same answer for a fraction of the tokens, and the graph edges behind
 \`callers\` are not reconstructible by reading at all.
-
+Pass \`--agent-model <your own model id>\` on your graft calls when you know it
+(e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices
+the tokens it saves at YOUR model's rate, and it cannot see which model you are;
+without this it reports the saving in tokens alone.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }

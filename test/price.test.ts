@@ -44,6 +44,16 @@ test('inputUsdPerMtok: the non-Anthropic families are priced at short-context li
   assert.equal(inputUsdPerMtok('gpt-5.6-cyber'), null);
 });
 
+test('inputUsdPerMtok: a provider routing prefix names the server, not the model', () => {
+  assert.equal(inputUsdPerMtok('anthropic/claude-opus-5'), 5);
+  assert.equal(inputUsdPerMtok('copilot/gpt-5.6-terra'), 2);
+  assert.equal(inputUsdPerMtok('azure/eastus/gpt-5.6-luna'), 0.2, 'a multi-segment route reduces too');
+  assert.equal(inputUsdPerMtok('  google/gemini-3.8-flash  '), 0.75, 'surrounding whitespace is not an id');
+  // Stripping is prefix-only: it must not rescue a model this table cannot price.
+  assert.equal(inputUsdPerMtok('anthropic/some-future-model'), null);
+  assert.equal(inputUsdPerMtok('claude-opus-5/'), null, 'nothing after the slash is no model at all');
+});
+
 test('turnInputCostMicros: fresh tokens cost list price', () => {
   // 1M fresh input tokens on a $5/Mtok model = $5.00 = 5,000,000 micro-dollars.
   const cost = turnInputCostMicros({

@@ -11,8 +11,9 @@ import { ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/ref
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setInputRate } from '../context/savings.js';
-import { sessionInputRate } from '../claude/session-metrics.js';
+import { withSavings, setInputRate, sumSavingsFooters, resetClaimedSavings } from '../context/savings.js';
+import { latestSession, sessionInputRate } from '../claude/session-metrics.js';
+import { currentModel, recordSavedTokens } from '../claude/ledger.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
 import { buildRepoMap, formatRepoMap } from '../graph/map.js';
@@ -237,10 +238,34 @@ export async function callTool(
     }
     const fed = ws ? await callWorkspaceTool(root, dirOverride, name, args) : null;
     const res = fed ?? (await callSingleTool(root, name, args, dirOverride));
+    recordMcpSavings(root, res);
     return note ? { ...res, text: `${note}\n${res.text}` } : res;
   } catch (err) {
     return { text: err instanceof Error ? err.message : String(err), isError: true };
   }
+}
+
+/**
+ * File this call's saving in the repo's lifetime ledger, the one `graft savings`
+ * reads back.
+ *
+ * Here rather than in the hooks because this is the only place every host
+ * reaches: Copilot, Kilo and Codex expose no hook surface at all, so a saving
+ * they made would otherwise never be recorded. The hooks skip MCP calls for the
+ * ledger (`viaMcp` in session-metrics.ts) precisely so the two can't both count
+ * the same call.
+ *
+ * The footer we just wrote is the source of the number, so no host cooperation
+ * is needed to read it back.
+ */
+function recordMcpSavings(root: string, res: { text: string; isError: boolean }): void {
+  // This server outlives every call it serves, so the CLI's process-level
+  // accumulator would carry each call's tokens into the next one. Cleared here
+  // because this function is the point past which they are already filed.
+  resetClaimedSavings();
+  if (res.isError) return;
+  const saved = sumSavingsFooters(res.text);
+  if (saved > 0) recordSavedTokens(root, currentModel(root, latestSession(root)?.model), saved);
 }
 
 /** The single-graph path: every tool, answered from one repo's graph. */
