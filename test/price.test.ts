@@ -22,12 +22,19 @@ import {
 
 test('inputUsdPerMtok: known families are priced, anything else is null', () => {
   assert.equal(inputUsdPerMtok('claude-opus-5'), 5);
+  assert.equal(inputUsdPerMtok('claude-opus-5-0'), 5);
   assert.equal(inputUsdPerMtok('claude-opus-4-8'), 5);
+  assert.equal(inputUsdPerMtok('claude-opus-4-7'), 5);
+  assert.equal(inputUsdPerMtok('claude-opus-4-6'), 5);
+  assert.equal(inputUsdPerMtok('claude-opus-4-5'), 5);
   assert.equal(inputUsdPerMtok('claude-sonnet-5'), 2);
+  assert.equal(inputUsdPerMtok('claude-sonnet-5-0'), 2);
   assert.equal(inputUsdPerMtok('claude-sonnet-4-6'), 3);
+  assert.equal(inputUsdPerMtok('claude-sonnet-4-5'), 3);
+  assert.equal(inputUsdPerMtok('claude-3-7-sonnet'), 3);
   assert.equal(inputUsdPerMtok('claude-haiku-4-5'), 1);
   assert.equal(inputUsdPerMtok('claude-fable-5-1'), 10);
-  assert.equal(inputUsdPerMtok('gpt-5'), null);
+  assert.equal(inputUsdPerMtok('some-future-model'), null);
   assert.equal(inputUsdPerMtok(undefined), null);
 });
 
@@ -35,12 +42,49 @@ test('inputUsdPerMtok: the non-Anthropic families are priced at short-context li
   assert.equal(inputUsdPerMtok('gpt-5.6-sol'), 4);
   assert.equal(inputUsdPerMtok('gpt-5.6-terra'), 2);
   assert.equal(inputUsdPerMtok('gpt-5.6-luna'), 0.2);
-  assert.equal(inputUsdPerMtok('gemini-3.7-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gpt-5.5'), 5);
+  assert.equal(inputUsdPerMtok('gpt-5.4'), 2.5);
+  assert.equal(inputUsdPerMtok('gpt-5.4-mini'), 0.75);
+  assert.equal(inputUsdPerMtok('gpt-5.4-nano'), 0.2);
+  assert.equal(inputUsdPerMtok('gpt-5.3-codex'), 1.75);
+  assert.equal(inputUsdPerMtok('gpt-5.2'), 1.75);
+  assert.equal(inputUsdPerMtok('gpt-5.2-chat'), 1.75);
+  assert.equal(inputUsdPerMtok('gpt-5.2-codex'), 1.75);
+  assert.equal(inputUsdPerMtok('gpt-5.1'), 1.25);
+  assert.equal(inputUsdPerMtok('gpt-5.1-chat'), 1.25);
+  assert.equal(inputUsdPerMtok('gpt-5'), 1.25);
+  assert.equal(inputUsdPerMtok('gpt-5-chat'), 1.25);
+  assert.equal(inputUsdPerMtok('gpt-5-mini'), 0.25);
+  assert.equal(inputUsdPerMtok('gpt-5-nano'), 0.05);
+  assert.equal(inputUsdPerMtok('gpt-4o-mini'), 0.15);
+  assert.equal(inputUsdPerMtok('gpt-35-turbo'), 0.5);
+  assert.equal(inputUsdPerMtok('gpt-o3-mini'), 1.1);
+
   assert.equal(inputUsdPerMtok('gemini-3.8-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3.7-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3.6-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3.5-flash'), 1.5);
+  assert.equal(inputUsdPerMtok('gemini-3.5-flash-lite'), 0.3);
+  assert.equal(inputUsdPerMtok('gemini-3.1-flash-lite'), 0.25);
+  assert.equal(inputUsdPerMtok('gemini-2.5-pro'), 1.25);
+  assert.equal(inputUsdPerMtok('gemini-2.5-flash'), 0.3);
+  assert.equal(inputUsdPerMtok('gemini-2.5-flash-lite'), 0.1);
+
+  assert.equal(inputUsdPerMtok('grok-4.3-2'), 1.25);
+  assert.equal(inputUsdPerMtok('grok-4-fast-non-reasoning'), 0.2);
+  assert.equal(inputUsdPerMtok('grok-3'), 2);
+
+  assert.equal(inputUsdPerMtok('DeepSeek-V4-Pro'), 1.32);
+  assert.equal(inputUsdPerMtok('DeepSeek-V4-Flash'), 0.44);
+  assert.equal(inputUsdPerMtok('DeepSeek-V3.2'), 0.27);
+
+  assert.equal(inputUsdPerMtok('Kimi-K2.6'), 0.8);
+  assert.equal(inputUsdPerMtok('Kimi-K2-Thinking'), 0.6);
+
   // The `.` in a version is escaped, so a neighbouring family cannot be priced
   // by a pattern that was never written for it.
   assert.equal(inputUsdPerMtok('gpt-546-sol'), null);
-  assert.equal(inputUsdPerMtok('gemini-3.6-flash'), null);
+  assert.equal(inputUsdPerMtok('gemini-99-flash'), null);
   assert.equal(inputUsdPerMtok('gpt-5.6-cyber'), null);
 });
 

@@ -16,10 +16,12 @@ import {
   stampPath,
   updateCachePath,
   wiredHostIds,
+  wiringContentHash,
   wiringOpts,
   writeStamp,
   type WiringOpts,
 } from '../src/upkeep.js';
+import { writeJsonAtomic } from '../src/util/state.js';
 import { tmpRepo } from './helpers.js';
 
 test('compareVersions orders releases numerically, not lexically', () => {
@@ -81,8 +83,14 @@ test('the stamp round-trips under graft/.cache/', () => {
     version: '1.2.3',
     hosts: ['claude', 'cursor'], // sorted, so two inits in different picker order match
     opts: { global: true, mcp: true, hooks: true, statusline: true },
+    content: wiringContentHash(),
     at: '2026-01-01T00:00:00.000Z',
   });
+});
+
+test('wiringContentHash is stable across calls and shaped like a short digest', () => {
+  assert.match(wiringContentHash(), /^[0-9a-f]{16}$/);
+  assert.equal(wiringContentHash(), wiringContentHash(), 'same code, same hash — else it refreshes every session');
 });
 
 test('wiringOpts defaults an older stamp to what plain `graft init` does', () => {
@@ -178,6 +186,41 @@ test('reconcileWiring rewrites once on a version mismatch, then no-ops', () => {
   assert.equal(readStamp(repo)?.version, '2.1.0');
 });
 
+test('reconcileWiring rewrites when the instructions changed under the same version', () => {
+  // The bug this closes: instruction text is edited far more often than the
+  // version is bumped, and a version-only gate leaves every already-wired repo
+  // on the old prompt forever, silently.
+  const repo = tmpRepo('upkeep-content-drift');
+  const calls: string[][] = [];
+  const rewrite = (_r: string, hosts: string[]) => { calls.push(hosts); };
+  const wired = () => ['copilot', 'kilo'];
+
+  reconcileWiring(repo, '2.0.0', { wired, rewrite });
+  assert.equal(calls.length, 1);
+  assert.equal(reconcileWiring(repo, '2.0.0', { wired, rewrite }), null, 'settled');
+
+  // Simulate an instruction edit landing without a version bump.
+  const stamp = readStamp(repo);
+  assert.ok(stamp);
+  writeJsonAtomic(stampPath(repo), { ...stamp, content: 'deadbeefdeadbeef' });
+
+  const drifted = reconcileWiring(repo, '2.0.0', { wired, rewrite });
+  assert.deepEqual(drifted, { from: '2.0.0', to: '2.0.0', hosts: ['copilot', 'kilo'], global: true });
+  assert.equal(calls.length, 2, 'the stale prompt is rewritten');
+  assert.equal(readStamp(repo)?.content, wiringContentHash(), 'and the stamp catches up');
+  assert.equal(reconcileWiring(repo, '2.0.0', { wired, rewrite }), null, 'then settles again');
+});
+
+test('a stamp predating content tracking earns exactly one refresh', () => {
+  const repo = tmpRepo('upkeep-legacy-stamp');
+  writeJsonAtomic(stampPath(repo), { version: '2.0.0', hosts: ['copilot'], at: 'x' });
+  let calls = 0;
+  const deps = { wired: () => ['copilot'], rewrite: () => { calls++; } };
+  assert.ok(reconcileWiring(repo, '2.0.0', deps), 'no fingerprint means the text is unknown, not current');
+  assert.equal(calls, 1);
+  assert.equal(reconcileWiring(repo, '2.0.0', deps), null, 'and never again');
+});
+
 test('reconcileWiring restores a host whose file went missing', () => {
   // The whole point of a refresh is putting the wiring back. Detecting hosts from
   // disk alone would drop the one host whose file is gone — the one that needs it.
@@ -227,6 +270,13 @@ test('formatWiringRefresh names the versions and the hosts touched', () => {
   assert.match(line, /claude, cursor/);
   // Repo-local hosts only: nothing outside the repo moved, so don't claim it did.
   assert.doesNotMatch(line, /~\/\.codex/);
+});
+
+test('formatWiringRefresh reads as a reason, not a bug, when the version did not move', () => {
+  const line = formatWiringRefresh({ from: '0.17.0', to: '0.17.0', hosts: ['copilot'], global: true });
+  assert.ok(line);
+  assert.match(line, /instructions changed in 0\.17\.0/);
+  assert.doesNotMatch(line, /written by/);
 });
 
 test('formatWiringRefresh discloses machine-wide writes', () => {

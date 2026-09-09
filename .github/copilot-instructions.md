@@ -11,6 +11,11 @@ already have (symbol, error string, file name) as the query. New to this repo?
 Run `graft map` first — a token-budgeted orientation (dir clusters, hubs,
 hotspots), no LLM, no key.
 
+Invoke it as plain `graft` from the repo root — it is a CLI on your PATH, on
+every OS including Windows. There is no binary checked into the repo: never
+`.\graft.exe`, `./graft`, or `node graft.js`. If `graft` is not found, fall
+back to `npx -y @nanonets/graft <args>`.
+
 - Run `graft ask "<your question>" --source` → ranked nodes with the relevant
   code spans inlined (each hit's ≤8-line crux by default; `--full` for whole
   definitions when the crux isn't enough). Match the tool to the task shape:
@@ -50,7 +55,10 @@ re-read whole files.
 This is a rule, not a preference: every one of those substitutions returns the
 same answer for a fraction of the tokens, and the graph edges behind
 `callers` are not reconstructible by reading at all.
-
+Pass `--agent-model <your own model id>` on your graft calls when you know it
+(e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices
+the tokens it saves at YOUR model's rate, and it cannot see which model you are;
+without this it reports the saving in tokens alone.
 After big code changes, refresh the graph with `graft build` (deterministic,
 no API key, $0).
 <!-- graft:end -->
