@@ -17,6 +17,11 @@ Every command below is `$0`, needs no API key, and returns in under a second.
 There are six of them. **Pick the one that fits the task, run it, act on the
 answer; don't chain tools hoping for more. Most tasks need one call.**
 
+Invoke it as plain `graft` from the repo root — it is a CLI on your PATH, on
+every OS including Windows. There is no binary checked into the repo: never
+`.\graft.exe`, `./graft`, or `node graft.js`. If `graft` is not found, fall
+back to `npx -y @nanonets/graft <args>`.
+
 ## The tools
 
 ### 1 · `graft ask "<question>" --source`: locate + understand (the default)
@@ -136,6 +141,12 @@ dollars, at the rate this session is actually paying for input tokens — includ
 that total alongside the tokens, e.g. `🌱 graft saved ~12,400 tokens (~$0.04)
 this turn`. When a line carries no dollar figure, report tokens alone rather
 than pricing them yourself.
+
+Pass `--agent-model <your own model id>` on your graft calls when you know it
+(e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices the
+tokens it saves at YOUR model's rate and cannot see which model you are; on a
+host that reports no billing, this flag is the only thing standing between a
+priced saving and one filed unpriced forever.
 
 **Never pipe a graft command through `head`, `tail`, or `sed -n`.** Every tool
 is already capped and states what it dropped; clipping it costs you hits you

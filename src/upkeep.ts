@@ -12,8 +12,11 @@
  *      rule files INTO the repo. `npm i -g` replaces the binary but touches none
  *      of them, so a repo wired by 0.7 keeps 0.7's prompts and 0.7's hook
  *      timeouts forever (see the comment on `promptAskTimeout`, which exists
- *      only to work around exactly this). A version stamp written next to the
- *      graph lets any entry point notice the skew and re-run the writes.
+ *      only to work around exactly this). A stamp written next to the graph
+ *      records both the version that wrote the wiring and a fingerprint of the
+ *      instruction text it wrote, so any entry point notices the skew — an
+ *      upgrade, or an instruction edit that never bumped the version — and
+ *      re-runs the writes.
  *
  * Everything here is fail-soft by construction: it runs inside hooks and inside
  * the MCP server's boot path, where a throw is a broken session, and it must
@@ -26,6 +29,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readJson, writeJsonAtomic, cacheDir } from './util/state.js';
@@ -190,7 +194,36 @@ export interface WiringStamp {
   hosts: string[];
   /** The init flags to replay — see {@link WiringOpts}. */
   opts?: Partial<WiringOpts>;
+  /** Fingerprint of the instruction text that was written — see
+   * {@link wiringContentHash}. Absent on stamps written before content was
+   * tracked, which reads as "unknown" and earns one idempotent refresh. */
+  content?: string;
   at: string;
+}
+
+/**
+ * A fingerprint of the text `init` writes into a repo: every host's rendered
+ * instruction, rule or skill file.
+ *
+ * The version alone cannot gate a refresh. Instruction content is edited far
+ * more often than the version is bumped — on a dev checkout it changes many
+ * times within one — and a repo wired before such an edit keeps the stale prompt
+ * forever with nothing to say so. That is not hypothetical: the `--agent-model`
+ * line that tells an agent to name its own model (and without which every saving
+ * is filed unpriced under `unknown`, see `claude/ledger.ts`) shipped in
+ * `hosts/instructions.ts` and never reached a single already-wired repo.
+ *
+ * Hashing what WOULD be written closes it for every host at once, rather than
+ * per-host — the renderers all draw on one canonical body, so a change to it is
+ * a change to all of them. Host ids are folded in as well, so adding a host with
+ * text identical to an existing one still moves the hash.
+ */
+export function wiringContentHash(): string {
+  const h = createHash('sha256');
+  for (const host of [...HOSTS].sort((a, b) => a.id.localeCompare(b.id))) {
+    h.update(`${host.id}\0${host.content()}\n`);
+  }
+  return h.digest('hex').slice(0, 16);
 }
 
 /** Under `graft/.cache/`, beside the other derived state: git-ignored, per-clone,
@@ -215,6 +248,9 @@ export function writeStamp(
       version,
       hosts: [...hosts].sort(),
       opts: { ...DEFAULT_WIRING_OPTS, ...opts },
+      // Computed here rather than passed in: every caller has just written this
+      // exact text, so there is no second source for it to drift from.
+      content: wiringContentHash(),
       at,
     } satisfies WiringStamp);
   } catch { /* unwritable graft/ — a refresh will just be retried next session */ }
@@ -252,7 +288,8 @@ export interface WiringRefresh {
 }
 
 /**
- * Re-run init's writes when the stamp and the running binary disagree.
+ * Re-run init's writes when the stamp and the running binary disagree — on the
+ * version, or on the instruction text that version renders.
  *
  * Deliberately narrow: it refreshes the hosts already wired, replays the flags
  * that init was given, never builds the graph (this runs at session start — a
@@ -269,7 +306,8 @@ export function reconcileWiring(
 ): WiringRefresh | null {
   try {
     const stamp = readStamp(repo);
-    if (stamp && stamp.version === current) return null;
+    const content = wiringContentHash();
+    if (stamp && stamp.version === current && stamp.content === content) return null;
     // The stamp is the record of *intent* (what the picker chose); disk is the
     // fallback for repos wired before stamps existed. Union, not just disk:
     // otherwise a host whose rule file went missing — deleted by hand, lost to a
@@ -292,5 +330,8 @@ export function formatWiringRefresh(r: WiringRefresh | null): string | null {
   // Name the out-of-repo writes explicitly: those are machine-wide and shared by
   // every repo, so a user seeing this line should not have to guess what moved.
   const scope = r.global && r.hosts.includes('agents') ? " (including this machine's ~/.codex config)" : '';
-  return `· graft refreshed this repo's agent wiring${scope} (written by ${r.from}, now ${r.to}): ${r.hosts.join(', ')}.`;
+  // Same version on both sides means the instruction text moved under it, and
+  // "written by 0.17.0, now 0.17.0" would read as a bug rather than a reason.
+  const why = r.from === r.to ? `instructions changed in ${r.to}` : `written by ${r.from}, now ${r.to}`;
+  return `· graft refreshed this repo's agent wiring${scope} (${why}): ${r.hosts.join(', ')}.`;
 }

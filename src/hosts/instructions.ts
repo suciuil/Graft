@@ -16,6 +16,11 @@ already have (symbol, error string, file name) as the query. New to this repo?
 Run \`graft map\` first — a token-budgeted orientation (dir clusters, hubs,
 hotspots), no LLM, no key.
 
+Invoke it as plain \`graft\` from the repo root — it is a CLI on your PATH, on
+every OS including Windows. There is no binary checked into the repo: never
+\`.\\graft.exe\`, \`./graft\`, or \`node graft.js\`. If \`graft\` is not found, fall
+back to \`npx -y @nanonets/graft <args>\`.
+
 - Run \`graft ask "<your question>" --source\` → ranked nodes with the relevant
   code spans inlined (each hit's ≤8-line crux by default; \`--full\` for whole
   definitions when the crux isn't enough). Match the tool to the task shape:
