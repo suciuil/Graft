@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Saved tokens are priced at the coding agent's model, never at `GRAFT_MODEL`.**
+  That variable names the model graft's own `--deep` enrichment pass calls — in
+  practice a cheap summariser behind a different gateway than the agent the user
+  is talking to — so pricing a saving with it was off by whatever the two list
+  rates differ by, silently and in either direction. The agent's model now comes
+  from the host's transcript when it stamps one, else `--agent-model <id>` (a new
+  global flag the agent passes to name itself), else `GRAFT_AGENT_MODEL`, else
+  `model` in `.graft/config.json`. As before, nothing named means the saving is
+  reported in tokens alone rather than priced at a guess. Hosts that stamp a
+  model — Claude Code — are unaffected; a repo that was relying on `GRAFT_MODEL`
+  to price should set `GRAFT_AGENT_MODEL` or the config field instead.
+
+### Fixed
+
+- **`graft savings` counts what the CLI saved.** The ledger had two writers —
+  the Claude Code hooks and the MCP server — so a host that drives graft from a
+  *terminal*, which is how Copilot and Kilo reach it when the MCP server isn't
+  wired, printed a savings footer on every call and filed none of them. `graft
+  savings` was permanently empty for those users. Each retrieval command now
+  files what it claimed, once, on the way out; the MCP server still files per
+  call and clears the accumulator so its long-lived process cannot carry one
+  call's tokens into the next.
+- **A gateway-routed model id is priced like the model it names.** The list-price
+  patterns are anchored, so a host reporting `anthropic/claude-opus-5` or
+  `azure/eastus/gpt-5.6-luna` — the shape Kilo, Copilot and any LiteLLM-style
+  proxy use — matched nothing and reported tokens without dollars. The routing
+  prefix says who serves the model, not which one it is, so it is dropped before
+  the lookup. Savings are still filed under the id the host reported, leaving two
+  routes to the same model distinguishable in `graft savings`.
+
 ## 0.17.0
 
 ### Added

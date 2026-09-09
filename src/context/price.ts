@@ -40,10 +40,20 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
 
 /** List input price for a model id, or null when we don't know it — a model
  * released after this table was written, or a host reporting something else
- * entirely. Null propagates all the way to "render tokens only". */
+ * entirely. Null propagates all the way to "render tokens only".
+ *
+ * Any provider routing prefix is dropped before matching: a gateway host names
+ * the model `anthropic/claude-opus-5` or `azure/eastus/gpt-5.6-luna`, where
+ * everything up to the last `/` says who SERVES the model rather than which one
+ * it is — and the table's patterns are anchored, so the prefix would otherwise
+ * turn a priced model into an unpriced one. Only the lookup normalises; callers
+ * keep filing savings under the id the host reported, so two routes to the same
+ * model stay distinguishable in the ledger. */
 export function inputUsdPerMtok(model: unknown): number | null {
   if (typeof model !== 'string') return null;
-  for (const [pattern, usd] of INPUT_USD_PER_MTOK) if (pattern.test(model)) return usd;
+  const named = model.trim();
+  const id = named.slice(named.lastIndexOf('/') + 1);
+  for (const [pattern, usd] of INPUT_USD_PER_MTOK) if (pattern.test(id)) return usd;
   return null;
 }
 
@@ -126,7 +136,8 @@ export const RATE_ENV = 'GRAFT_INPUT_USD_PER_MTOK';
  * Kilo expose no billing surface whatsoever — so for them the measured path can
  * never produce a number. Declaring one is the only honest alternative to
  * silence, and it stays honest because the user chose it: the env var outright,
- * or a `model` in `.graft/config.json` that this table prices.
+ * or an agent model — `--agent-model`, `GRAFT_AGENT_MODEL`, or `model` in
+ * `.graft/config.json` — that this table prices.
  *
  * A malformed env value yields null rather than falling through to the model.
  * Silently pricing at a different number than the one that was typed is exactly

@@ -17,7 +17,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import matter from "gray-matter";
 import { contextDirFor } from "../context/node-file.js";
-import { withSavings, savingsFor, formatCount, savingsTurnNudge, type Savings } from "../context/savings.js";
+import { withSavings, savingsFor, formatCount, savingsTurnNudge, noteClaimedSavings, type Savings } from "../context/savings.js";
 import { loadGraphCached, loadAskIndexCached } from "../graph/load.js";
 import {
   assertPrefixIndexed,
@@ -1531,6 +1531,7 @@ function askSavingsLine(r: AskResult, body: string): string {
   if (base <= pack) return ""; // no saving to claim (tiny files); stay quiet
   const saved = base - pack;
   const pct = Math.round((saved / base) * 100);
+  noteClaimedSavings(saved);
   return (
     `[graft] tokens saved ≈ ${formatCount(saved)} (${pct}%) — this pack ≈ ` +
     `${formatCount(pack)} tok vs reading the ${r.saved.files} source file(s) whole ≈ ` +

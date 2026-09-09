@@ -111,7 +111,9 @@ export interface BuildConfig {
   /** The model this repo's agent runs, used ONLY to price saved tokens on a
    * host that reports no billing of its own (see `context/price.ts`). Never
    * consulted when the session has a measured rate, and never a default: absent
-   * means the dollar figure is omitted rather than estimated. */
+   * means the dollar figure is omitted rather than estimated. This is the
+   * CODING AGENT's model, not `GRAFT_MODEL` — that one names graft's own
+   * enrichment pass and prices nothing. */
   model?: string;
 }
 

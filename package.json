@@ -39,13 +39,15 @@
   "files": [
     "dist",
     "scripts",
+    "vendor/*/prebuilds/**",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm run build:grammars && npm run build:ts",
+    "build": "npm run build:grammars && npm run build:ts && npm run build:vendor",
     "build:grammars": "node scripts/build-grammars.mjs",
     "build:ts": "tsc -p tsconfig.json && tsc -p viewer/tsconfig.json && node scripts/build-viewer.mjs",
+    "build:vendor": "node scripts/vendor-grammars.mjs",
     "pack:bundle": "node scripts/pack-bundle.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "cli": "tsx src/cli.ts",

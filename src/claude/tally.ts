@@ -63,6 +63,19 @@ export interface TurnBilling {
   costMicros: number;
   /** Input tokens billed this turn, cached and fresh alike. */
   tokens: number;
+  /** The same spend split by model, unpriced models included. The ledger behind
+   * `graft savings` keys on the model, so it needs the split the blended rate
+   * throws away — and it wants the unpriced ones too, to name a model whose
+   * saving it can only report in tokens. */
+  models: ModelUsage[];
+}
+
+/** One model's share of a turn's input spend. `costMicros` is null when the
+ * model has no price, which is not the same as costing nothing. */
+export interface ModelUsage {
+  model: string;
+  costMicros: number | null;
+  tokens: number;
 }
 
 /** Read the last {@link TAIL_BYTES} of a file as utf8, dropping the leading
@@ -154,9 +167,12 @@ export function lastAssistantTurn(transcriptPath: unknown): AssistantTurn | null
  * summing the lines would bill the turn two or three times over.
  *
  * Null when there is nothing to bill — no transcript path (a host whose Stop
- * hook names none), an unreadable file, a turn whose entries carry no `usage`,
- * or a model with no price in {@link inputUsdPerMtok}. As everywhere in this
- * file, null means "not observed", never "zero".
+ * hook names none), an unreadable file, or a turn whose entries carry no
+ * `usage`. A turn whose every model is unpriced still returns: its `costMicros`
+ * and `tokens` are zero (the blended rate must not see it), but its `models`
+ * name the model, which is what lets `graft savings` report that model's saving
+ * in tokens rather than filing it under "unknown". As everywhere in this file,
+ * null means "not observed", never "zero".
  */
 export function lastTurnBilling(transcriptPath: unknown): TurnBilling | null {
   if (typeof transcriptPath !== 'string' || !transcriptPath) return null;
@@ -170,6 +186,7 @@ export function lastTurnBilling(transcriptPath: unknown): TurnBilling | null {
   }
 
   const seen = new Set<string>();
+  const byModel = new Map<string, ModelUsage>();
   let uuid: string | null = null;
   let costMicros = 0;
   let tokens = 0;
@@ -192,13 +209,18 @@ export function lastTurnBilling(transcriptPath: unknown): TurnBilling | null {
       cacheRead: Number(usage.cache_read_input_tokens) || 0,
     };
     const micros = turnInputCostMicros(turn);
-    // An unpriced model contributes neither cost nor tokens: leaving its tokens
-    // in the denominator alone would drag the blended rate toward zero and
-    // quietly under-report every saving after it.
+    const row = byModel.get(turn.model) ?? { model: turn.model, costMicros: micros === null ? null : 0, tokens: 0 };
+    row.tokens += turnInputTokens(turn);
+    if (micros !== null) row.costMicros = (row.costMicros ?? 0) + micros;
+    byModel.set(turn.model, row);
+    // An unpriced model contributes neither cost nor tokens to the SESSION
+    // totals: leaving its tokens in the denominator alone would drag the blended
+    // rate toward zero and quietly under-report every saving after it. Its own
+    // row above keeps the tokens, where they mislead nobody.
     if (micros === null) continue;
     costMicros += micros;
     tokens += turnInputTokens(turn);
   }
-  if (uuid === null || tokens === 0) return null;
-  return { uuid, costMicros, tokens };
+  if (uuid === null || byModel.size === 0) return null;
+  return { uuid, costMicros, tokens, models: [...byModel.values()] };
 }

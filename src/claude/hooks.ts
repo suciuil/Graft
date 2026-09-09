@@ -11,6 +11,7 @@ import { runUpkeep } from '../upkeep-run.js';
 import { runningVersion } from '../upkeep.js';
 import { flushClosedSessions, summarizeSession } from '../telemetry/sessions.js';
 import { hasSavingsTally, lastAssistantTurn, lastTurnBilling } from './tally.js';
+import { recordTurnBilling } from './ledger.js';
 import { handlePreTool } from './gate.js';
 import { scopeOf, scopesOfGraph } from '../graph/scopes.js';
 import { classifyToolUse, isMcpToolName, isGraftMcpTool, parseSavings, recordToolUse, type ToolKind } from './session-metrics.js';
@@ -252,8 +253,13 @@ export function lastFileScopeHint(dir: string, lastFile: string | null | undefin
  * nothing is written.
  */
 function handleToolUse(input: any, dir: string): void {
+  const toolName = String(input?.tool_name ?? '');
   recordToolUse(dir, input?.session_id || 'default',
-    { ...classifyAndScore(input?.tool_name, input?.tool_input?.command, () => input?.tool_response ?? input), host: 'claude-code' });
+    {
+      ...classifyAndScore(toolName, input?.tool_input?.command, () => input?.tool_response ?? input),
+      host: 'claude-code',
+      viaMcp: isMcpToolName(toolName) || isGraftMcpTool(toolName),
+    });
 }
 
 /**
@@ -306,7 +312,7 @@ function handleCursorMcp(input: any, dir: string): void {
   const toolName = String(input?.tool_name ?? '');
   if (!isGraftMcpTool(toolName)) return;
   const savedTokens = parseSavings(JSON.stringify(input?.result_json ?? input?.result ?? input ?? ''));
-  recordToolUse(dir, cursorSessionId(input), { kind: 'graft', savedTokens, host: 'cursor' });
+  recordToolUse(dir, cursorSessionId(input), { kind: 'graft', savedTokens, host: 'cursor', viaMcp: true });
 }
 
 /** Cursor keys a chat by `conversation_id` (its `session_id` equivalent). */
@@ -336,7 +342,12 @@ function sampleTurnCost(input: any, dir: string): void {
     s.inputCostMicros = (s.inputCostMicros ?? 0) + billing.costMicros;
     s.inputTokensBilled = (s.inputTokensBilled ?? 0) + billing.tokens;
     s.lastBillingUuid = billing.uuid;
+    // The model this turn ran, for the savings the NEXT turn records: mid-turn
+    // all a tool hook has is the output, never the model that asked for it.
+    const dominant = [...billing.models].sort((a, b) => b.tokens - a.tokens)[0]?.model;
+    if (dominant) s.model = dominant;
     writeSession(dir, id, s);
+    recordTurnBilling(dir, billing.models);
   } catch {
     // A billing estimate is never worth failing the graph sync over.
   }

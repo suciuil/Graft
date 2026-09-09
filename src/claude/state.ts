@@ -71,6 +71,11 @@ export interface SessionState {
    * are sampled on different turns: the tally only on graft turns, the cost on
    * every one. */
   lastBillingUuid?: string;
+  /** The model the host reported for the most recent turn it billed. Kept so a
+   * saving recorded mid-turn — when only the tool output is in hand — can still
+   * be filed under the model that was running (see `ledger.ts`). Absent on a
+   * host that names no model. */
+  model?: string;
   /** Set once this session has been rolled up into a `session_summary`
    * telemetry event, so a resumed or long-lived session is counted once.
    * A flag rather than deleting the file: the file still holds `lastQuery` and
