@@ -53,14 +53,32 @@ test("graft init scaffolds .graft/config.json listing every build option at its 
   }
 });
 
-test("re-running init never overwrites an edited config", () => {
+test("re-running init preserves edited values while topping up missing options", () => {
   const d = freshRepo("graft-init-keep-");
   try {
     runInitCli(d);
     writeFileSync(buildConfigPath(d), JSON.stringify({ excludeDirs: ["src/themes"] }, null, 2));
 
     runInitCli(d);
-    assert.deepEqual(readBuildConfig(d), { excludeDirs: ["src/themes"] }, "the user's list survives a re-init");
+    const cfg = readBuildConfig(d) as Record<string, unknown>;
+    assert.deepEqual(cfg.excludeDirs, ["src/themes"], "the user's list survives a re-init");
+    // A config written by an older graft must learn the options it predates —
+    // an absent `model` is why savings go unpriced on a no-billing host.
+    assert.equal(cfg.model, "", "a missing option is backfilled at its default");
+    assert.deepEqual(cfg.includeDirs, []);
+    assert.equal(cfg.followSubmodules, false);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("re-running init on a complete config rewrites nothing", () => {
+  const d = freshRepo("graft-init-noop-");
+  try {
+    runInitCli(d);
+    const before = readFileSync(buildConfigPath(d), "utf8");
+    runInitCli(d);
+    assert.equal(readFileSync(buildConfigPath(d), "utf8"), before);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

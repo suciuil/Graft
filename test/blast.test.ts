@@ -64,6 +64,10 @@ function builtRepo(): string {
     'import { total } from "./total.js";\nexport function report(xs: number[]): string {\n  return `sum=${total(xs)}`;\n}\n',
   );
   writeFileSync(join(d, "README.md"), "# fixture\n");
+  // No grammar claims `.txt`, in any build. README.md would not do: markdown is
+  // an OPTIONAL_EXTENSIONS grammar, so it IS indexed wherever it happens to be
+  // built, and an unindexed-file check seeded from it passes or fails by machine.
+  writeFileSync(join(d, "notes.txt"), "fixture notes\n");
 
   git(d, "init", "-b", "main");
   git(d, "config", "user.email", "test@example.com");
@@ -139,11 +143,11 @@ test("blast --base: diffs against the merge base, and reports the ranges it read
 
 test("blast: a changed file no parser claims is reported, never silently dropped", () => {
   const d = builtRepo();
-  writeFileSync(join(d, "README.md"), "# fixture\n\nnow with prose\n");
+  writeFileSync(join(d, "notes.txt"), "fixture notes\n\nnow with prose\n");
 
   const report = blastJson([d]);
 
-  assert.deepEqual(report.unindexed, ["README.md"]);
+  assert.deepEqual(report.unindexed, ["notes.txt"]);
   assert.deepEqual(report.impacted, [], "nothing to walk from an unindexed file");
 });
 

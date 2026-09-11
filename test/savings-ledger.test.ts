@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import {
   AGENT_MODEL_ENV,
   UNKNOWN_MODEL,
+  agentModel,
   aggregateSavings,
   currentModel,
   dayKey,
@@ -23,6 +24,7 @@ import {
   recordTurnBilling,
   setAgentModel,
 } from '../src/claude/ledger.js';
+import { writeBuildConfig } from '../src/util/state.js';
 import { recordToolUse } from '../src/claude/session-metrics.js';
 import { readSession } from '../src/claude/state.js';
 import { sumSavingsFooters } from '../src/context/savings.js';
@@ -97,12 +99,8 @@ test('turn billing is recorded per model, unpriced ones named but not costed', (
 
 test('recordToolUse files its saving in the ledger under today', () => {
   const d = fresh();
-  process.env[AGENT_MODEL_ENV] = 'claude-sonnet-5';
-  try {
-    recordToolUse(d, 's1', { kind: 'graft', savedTokens: 4200 });
-  } finally {
-    delete process.env[AGENT_MODEL_ENV];
-  }
+  writeBuildConfig(d, { model: 'claude-sonnet-5' });
+  recordToolUse(d, 's1', { kind: 'graft', savedTokens: 4200 });
   assert.equal(readLedger(d).days[dayKey()]['claude-sonnet-5'].savedTokens, 4200);
 });
 
@@ -115,14 +113,11 @@ test('an MCP call is left to the MCP server to file, so it is never counted twic
 
 test('an MCP call files its saving — the only path a hookless host has', async () => {
   const d = builtFixture('graft-ledger-mcp-');
+  // MCP is the hookless path: nothing stamps a model, so the config field is
+  // the only thing that can name one. That is scenario 3 in the wording rules.
+  writeBuildConfig(d, { model: 'gemini-3.8-flash' });
 
-  process.env[AGENT_MODEL_ENV] = 'gemini-3.8-flash';
-  let res: { text: string; isError: boolean };
-  try {
-    res = await callTool(d, 'graft_find_code', { query: 'add two numbers to a total' });
-  } finally {
-    delete process.env[AGENT_MODEL_ENV];
-  }
+  const res = await callTool(d, 'graft_find_code', { query: 'add two numbers to a total' });
 
   const claimed = sumSavingsFooters(res.text);
   assert.ok(claimed > 0, 'the call printed a savings footer to record');
@@ -131,15 +126,11 @@ test('an MCP call files its saving — the only path a hookless host has', async
 
 test('a second MCP call files its own tokens, never the first call\'s again', async () => {
   const d = builtFixture('graft-ledger-mcp2-');
+  writeBuildConfig(d, { model: 'gemini-3.8-flash' });
 
-  process.env[AGENT_MODEL_ENV] = 'gemini-3.8-flash';
   let both = 0;
-  try {
-    for (const query of ['add two numbers to a total', 'a running money total']) {
-      both += sumSavingsFooters((await callTool(d, 'graft_find_code', { query })).text);
-    }
-  } finally {
-    delete process.env[AGENT_MODEL_ENV];
+  for (const query of ['add two numbers to a total', 'a running money total']) {
+    both += sumSavingsFooters((await callTool(d, 'graft_find_code', { query })).text);
   }
 
   assert.ok(both > 0, 'both calls printed footers to record');
@@ -167,17 +158,48 @@ test('a plain CLI query files its saving — the only path a terminal-driven hos
 
 // ── which model a saving belongs to ───────────────────────────────────────
 
-test('currentModel prefers the measured stamp, then the env, then unknown', () => {
+test('currentModel prefers the measured stamp, then the config, then unknown', () => {
+  const d = fresh();
+  writeBuildConfig(d, { model: 'claude-sonnet-5' });
+  assert.equal(currentModel(d, 'claude-opus-5'), 'claude-opus-5', 'what the host actually ran wins');
+  assert.equal(currentModel(d, null), 'claude-sonnet-5');
+  assert.equal(currentModel(d, '  '), 'claude-sonnet-5', 'a blank stamp is not a model');
+  assert.equal(currentModel(fresh()), UNKNOWN_MODEL);
+});
+
+test('GRAFT_AGENT_MODEL no longer names the model a saving is priced at', () => {
+  // Retired: it was a second standing declaration, invisible in the repo and
+  // outranking the config file the user was actually looking at. One standing
+  // declaration is enough, and it should be the one that can be reviewed.
   const d = fresh();
   process.env[AGENT_MODEL_ENV] = 'claude-sonnet-5';
   try {
-    assert.equal(currentModel(d, 'claude-opus-5'), 'claude-opus-5', 'what the host actually ran wins');
-    assert.equal(currentModel(d, null), 'claude-sonnet-5');
-    assert.equal(currentModel(d, '  '), 'claude-sonnet-5', 'a blank stamp is not a model');
+    assert.equal(currentModel(d), UNKNOWN_MODEL, 'the env var is ignored outright');
+    writeBuildConfig(d, { model: 'claude-opus-5' });
+    assert.equal(currentModel(d), 'claude-opus-5', 'and never displaces the config');
   } finally {
     delete process.env[AGENT_MODEL_ENV];
   }
-  assert.equal(currentModel(d), UNKNOWN_MODEL);
+});
+
+test('agentModel reports how sure we are, which is what pricing branches on', () => {
+  const d = fresh();
+  assert.deepEqual(agentModel(d, 'claude-opus-5'), { id: 'claude-opus-5', confidence: 'certain' },
+    'a transcript stamp is the model that ran');
+
+  setAgentModel('claude-opus-5');
+  try {
+    assert.deepEqual(agentModel(d), { id: 'claude-opus-5', confidence: 'certain' },
+      'so is the agent naming itself on this call');
+  } finally {
+    setAgentModel(null);
+  }
+
+  writeBuildConfig(d, { model: 'claude-opus-5' });
+  assert.deepEqual(agentModel(d), { id: 'claude-opus-5', confidence: 'declared' },
+    'a config entry is the user\'s last word, not an observation');
+
+  assert.deepEqual(agentModel(fresh()), { id: null, confidence: 'unknown' });
 });
 
 test('graft\'s own LLM-pass model never prices the agent\'s saved tokens', () => {
@@ -192,9 +214,9 @@ test('graft\'s own LLM-pass model never prices the agent\'s saved tokens', () =>
   }
 });
 
-test('--agent-model outranks env and config, and a blank one clears it', () => {
+test('--agent-model outranks the config, and a blank one clears it', () => {
   const d = fresh();
-  process.env[AGENT_MODEL_ENV] = 'claude-sonnet-5';
+  writeBuildConfig(d, { model: 'claude-sonnet-5' });
   try {
     setAgentModel('claude-opus-5');
     assert.equal(currentModel(d), 'claude-opus-5', 'the agent naming itself on this call wins');
@@ -203,7 +225,6 @@ test('--agent-model outranks env and config, and a blank one clears it', () => {
     assert.equal(currentModel(d), 'claude-sonnet-5', 'a blank flag falls through rather than pricing nothing');
   } finally {
     setAgentModel(null);
-    delete process.env[AGENT_MODEL_ENV];
   }
 });
 

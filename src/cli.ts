@@ -17,6 +17,7 @@ import { buildGraphIfMissing, runInit } from "./claude/init.js";
 import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { KILO_RULE_REL } from "./hosts/kilo.js";
+import { formatModelPrices, readHostModels } from "./hosts/models.js";
 import { hostIds } from "./hosts/registry.js";
 import { contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
@@ -42,9 +43,9 @@ import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, runUpgrade } from "./cli-meta.js";
 import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
-import { latestSession, formatSessionStats, sessionInputRate } from "./claude/session-metrics.js";
+import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel } from "./claude/ledger.js";
-import { claimedSavings, setInputRate } from "./context/savings.js";
+import { claimedSavings, setPricing, setRepoRoot } from "./context/savings.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   errorCode,
@@ -83,7 +84,8 @@ function noteQuery(dir: string): string {
   queryNote.repo = dir;
   // Every retrieval command funnels through here, which makes it the one place
   // that can price this session's tokens before a formatter needs the number.
-  setInputRate(sessionInputRate(dir));
+  setPricing(sessionPricing(dir));
+  setRepoRoot(dir);
   return dir;
 }
 
@@ -745,6 +747,30 @@ program
   });
 
 program
+  .command("models")
+  .description(
+    "Price this session's saved tokens under every model your agent offers — the cross-check for when the declared model isn't the one you ran",
+  )
+  .argument(...DIR_ARG)
+  .option("--tokens <n>", "price this many saved tokens instead of the session's total")
+  .option("--json", "output the model list and values as JSON")
+  .action((dirArg: string | undefined, opts: { tokens?: string; json?: boolean }) => {
+    const dir = queryRoot(dirArg);
+    const parsed = opts.tokens === undefined ? NaN : Number(opts.tokens);
+    if (opts.tokens !== undefined && (!Number.isFinite(parsed) || parsed < 0)) {
+      console.error(`✗ --tokens takes a non-negative number, got "${opts.tokens}"`);
+      process.exit(1);
+    }
+    const saved = Number.isFinite(parsed) ? parsed : latestSession(dir)?.savedTokens ?? 0;
+    const host = readHostModels();
+    if (opts.json) {
+      console.log(JSON.stringify({ savedTokens: saved, ...(host ?? { host: null, path: null, models: [] }) }, null, 2));
+      return;
+    }
+    console.log(formatModelPrices(host, saved));
+  });
+
+program
   .command("savings")
   .description(
     "Cumulated savings for this repo, per model — all time, or for one period: `graft savings 2026`, `graft savings 2026-09`, `graft savings 2026-09-08`",
@@ -1168,8 +1194,9 @@ function wireTarget(
     const wantStatusline = statuslineWanted({ statusline: opts.statusline });
 
     // Before any agent wiring, and regardless of which agents were picked: the
-    // repo's own build settings. Written only when absent, so re-running init
-    // never discards an edited exclude list.
+    // repo's own build settings. Only absent keys are added, so re-running init
+    // never discards an edited exclude list, and a config written by an older
+    // graft still learns the options it predates.
     const configPath = ensureDefaultBuildConfig(repo);
     if (configPath) console.error(`✓ wrote ${configPath}`);
 

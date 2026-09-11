@@ -136,17 +136,22 @@ tally summing those numbers across every graft call you made, e.g.
 skip it. This is the per-turn figure; the statusline carries the running
 session total.
 
-Once a turn has been billed, each line also states what that call was worth in
-dollars, at the rate this session is actually paying for input tokens — include
-that total alongside the tokens, e.g. `🌱 graft saved ~12,400 tokens (~$0.04)
-this turn`. When a line carries no dollar figure, report tokens alone rather
-than pricing them yourself.
+Each line also carries an example tally in quotes, ending in `this turn`. Use
+its parenthetical **verbatim**, with `~$X` replaced by the summed dollar value
+and `~N` by the summed tokens — it states which model and rate the figure rests
+on, e.g. `🌱 graft saved ~12,400 tokens (~$0.04 at $5/input mtok for
+claude-opus-5) this turn`. Never price tokens yourself and never simplify that
+parenthetical away: it is the only place the user learns what their saving was
+priced at, and whether the price was measured, listed, or assumed. When it says
+the saving cannot be valued in dollars, relay that reason too — it names the
+exact thing the user would have to set to get a figure.
 
 Pass `--agent-model <your own model id>` on your graft calls when you know it
 (e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices the
 tokens it saves at YOUR model's rate and cannot see which model you are; on a
 host that reports no billing, this flag is the only thing standing between a
-priced saving and one filed unpriced forever.
+priced saving and one filed unpriced forever. Can't pass flags (an MCP host)?
+Set `model` in `.graft/config.json` instead.
 
 **Never pipe a graft command through `head`, `tail`, or `sed -n`.** Every tool
 is already capped and states what it dropped; clipping it costs you hits you

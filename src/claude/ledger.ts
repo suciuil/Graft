@@ -19,7 +19,16 @@
  */
 import { join } from 'node:path';
 import { cacheDir, readDeclaredModel, readJson, writeJsonAtomic } from '../util/state.js';
-import { blendedRate, declaredRate, formatDollars, valueSaved, type InputRate } from '../context/price.js';
+import {
+  NO_MODEL,
+  blendedRate,
+  declaredRate,
+  formatDollars,
+  valueSaved,
+  type AgentModel,
+  type InputRate,
+  type ModelConfidence,
+} from '../context/price.js';
 import { formatCount } from '../context/savings.js';
 import type { ModelUsage } from './tally.js';
 
@@ -45,16 +54,21 @@ export interface SavingsLedger {
 export const UNKNOWN_MODEL = 'unknown';
 
 /**
- * The model the CODING AGENT is running — the one whose context window graft's
- * retrieval is keeping tokens out of, and therefore the only one whose price
- * says what a saving was worth.
+ * Retired. `GRAFT_AGENT_MODEL` no longer takes part in pricing a saving.
  *
- * Deliberately NOT `GRAFT_MODEL`. That names the model graft's own `--deep`
- * enrichment pass calls (see `ai/providers.ts`), which is routinely a cheap
- * summarisation model pointed at a different gateway than the agent the user is
- * actually talking to. Pricing an agent's saved tokens at graft's summariser
- * rate is off by whatever the two models' list prices differ by — silently, and
- * in whichever direction — so the two are kept apart.
+ * It was a standing declaration of the same kind as `model` in
+ * `.graft/config.json`, but invisible in the repo and outranking it — so a
+ * variable exported into a shell profile months ago silently out-voted the file
+ * the user was looking at while they wondered why the number was wrong. Two
+ * standing declarations is one too many, and the config file is the one that can
+ * be read, reviewed and corrected. What names the model now is either the host
+ * itself (a transcript stamp), the agent on the call (`--agent-model`), or that
+ * config field — and nothing else.
+ *
+ * The name is kept exported so an importer fails loudly at the type level rather
+ * than reading an env var nothing writes; see `resolveModel`.
+ *
+ * @deprecated Ignored since 0.18.0. Use `model` in `.graft/config.json`.
  */
 export const AGENT_MODEL_ENV = 'GRAFT_AGENT_MODEL';
 
@@ -81,24 +95,49 @@ export function dayKey(when: Date = new Date()): string {
   return `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
 }
 
+/** Where {@link resolveModel} got its answer. The distinction is about
+ * CONFIDENCE, not bookkeeping: 'stamped' and 'flag' name the model the turn
+ * actually ran, while 'config' is a standing declaration that goes stale the
+ * moment the user switches models in their host's UI. */
+export type ModelSource = 'stamped' | 'flag' | 'config' | 'none';
+
+/** How much a source is worth trusting, which is what every pricing surface
+ * actually branches on — the source name is only ever wording material. */
+function confidenceOf(source: ModelSource): ModelConfidence {
+  if (source === 'stamped' || source === 'flag') return 'certain';
+  return source === 'config' ? 'declared' : 'unknown';
+}
+
 /**
- * Which model a saving belongs to: the one the host's transcript reported for
- * the last turn, else the one this invocation named via `--agent-model`, else
- * `GRAFT_AGENT_MODEL`, else the `model` declared in `.graft/config.json`, else
- * unknown.
+ * Which model a saving belongs to, and how sure we are of it.
  *
  * Ordered by how close each source sits to the turn being priced. A stamped
  * model is what the session demonstrably ran; `--agent-model` is the agent
- * naming itself on this very call, which beats env and config because those are
- * standing declarations that go stale the moment the user switches models
- * mid-session — the exact case a per-call flag exists to cover.
+ * naming itself on this very call. Both are facts about THIS turn, which is why
+ * they rank as `certain` and nothing may override them. `model` in
+ * `.graft/config.json` is the fallback for the hosts that name nothing (Kilo and
+ * anything else reaching graft over MCP), and it is a standing declaration — the
+ * user's last word on the subject, not an observation — so it ranks `declared`
+ * and every surface says where it came from.
  */
+export function resolveModel(dir: string, stamped?: string | null): { model: string; source: ModelSource } {
+  if (stamped && stamped.trim()) return { model: stamped.trim(), source: 'stamped' };
+  if (invocationModel) return { model: invocationModel, source: 'flag' };
+  const declared = readDeclaredModel(dir);
+  return declared ? { model: declared, source: 'config' } : { model: UNKNOWN_MODEL, source: 'none' };
+}
+
+/** The model a saving belongs to in the shape the pricing layer wants: the id,
+ * or null when nothing named one, plus how sure we are. */
+export function agentModel(dir: string, stamped?: string | null): AgentModel {
+  const { model, source } = resolveModel(dir, stamped);
+  return source === 'none' ? NO_MODEL : { id: model, confidence: confidenceOf(source) };
+}
+
+/** The model alone, for the ledger key and every caller that does not care where
+ * it came from. */
 export function currentModel(dir: string, stamped?: string | null): string {
-  if (stamped && stamped.trim()) return stamped.trim();
-  if (invocationModel) return invocationModel;
-  const env = process.env[AGENT_MODEL_ENV];
-  if (env && env.trim()) return env.trim();
-  return readDeclaredModel(dir) ?? UNKNOWN_MODEL;
+  return resolveModel(dir, stamped).model;
 }
 
 /** One file for the whole history. Measured at ten years of daily use (7,300
@@ -209,9 +248,13 @@ export function aggregateSavings(ledger: SavingsLedger, period?: string | null):
   let measured = true;
   let unpricedTokens = 0;
   for (const [model, b] of byModel) {
-    // An unpriced or unknown model falls through to `declaredRate`, which prices
-    // nothing it doesn't recognise — the row then reports tokens alone.
-    const rate: InputRate | null = blendedRate(b.costMicros, b.tokensBilled) ?? declaredRate(model);
+    // An unpriced model falls through to `declaredRate`, which prices it from
+    // the env override or not at all — the row then reports tokens alone. The
+    // UNKNOWN_MODEL sentinel is passed as null rather than as its own name: it
+    // is a placeholder, not a model id, and naming it in a rate would put the
+    // word "unknown" where a reader expects a model.
+    const named = model === UNKNOWN_MODEL ? null : model;
+    const rate: InputRate | null = blendedRate(b.costMicros, b.tokensBilled) ?? declaredRate(named);
     const value = valueSaved(b.savedTokens, rate);
     models.push({ model, ...b, value });
     savedTokens += b.savedTokens;
