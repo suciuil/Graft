@@ -18,16 +18,15 @@
  * never priced at a guess (see `context/price.ts` for why).
  */
 import { join } from 'node:path';
-import { cacheDir, readDeclaredModel, readJson, writeJsonAtomic } from '../util/state.js';
+import { cacheDir, readJson, writeJsonAtomic } from '../util/state.js';
 import {
   NO_MODEL,
   blendedRate,
-  declaredRate,
   formatDollars,
+  listRate,
   valueSaved,
   type AgentModel,
   type InputRate,
-  type ModelConfidence,
 } from '../context/price.js';
 import { formatCount } from '../context/savings.js';
 import type { ModelUsage } from './tally.js';
@@ -95,43 +94,32 @@ export function dayKey(when: Date = new Date()): string {
   return `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
 }
 
-/** Where {@link resolveModel} got its answer. The distinction is about
- * CONFIDENCE, not bookkeeping: 'stamped' and 'flag' name the model the turn
- * actually ran, while 'config' is a standing declaration that goes stale the
- * moment the user switches models in their host's UI. */
-export type ModelSource = 'stamped' | 'flag' | 'config' | 'none';
-
-/** How much a source is worth trusting, which is what every pricing surface
- * actually branches on — the source name is only ever wording material. */
-function confidenceOf(source: ModelSource): ModelConfidence {
-  if (source === 'stamped' || source === 'flag') return 'certain';
-  return source === 'config' ? 'declared' : 'unknown';
-}
+/** Where {@link resolveModel} got its answer. Both real sources name the model
+ * the turn ACTUALLY ran — 'stamped' from the host's own transcript, 'flag' from
+ * the agent naming itself on this call. There is deliberately no third: a model
+ * standing in a config file is a guess that outlives its session, and pricing
+ * from one is what this design removed. */
+export type ModelSource = 'stamped' | 'flag' | 'none';
 
 /**
  * Which model a saving belongs to, and how sure we are of it.
  *
- * Ordered by how close each source sits to the turn being priced. A stamped
- * model is what the session demonstrably ran; `--agent-model` is the agent
- * naming itself on this very call. Both are facts about THIS turn, which is why
- * they rank as `certain` and nothing may override them. `model` in
- * `.graft/config.json` is the fallback for the hosts that name nothing (Kilo and
- * anything else reaching graft over MCP), and it is a standing declaration — the
- * user's last word on the subject, not an observation — so it ranks `declared`
- * and every surface says where it came from.
+ * A stamped model is what the session demonstrably ran; `--agent-model` is the
+ * agent naming itself on this very call. Both are facts about THIS turn, so both
+ * rank `certain`. Anything else is `none`: the saving is filed under
+ * {@link UNKNOWN_MODEL} and reported in tokens alone, never priced at a guess.
  */
 export function resolveModel(dir: string, stamped?: string | null): { model: string; source: ModelSource } {
   if (stamped && stamped.trim()) return { model: stamped.trim(), source: 'stamped' };
   if (invocationModel) return { model: invocationModel, source: 'flag' };
-  const declared = readDeclaredModel(dir);
-  return declared ? { model: declared, source: 'config' } : { model: UNKNOWN_MODEL, source: 'none' };
+  return { model: UNKNOWN_MODEL, source: 'none' };
 }
 
 /** The model a saving belongs to in the shape the pricing layer wants: the id,
  * or null when nothing named one, plus how sure we are. */
 export function agentModel(dir: string, stamped?: string | null): AgentModel {
   const { model, source } = resolveModel(dir, stamped);
-  return source === 'none' ? NO_MODEL : { id: model, confidence: confidenceOf(source) };
+  return source === 'none' ? NO_MODEL : { id: model, confidence: 'certain' };
 }
 
 /** The model alone, for the ledger key and every caller that does not care where
@@ -248,13 +236,13 @@ export function aggregateSavings(ledger: SavingsLedger, period?: string | null):
   let measured = true;
   let unpricedTokens = 0;
   for (const [model, b] of byModel) {
-    // An unpriced model falls through to `declaredRate`, which prices it from
-    // the env override or not at all — the row then reports tokens alone. The
-    // UNKNOWN_MODEL sentinel is passed as null rather than as its own name: it
-    // is a placeholder, not a model id, and naming it in a rate would put the
-    // word "unknown" where a reader expects a model.
-    const named = model === UNKNOWN_MODEL ? null : model;
-    const rate: InputRate | null = blendedRate(b.costMicros, b.tokensBilled) ?? declaredRate(named);
+    // A model this table cannot price reports tokens alone. The UNKNOWN_MODEL
+    // sentinel is never priced at all: it is a placeholder, not a model id.
+    // Rows are `certain` by construction — a saving is only ever FILED under a
+    // model the agent named, so a ledger key is as good as a stamp.
+    const known: AgentModel =
+      model === UNKNOWN_MODEL ? NO_MODEL : { id: model, confidence: 'certain' };
+    const rate: InputRate | null = blendedRate(b.costMicros, b.tokensBilled) ?? listRate(known);
     const value = valueSaved(b.savedTokens, rate);
     models.push({ model, ...b, value });
     savedTokens += b.savedTokens;

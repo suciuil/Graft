@@ -108,13 +108,6 @@ export interface BuildConfig {
    * checkout someone parked in the tree. Absent/false keeps the historical
    * boundary. */
   followNestedRepos?: boolean;
-  /** The model this repo's agent runs, used ONLY to price saved tokens on a
-   * host that reports no billing of its own (see `context/price.ts`). Never
-   * consulted when the session has a measured rate, and never a default: absent
-   * means the dollar figure is omitted rather than estimated. This is the
-   * CODING AGENT's model, not `GRAFT_MODEL` — that one names graft's own
-   * enrichment pass and prices nothing. */
-  model?: string;
 }
 
 /** Local, Git-ignored repository configuration. Kept outside generated
@@ -154,7 +147,6 @@ const DEFAULT_BUILD_CONFIG: Required<BuildConfig> = {
   excludeDirs: [],
   followSubmodules: false,
   followNestedRepos: false,
-  model: '',
 };
 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as
@@ -162,8 +154,8 @@ const DEFAULT_BUILD_CONFIG: Required<BuildConfig> = {
 const BUILD_CONFIG_NOTE =
   "graft repository settings — see `graft build --help`. excludeDirs takes a NAME (themes), " +
   "a root-relative PATH (src/themes), or a glob (src/themes*, src/themes/*, *src/themes). " +
-  "model names the model your agent runs (e.g. gemini-3.8-flash), so savings can be priced " +
-  "on hosts that report no billing; leave empty to show token counts alone.";
+  "To have saved tokens priced in $, pass --agent-model <your model id> on graft calls: " +
+  "a model named per call cannot go stale the way a value pinned in this file would.";
 
 /**
  * The config `ensureDefaultBuildConfig` would write for repo `d`, or null when
@@ -186,9 +178,10 @@ function pendingBuildConfig(d: string): Record<string, unknown> | null {
  * existing one with the options it predates. Returns the path when it wrote,
  * null when the file was already complete.
  *
- * Without the top-up, a repo initialized by an older graft keeps a config that
- * silently lacks `model`, and its savings stay unpriced forever because nothing
- * on a no-billing host can name the agent's model.
+ * The top-up only ever adds keys and refreshes the note; a value the user set is
+ * spread in last and never rewritten. A stale `model` key left over from an
+ * older graft is therefore preserved on disk but ignored by every code path —
+ * harmless, and cheaper than rewriting a file the user owns.
  */
 export function ensureDefaultBuildConfig(d: string): string | null {
   const next = pendingBuildConfig(d);
@@ -248,13 +241,6 @@ export function readFollowNestedRepos(d: string): boolean {
   return readBuildConfig(d)?.followNestedRepos === true;
 }
 
-/** The model the user declared for repo `d`, or null when the field is absent
- * or blank — the scaffolded default is `""`, which must read as "not declared"
- * rather than as a model name no price table will ever match. */
-export function readDeclaredModel(d: string): string | null {
-  const model = readBuildConfig(d)?.model;
-  return typeof model === 'string' && model.trim() !== '' ? model.trim() : null;
-}
 // Best-effort read-modify-write; not atomic across concurrent processes, but acceptable
 // for episodic hook writes (worst case is a lost update, not corruption).
 export function patchStats(d: string, patch: Partial<Stats>): Stats {

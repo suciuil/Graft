@@ -15,33 +15,43 @@
   tokens alone rather than priced at a guess. Hosts that stamp a model — Claude
   Code — are unaffected; a repo that was relying on `GRAFT_MODEL` to price should
   set the config field instead.
-- **The savings tally says what it priced at, and why, in the line the user
-  actually reads.** The dollar figure the agent relays used to arrive with its
-  caveats stripped: the sentence explaining that `$0.04` was a list price for a
-  model read out of a config file was written for the agent, and the agent
-  relayed only the example. So a stale `model` entry produced a number that read
-  exactly as confidently as one measured from real billing. The example now
-  carries the whole basis — `🌱 graft saved ~5,548 tokens (~$0.03 at $5/input
-  mtok for claude-opus-5) this turn`, or `… for claude-opus-5 specified as model
-  in .graft/config.json`, or the specific reason no figure exists — so the reader
-  can tell a measured price from an assumed one and knows what to change.
-  Previously an unpriced saving simply dropped the money and said nothing.
-- **A price graft is sure of is no longer overridden by
-  `GRAFT_INPUT_USD_PER_MTOK`.** The override used to win over everything, so a
-  number exported into a shell months ago silently repriced a model graft knows
-  the list rate for — replacing a correct figure with a stale one, invisibly. It
-  is now the fallback it was always meant to be: measured billing first, then the
-  list price for the model we know we ran, then the override, which fills in only
-  for a model graft has no price for (or none at all) and says so when it does.
+- **A saving is priced only at a model the agent itself named.** Graft used to
+  accept standing declarations — a `model` field in `.graft/config.json`, a
+  `$/Mtok` figure in `GRAFT_INPUT_USD_PER_MTOK` — and price from whichever it
+  found. Both outlive the session that justified them, and on screen a stale
+  price is indistinguishable from a correct one, so a user who switched models
+  months ago was quietly shown the wrong number every turn. There are now two
+  states and no third: either the model is known for THIS turn (the host stamped
+  it, or `--agent-model` named it) and the tally reads
+  `🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this turn`, or it is
+  not, and the saving is reported in tokens alone.
+- **The tally names the model the way the user's host does.** `--agent-model
+  vertex_ai/claude-opus-5` reports as "Claude Opus 5" when the host config gives
+  that display name — the string the user actually picked from a menu, rather
+  than the routing-prefixed wire id they would have to decode.
+- **Kilo Code gets a per-model table instead of a bare token count.** Kilo
+  reaches graft over MCP, where no flag can be passed and no transcript is
+  stamped, so its savings can never be attributed to one model. But its own
+  configuration lists the models it can run, so graft now prices the saving under
+  every one of them and hands the agent a ready-made table to relay in a
+  collapsed section. A table of honest alternatives beats one confident wrong
+  figure, and beats silence. Models graft has no published rate for are omitted
+  rather than shown as `—`.
+- **Kilo Code 5.x configs are read too.** The 5.x extension keeps its model list
+  in `~/.kilocode/secrets.json`, as a JSON-encoded string nested inside the outer
+  JSON, one entry per API profile — a completely different shape from 7.x's
+  `~/.config/kilo/kilo.jsonc`. Both are read and merged into one de-duplicated
+  list, so a user mid-upgrade sees a single table rather than two or none.
 
 ### Removed
 
-- **`GRAFT_AGENT_MODEL` no longer names the model a saving is priced at.** It was
-  a second standing declaration alongside `model` in `.graft/config.json`, but
-  invisible in the repo and outranking it — a variable in a shell profile quietly
-  out-voting the file the user was staring at while wondering why the number was
-  wrong. One reviewable declaration is enough. Set `model` in
-  `.graft/config.json`, or pass `--agent-model <id>` on the call.
+- **`GRAFT_AGENT_MODEL`, `GRAFT_INPUT_USD_PER_MTOK`, and the `model` field in
+  `.graft/config.json` no longer affect pricing.** All three were standing
+  declarations of the same kind, and all three had the same failure mode: they
+  kept producing confident numbers long after they stopped being true. Pass
+  `--agent-model <id>` on the call instead — a model named per call cannot go
+  stale. An existing `model` field is left in place on disk (rewriting a file the
+  user owns to delete a key is worse than ignoring it) but is read by nothing.
 
 ### Fixed
 

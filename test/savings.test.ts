@@ -4,17 +4,20 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { savingsFor, savingsLine, withSavings, toTokens, setPricing, setRepoRoot } from '../src/context/savings.js';
-import { NO_MODEL, RATE_ENV, pricingFor, type AgentModel } from '../src/context/price.js';
+import {
+  savingsFor,
+  savingsLine,
+  withSavings,
+  toTokens,
+  setPricing,
+  setRepoRoot,
+  setModelTable,
+} from '../src/context/savings.js';
+import { NO_MODEL, pricingFor, type AgentModel } from '../src/context/price.js';
 import { hasSavingsTally } from '../src/claude/tally.js';
 import type { GraphV1, NodeV1 } from '../src/graph/types.js';
 
-/** A developer box that exports the override would otherwise price every
- * fixture below at a rate the assertions know nothing about. */
-delete process.env[RATE_ENV];
-
-const certain = (id: string): AgentModel => ({ id, confidence: 'certain' });
-const declared = (id: string): AgentModel => ({ id, confidence: 'declared' });
+const certain = (id: string, label?: string): AgentModel => ({ id, confidence: 'certain', label });
 
 /** The footer for a fixed 1,000-token saving, priced however the caller set it
  * up. Every wording assertion below reads this one string. */
@@ -22,19 +25,11 @@ function footer(): string {
   return savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
 }
 
-/** Run `body` with the env override set (or explicitly unset), always restoring
- * it — the wording branches turn on this variable, so a leak between tests would
- * silently assert the wrong scenario. */
-function withEnvRate<T>(value: string | null, body: () => T): T {
-  const had = process.env[RATE_ENV];
-  if (value === null) delete process.env[RATE_ENV];
-  else process.env[RATE_ENV] = value;
-  try {
-    return body();
-  } finally {
-    if (had === undefined) delete process.env[RATE_ENV];
-    else process.env[RATE_ENV] = had;
-  }
+/** Reset both process-level slots between tests: a leaked model table would make
+ * the next test assert the wrong branch entirely. */
+function clearPricing(): void {
+  setPricing(null);
+  setModelTable(null);
 }
 
 function fileNode(path: string, chars?: number): NodeV1 {
@@ -83,7 +78,7 @@ test('savingsLine: reports saved tokens and percent when the output is smaller',
   assert.ok(footer.includes((base - toTokens(body.length)).toLocaleString('en-US')));
   // The nudge rides along so the agent reports the turn total without SKILL.md.
   assert.match(footer, /end of your reply/i);
-  assert.match(footer, /graft saved ~N tokens \(.*\) this turn/);
+  assert.match(footer, /graft saved ~N tokens/);
   // The nudge must NOT introduce a second "[graft] tokens saved ≈ <n>" token —
   // the PostToolUse accumulator sums every such match, so a stray one double-counts.
   assert.equal((footer.match(/\[graft\] tokens saved ≈ [\d,]+/g) ?? []).length, 1);
@@ -111,34 +106,7 @@ test('withSavings: returns the body untouched when there is nothing to claim', (
   assert.equal(withSavings('body', undefined), 'body');
 });
 
-test('the turn nudge carries no dollar figure until something prices the tokens', () => {
-  withEnvRate(null, () => {
-    setPricing(pricingFor(NO_MODEL));
-    setRepoRoot(null);
-    const f = savingsLine('body', { files: 2, baselineChars: 8000 });
-    assert.match(f, /graft saved ~N tokens/);
-    assert.doesNotMatch(f, /~\$0|worth \$[\d.]/, 'nothing measured or declared, so nothing is priced');
-    // Unpriced is the one branch where the user can DO something about it, so
-    // both the prose and the relayed example carry the fix.
-    assert.match(f, /`model` in \.graft\/config\.json/);
-    assert.doesNotMatch(f, /\]\(/, 'no repo known, so the file is named but not linked');
-  });
-  setPricing(null);
-});
-
-test('the unpriced hint links the config file once the repo is known', () => {
-  withEnvRate(null, () => {
-    setPricing(pricingFor(NO_MODEL));
-    setRepoRoot(process.platform === 'win32' ? 'C:\\repo' : '/repo');
-    // A markdown link with an absolute file URI, so a chat host can open the real
-    // file on click rather than showing an unresolvable relative path.
-    assert.match(footer(), /\[\.graft\/config\.json\]\(file:\/\/\/\S*\.graft\/config\.json\)/);
-  });
-  setRepoRoot(null);
-  setPricing(null);
-});
-
-// ── scenario 0: the session's own billing, which outranks every list price ──
+// ── priced: the session was billed, or the agent named its model ───────────
 
 test('a measured rate is priced bare — there is nothing to caveat', () => {
   // $5/Mtok: a 1,000-token saving is worth half a cent, which must read as
@@ -148,146 +116,88 @@ test('a measured rate is priced bare — there is nothing to caveat', () => {
   assert.match(f, /worth <\$0\.01/);
   assert.match(f, /rate this session is actually paying/);
   assert.match(f, /"🌱 graft saved ~N tokens \(~\$X\) this turn"/);
-  setPricing(null);
+  clearPricing();
 });
 
-test('a measured rate is not displaced by the env override', () => {
-  // What the user was BILLED beats a number they typed into a shell once.
-  withEnvRate('99', () => {
-    setPricing(pricingFor(certain('claude-opus-5'), { usdPerMtok: 5, measured: true }));
-    const f = footer();
-    assert.match(f, /rate this session is actually paying/);
-    assert.doesNotMatch(f, new RegExp(RATE_ENV));
-  });
-  setPricing(null);
+test('a model the agent named is priced at list, and named in the tally', () => {
+  setPricing(pricingFor(certain('claude-opus-5')));
+  const f = footer();
+  assert.match(f, /\(~\$X for claude-opus-5\) this turn/);
+  assert.doesNotMatch(f, /actually paying/, 'a list price is not what the session paid');
+  clearPricing();
 });
 
-// ── scenario 1: model certain, graft knows its price ──────────────────────
-
-test('a certain model with a known price names both, and ignores every override', () => {
-  // The host stamped the model (or --agent-model named it) and graft's table
-  // prices it: both halves are facts, so neither the env var nor a config entry
-  // may touch them.
-  withEnvRate('99', () => {
-    setPricing(pricingFor(certain('claude-opus-5')));
-    const f = footer();
-    assert.match(f, /\(~\$X at \$5\/input mtok for claude-opus-5\) this turn/);
-    assert.doesNotMatch(f, new RegExp(RATE_ENV), 'the override must not appear at all');
-    assert.doesNotMatch(f, /config\.json/, 'nor may a config entry claim the credit');
-    assert.doesNotMatch(f, /actually paying/, 'a list price is not what the session paid');
-  });
-  setPricing(null);
+test('the tally prefers the host display name over the wire id', () => {
+  // The user picked "Claude Opus 5" from a menu; `vertex_ai/claude-opus-5` is
+  // plumbing they should not have to decode.
+  setPricing(pricingFor(certain('vertex_ai/claude-opus-5', 'Claude Opus 5')));
+  const f = footer();
+  assert.match(f, /\(~\$X for Claude Opus 5\) this turn/);
+  assert.doesNotMatch(f, /vertex_ai/);
+  clearPricing();
 });
 
-test('the quoted rate is the real list number, not a dollars-and-cents rounding', () => {
-  // formatDollars floors at "<$0.01", which is right for a saving and wrong for
-  // a rate: $0.2/mtok must read as itself.
-  withEnvRate(null, () => {
-    setPricing(pricingFor(certain('gpt-5.6-luna')));
-    assert.match(footer(), /~\$X at \$0\.2\/input mtok for gpt-5\.6-luna/);
-  });
-  setPricing(null);
+// ── unpriced: nothing named the model ──────────────────────────────────────
+
+test('with no model and no host table, the tally is tokens alone', () => {
+  setPricing(pricingFor(NO_MODEL));
+  setModelTable(null);
+  const f = footer();
+  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  assert.doesNotMatch(f, /~\$X|worth \$/, 'no model, so no dollar figure of any kind');
+  // The fix is named, since it is the only one that exists now.
+  assert.match(f, /--agent-model/);
+  clearPricing();
 });
 
-// ── scenario 2: model certain, graft has no price for it ──────────────────
-
-test('2.1 a certain unpriced model falls back to the env override, and says so', () => {
-  withEnvRate('7.5', () => {
-    setPricing(pricingFor(certain('claude-opus-6')));
-    const f = footer();
-    assert.match(
-      f,
-      new RegExp(`\\(~\\$X at \\$7\\.5/input mtok for claude-opus-6 specified by the ${RATE_ENV} environment variable\\) this turn`),
-    );
-    assert.doesNotMatch(f, /config\.json/, 'a config entry never overrides a model we are sure of');
-  });
-  setPricing(null);
+test('a model with no published price is not priced from anything else', () => {
+  // Previously an env override filled this gap. It no longer exists: an unknown
+  // price means tokens alone, full stop.
+  setPricing(pricingFor(certain('claude-opus-6')));
+  setModelTable(null);
+  const f = footer();
+  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  assert.doesNotMatch(f, /~\$X|worth \$/);
+  clearPricing();
 });
 
-test('2.2 a certain unpriced model with no override explains the exact gap', () => {
-  withEnvRate(null, () => {
-    setPricing(pricingFor(certain('claude-opus-6')));
-    const f = footer();
-    assert.match(
-      f,
-      new RegExp(`the savings in dollars cannot be estimated because graft has no info about claude-opus-6's price per input mtok and also the ${RATE_ENV} environment variable was not set`),
-    );
-    assert.doesNotMatch(f, /~\$0|worth \$[\d.]/, 'and no figure is invented');
-  });
-  setPricing(null);
+test('a host that lists its models gets a per-model table instead of nothing', () => {
+  setPricing(pricingFor(NO_MODEL));
+  setModelTable((saved) => [
+    { label: 'Claude Opus 5', value: `$${(saved * 5) / 1_000_000}` },
+    { label: 'Gemini 3.8 Flash', value: `$${(saved * 0.75) / 1_000_000}` },
+  ]);
+  const f = footer();
+  assert.match(f, /graft saved ~N tokens by this turn, which estimates in \$ as following:/);
+  // Rows are pre-rendered and column-aligned, so the agent relays a table rather
+  // than laying one out differently every turn.
+  assert.match(f, /\| Claude Opus 5    \| \$0\.0095 \|/);
+  assert.match(f, /\| Gemini 3\.8 Flash \| \$0\.001425 \|/);
+  // And it is told where to put it.
+  assert.match(f, /collapsed\/expandable section/);
+  clearPricing();
 });
 
-// ── scenario 3 & 4: the model came from .graft/config.json ────────────────
-
-test('3 a declared model with a known price names the config it came from', () => {
-  // The config is pinned while the host's model selector is not. Naming the
-  // file is what lets a reader notice the two have drifted apart — and the env
-  // override is ignored, because the pair (model, list price) is still complete.
-  withEnvRate('99', () => {
-    setPricing(pricingFor(declared('claude-opus-5')));
-    const f = footer();
-    assert.match(f, /\(~\$X at \$5\/input mtok for claude-opus-5 specified as model in \.graft\/config\.json\) this turn/);
-    assert.doesNotMatch(f, new RegExp(RATE_ENV));
-    assert.doesNotMatch(f, /actually paying/);
+test('the table is driven by the real saving, not a fixed number', () => {
+  setPricing(pricingFor(NO_MODEL));
+  let seen = -1;
+  setModelTable((saved) => {
+    seen = saved;
+    return [{ label: 'M', value: '$1' }];
   });
-  setPricing(null);
+  footer();
+  assert.equal(seen, 1900, 'the table prices the tokens this call actually saved');
+  clearPricing();
 });
 
-test('4.1 a declared unpriced model credits the config AND the override', () => {
-  withEnvRate('7.5', () => {
-    setPricing(pricingFor(declared('claude-opus-6')));
-    assert.match(
-      footer(),
-      new RegExp(`\\(~\\$X at \\$7\\.5/input mtok for claude-opus-6 specified as model in \\.graft/config\\.json and by the specified ${RATE_ENV} environment variable\\) this turn`),
-    );
-  });
-  setPricing(null);
-});
+test('a host table that throws or comes back empty degrades to tokens alone', () => {
+  setPricing(pricingFor(NO_MODEL));
+  setModelTable(() => { throw new Error('unreadable config'); });
+  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
 
-test('4.2 a declared unpriced model with no override names the file and the var', () => {
-  withEnvRate(null, () => {
-    setPricing(pricingFor(declared('claude-opus-6')));
-    assert.match(
-      footer(),
-      new RegExp(`cannot be estimated because graft has no info about the price per input mtok for the 'claude-opus-6' model specified in the \\.graft/config\\.json file and also the ${RATE_ENV} environment variable was not set`),
-    );
-  });
-  setPricing(null);
-});
-
-// ── scenario 5: nothing names a model at all ──────────────────────────────
-
-test('5.1 with no model at all the override is the whole basis, and says so', () => {
-  withEnvRate('7.5', () => {
-    setPricing(pricingFor(NO_MODEL));
-    const f = footer();
-    assert.match(
-      f,
-      new RegExp(`\\(~\\$X at \\$7\\.5/input mtok as specified by the ${RATE_ENV} environment variable and no model specified in the \\.graft/config\\.json\\) this turn`),
-    );
-    assert.doesNotMatch(f, /list list/, 'and it still reads as English');
-  });
-  setPricing(null);
-});
-
-test('5.2 with neither a model nor an override, the tally names both gaps', () => {
-  withEnvRate(null, () => {
-    setPricing(pricingFor(NO_MODEL));
-    assert.match(
-      footer(),
-      new RegExp(`cannot be estimated because no model was specified in the \\.graft/config\\.json file and also the ${RATE_ENV} environment variable was not set`),
-    );
-  });
-  setPricing(null);
-});
-
-test('a malformed override is reported as malformed, not as absent', () => {
-  // "unset" and "set to nonsense" send the user to different fixes.
-  withEnvRate('abc', () => {
-    setPricing(pricingFor(NO_MODEL));
-    assert.match(footer(), new RegExp(`the ${RATE_ENV} environment variable was set to a value that is not a positive number`));
-  });
-  setPricing(null);
+  setModelTable(() => []);
+  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
+  clearPricing();
 });
 
 // ── invariants every branch has to keep ───────────────────────────────────
@@ -296,57 +206,54 @@ test('every wording branch leaves exactly one number for the accumulator', () =>
   // The nudge must never grow a second `[graft] tokens saved ≈ <n>` — the
   // PostToolUse accumulator sums every match, so an example carrying the
   // pattern would double-count the call.
-  const branches = [
+  const branches: Array<() => void> = [
     () => setPricing({ rate: { usdPerMtok: 5, measured: true }, model: certain('claude-opus-5') }),
     () => setPricing(pricingFor(certain('claude-opus-5'))),
-    () => setPricing(pricingFor(declared('claude-opus-5'))),
     () => setPricing(pricingFor(certain('claude-opus-6'))),
     () => setPricing(pricingFor(NO_MODEL)),
+    () => {
+      setPricing(pricingFor(NO_MODEL));
+      setModelTable(() => [{ label: 'Claude Opus 5', value: '$0.01' }]);
+    },
   ];
-  withEnvRate(null, () => {
-    for (const setup of branches) {
-      setup();
-      assert.equal((footer().match(/\[graft\] tokens saved ≈ [\d,]+/g) ?? []).length, 1);
-    }
-  });
-  setPricing(null);
+  for (const setup of branches) {
+    clearPricing();
+    setup();
+    assert.equal((footer().match(/\[graft\] tokens saved ≈ [\d,]+/g) ?? []).length, 1);
+  }
+  clearPricing();
 });
 
 test('every wording branch still matches the reported-turns tally regex', () => {
   // Wording changes must not quietly zero `reportedTurns`, which measures
   // whether the agent told the user anything at all.
   assert.equal(hasSavingsTally('🌱 graft saved ~12,400 tokens (~$0.04) this turn'), true);
-  assert.equal(
-    hasSavingsTally('🌱 graft saved ~5,548 tokens (~$0.03 at $5/input mtok for claude-opus-5) this turn'),
-    true,
-  );
+  assert.equal(hasSavingsTally('🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this turn'), true);
+  assert.equal(hasSavingsTally('🌱 graft saved ~5,548 tokens by this turn'), true);
   assert.equal(
     hasSavingsTally(
-      '🌱 graft saved ~5,548 tokens (the savings in dollars cannot be estimated because ' +
-        "graft has no info about claude-opus-6's price per input mtok) this turn",
+      '🌱 graft saved ~5,548 tokens by this turn, which estimates in $ as following:\n' +
+        '| Claude Opus 5 | $0.03 |',
     ),
     true,
   );
 });
 
 test('setPricing refuses a rate that would render as $NaN', () => {
-  withEnvRate(null, () => {
-    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
-      setPricing({ rate: { usdPerMtok: bad, measured: true }, model: certain('claude-opus-5') });
-      // The unpriced branch mentions `$` in its "set a model" hint, so the check
-      // is for a rendered FIGURE, not for the character.
-      assert.doesNotMatch(footer(), /worth \$[\d.]|~\$0/, `rate ${bad} must price nothing`);
-    }
-  });
-  setPricing(null);
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
+    setPricing({ rate: { usdPerMtok: bad, measured: true }, model: certain('claude-opus-5') });
+    assert.doesNotMatch(footer(), /worth \$[\d.]|~\$X/, `rate ${bad} must price nothing`);
+  }
+  clearPricing();
 });
 
-test('a cleared rate keeps the model, so the unpriced wording can still name it', () => {
-  // The whole point of carrying the model alongside the rate: "we cannot price
-  // this" is only actionable if it says WHICH model went unpriced.
-  withEnvRate(null, () => {
-    setPricing({ rate: { usdPerMtok: Number.NaN, measured: true }, model: certain('claude-opus-6') });
-    assert.match(footer(), /graft has no info about claude-opus-6's price per input mtok/);
-  });
-  setPricing(null);
+test('setRepoRoot is still accepted and changes nothing about pricing', () => {
+  // Kept for the callers that set it; the config file it used to address is no
+  // longer consulted by any pricing path.
+  setRepoRoot(process.platform === 'win32' ? 'C:\\repo' : '/repo');
+  setPricing(pricingFor(NO_MODEL));
+  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
+  setRepoRoot(null);
+  clearPricing();
 });
+

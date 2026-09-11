@@ -62,9 +62,8 @@ test("re-running init preserves edited values while topping up missing options",
     runInitCli(d);
     const cfg = readBuildConfig(d) as Record<string, unknown>;
     assert.deepEqual(cfg.excludeDirs, ["src/themes"], "the user's list survives a re-init");
-    // A config written by an older graft must learn the options it predates —
-    // an absent `model` is why savings go unpriced on a no-billing host.
-    assert.equal(cfg.model, "", "a missing option is backfilled at its default");
+    // A config written by an older graft must learn the options it predates.
+    assert.equal(cfg.model, undefined, "`model` was removed and is never re-added");
     assert.deepEqual(cfg.includeDirs, []);
     assert.equal(cfg.followSubmodules, false);
   } finally {

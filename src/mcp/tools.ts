@@ -13,6 +13,7 @@ import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
 import { withSavings, setPricing, setRepoRoot, sumSavingsFooters, resetClaimedSavings } from '../context/savings.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
+import { installModelTable } from '../hosts/models.js';
 import { currentModel, recordSavedTokens } from '../claude/ledger.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
@@ -230,6 +231,11 @@ export async function callTool(
     // here, so the formatters downstream can put a dollar figure in the nudge.
     setPricing(sessionPricing(root));
     setRepoRoot(root);
+    // MCP is the hookless path: no flag can be passed and no transcript is
+    // stamped, so this is exactly where a saving would otherwise go unpriced.
+    // The host's own model list is the honest substitute for a rate we cannot
+    // know — read lazily, and only if the unpriced branch is actually reached.
+    installModelTable();
     let note: string | null = null;
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
