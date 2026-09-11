@@ -143,11 +143,17 @@ function ensureBuildConfigIgnored(d: string): void {
  * discoverable rather than folklore — JSON has no comments and the options are
  * otherwise only visible in `graft build --help`.
  *
- * Typed `Required<BuildConfig>` deliberately: adding a field to {@link BuildConfig}
+ * Typed `Required<...>` deliberately: adding a field to {@link BuildConfig}
  * without adding it here is a compile error, so the scaffold cannot silently fall
  * behind the options it claims to list.
+ *
+ * `brain` is the one exclusion, and it is not an option: it is the link written
+ * by `graft brain connect`, holding a secret and belonging to no default. Listing
+ * it would have `init` stamp an empty credential into a file it advertises as the
+ * option reference, and would make {@link pendingBuildConfig} judge every
+ * brain-less repo's config perpetually incomplete.
  */
-const DEFAULT_BUILD_CONFIG: Required<BuildConfig> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,
