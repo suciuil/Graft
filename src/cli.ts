@@ -17,7 +17,7 @@ import { buildGraphIfMissing, runInit } from "./claude/init.js";
 import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { KILO_RULE_REL } from "./hosts/kilo.js";
-import { formatModelPrices, readHostModels } from "./hosts/models.js";
+import { formatModelPrices, installModelTable, readHostModels } from "./hosts/models.js";
 import { hostIds } from "./hosts/registry.js";
 import { contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
@@ -86,6 +86,10 @@ function noteQuery(dir: string): string {
   // that can price this session's tokens before a formatter needs the number.
   setPricing(sessionPricing(dir));
   setRepoRoot(dir);
+  // Same reason as the MCP dispatch: when nothing named the model, the host's
+  // own model list is the honest alternative to a made-up rate. Lazy — a query
+  // that IS priced never reads the config.
+  installModelTable();
   return dir;
 }
 

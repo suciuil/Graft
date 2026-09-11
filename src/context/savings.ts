@@ -15,14 +15,7 @@
 import type { GraphV1 } from '../graph/types.js';
 import { pathToFileURL } from 'node:url';
 import { buildConfigPath } from '../util/state.js';
-import {
-  NO_MODEL,
-  RATE_ENV,
-  envRate,
-  formatDollars,
-  type InputRate,
-  type Pricing,
-} from './price.js';
+import { NO_MODEL, formatDollars, type InputRate, type Pricing } from './price.js';
 
 export interface Savings {
   /** How many source files the baseline covers. */
@@ -91,11 +84,8 @@ export function setPricing(p: Pricing | null): void {
 
 /**
  * The repo this process is answering for, held process-level for the same reason
- * {@link setInputRate} is: one invocation answers one query for one repo, and the
+ * {@link setPricing} is: one invocation answers one query for one repo, and the
  * alternative is threading a path through every retrieval formatter.
- *
- * Only used to address the config file the unpriced nudge points at. Null means
- * "nobody said", and the nudge then names the file without linking it.
  */
 let repoRoot: string | null = null;
 
@@ -104,16 +94,23 @@ export function setRepoRoot(dir: string | null): void {
   repoRoot = dir && dir.trim() ? dir : null;
 }
 
-/** `.graft/config.json`, as a markdown link to the real file when the repo is
- * known so a chat host can open it on click, and as bare text when it isn't. */
-function configTarget(): string {
-  const label = '.graft/config.json';
-  if (repoRoot === null) return label;
-  try {
-    return `[${label}](${pathToFileURL(buildConfigPath(repoRoot)).href})`;
-  } catch {
-    return label;
-  }
+/**
+ * The per-model price table for the unpriced branch, injected rather than
+ * imported.
+ *
+ * `hosts/models.ts` reads the user's agent configuration off disk; wiring that
+ * into this module directly would make every retrieval formatter — including the
+ * ones under test — depend on whatever Kilo config the developer's machine
+ * happens to have. The MCP dispatch and the CLI set it; tests set their own.
+ */
+export type ModelTable = (savedTokens: number) => Array<{ label: string; value: string }>;
+
+let modelTable: ModelTable | null = null;
+
+/** Supply the per-model rows shown when no single model can be named. Null
+ * clears it, which is the correct state for every host that is not Kilo. */
+export function setModelTable(rows: ModelTable | null): void {
+  modelTable = rows;
 }
 
 /**
@@ -145,84 +142,64 @@ export function resetClaimedSavings(): void {
   claimedTokens = 0;
 }
 
-/** A $/Mtok rate as a human would write it: `$5`, `$0.75`, `$1.25`. Not
- * {@link formatDollars}, which floors at `<$0.01` — that is right for a saving
- * (a real sub-cent amount is not nothing) and wrong for a rate, where the number
- * IS the fact being quoted and rounding it away would misquote the price. */
-function formatRate(usdPerMtok: number): string {
-  return `$${Number(usdPerMtok.toFixed(4))}`;
-}
-
-/** What the env override is doing right now, for the sentence that has to
- * explain why there is no dollar figure. "Not set" and "set to something
- * unusable" send the user to different fixes, so they are never conflated. */
-function envOverrideState(): 'unset' | 'invalid' {
-  if (envRate() !== null) return 'unset'; // unreachable in the unpriced branch
-  const raw = process.env[RATE_ENV];
-  return raw === undefined || raw.trim() === '' ? 'unset' : 'invalid';
-}
-
-/** The trailing half of "…cannot be estimated because X and also …". */
-function envOverrideClause(): string {
-  return envOverrideState() === 'invalid'
-    ? `the ${RATE_ENV} environment variable was set to a value that is not a positive number`
-    : `the ${RATE_ENV} environment variable was not set`;
+/** How the agent should name the model in the tally: the host's display name
+ * ("Claude Opus 5") when it gave one, else the wire id. The user chose the model
+ * from a menu showing the former. */
+function modelLabel(rate: InputRate): string | null {
+  return rate.label ?? rate.model ?? null;
 }
 
 /**
- * What goes in the parentheses of the tally the user actually reads, and the
- * matching explanation for the agent's own benefit.
+ * The per-model table for the unpriced branch, as markdown rows.
  *
- * These two are separate on purpose. The prose sentence is read by the agent and
- * thrown away; the example is RELAYED, so anything the user must know — which
- * model was assumed, which rate, and who declared it — has to be inside the
- * example itself or it never arrives. Hence the parenthetical says the whole
- * thing in one breath rather than deferring to a caveat the reader never sees.
- *
- * The five shapes below are the five things graft can honestly know, ordered by
- * how much that is:
- *
- *  1. measured — the session's own billing. A bare `~$X`: nothing to caveat.
- *  2. certain model, known price — `~$X at $5/input mtok for claude-opus-5`.
- *     The host stamped the model or the agent named it on this call, and graft's
- *     table prices it. No override may touch either half; both are facts.
- *  3. certain model, no price — the model is new. Then, and only then, the
- *     `GRAFT_INPUT_USD_PER_MTOK` number fills in, and says so.
- *  4. declared model (`.graft/config.json`) — same two cases, but the tally
- *     names the file, because a standing declaration is exactly the thing that
- *     goes stale when the user switches models and nobody tells graft.
- *  5. no model at all — an override alone, or no figure and a plain statement of
- *     the two things that would produce one.
+ * Returned as a single pre-rendered block rather than data because it has to
+ * survive being relayed verbatim by an agent: anything requiring the agent to
+ * lay out a table itself is something it will lay out differently every turn.
+ * Empty string when no host table is available, which is every host but Kilo.
  */
-function tallyDetail(rate: InputRate | null): string {
-  const model = pricing.model;
-  const name = rate?.model ?? model.id ?? null;
-  const declared = model.confidence === 'declared';
+function modelTableBlock(savedTokens: number): string {
+  if (!modelTable || savedTokens <= 0) return '';
+  let rows: Array<{ label: string; value: string }>;
+  try {
+    rows = modelTable(savedTokens);
+  } catch {
+    return ''; // a price table is never worth failing a retrieval over
+  }
+  if (rows.length === 0) return '';
+  const width = Math.max(...rows.map((r) => r.label.length));
+  const body = rows.map((r) => `| ${r.label.padEnd(width)} | ${r.value} |`).join('\n');
+  return `\n${body}\n`;
+}
 
+/**
+ * What goes in the tally the user actually reads.
+ *
+ * The prose sentence around it is read by the agent and thrown away; the example
+ * is RELAYED. So anything the user must know — which model, which figure — has
+ * to be inside the example itself or it never arrives.
+ *
+ * Exactly two shapes now, because graft only has two honest states:
+ *
+ *  1. We know the model (the host stamped it, or `--agent-model` named it) and
+ *     can price it: `~$0.03 for Claude Opus 5`. One figure, attributable.
+ *  2. We do not: tokens alone. On Kilo, where the agent's own configuration
+ *     lists the candidate models, that is followed by a table pricing this
+ *     saving under each — the user reads their own row. Everywhere else the
+ *     token count stands by itself.
+ */
+function tallyExample(savedTokens: number, rate: InputRate | null): string {
   if (rate === null) {
-    const why = name
-      ? declared
-        ? `graft has no info about the price per input mtok for the '${name}' model specified in the .graft/config.json file`
-        : `graft has no info about ${name}'s price per input mtok`
-      : 'no model was specified in the .graft/config.json file';
-    return `the savings in dollars cannot be estimated because ${why} and also ${envOverrideClause()}`;
+    const table = modelTableBlock(savedTokens);
+    return table
+      ? '"\u{1F331} graft saved ~N tokens by this turn, which estimates in $ as ' +
+          `following:${table}"`
+      : '"\u{1F331} graft saved ~N tokens by this turn"';
   }
-  if (rate.measured) return '~$X';
-
-  const at = `~$X at ${formatRate(rate.usdPerMtok)}/input mtok`;
-  if (name === null || name === undefined) {
-    // Nothing named a model, so the override is the entire basis — and the tally
-    // says the config field is empty, which is the one thing the user can fix.
-    return `${at} as specified by the ${RATE_ENV} environment variable and no model specified in the .graft/config.json`;
-  }
-  if (!rate.fromEnv) {
-    return declared
-      ? `${at} for ${name} specified as model in .graft/config.json`
-      : `${at} for ${name}`;
-  }
-  return declared
-    ? `${at} for ${name} specified as model in .graft/config.json and by the specified ${RATE_ENV} environment variable`
-    : `${at} for ${name} specified by the ${RATE_ENV} environment variable`;
+  if (rate.measured) return '"\u{1F331} graft saved ~N tokens (~$X) this turn"';
+  const name = modelLabel(rate);
+  return name
+    ? `"\u{1F331} graft saved ~N tokens (~$X for ${name}) this turn"`
+    : '"\u{1F331} graft saved ~N tokens (~$X) this turn"';
 }
 
 /** Appended to every retrieval footer so the agent reports the turn's running
@@ -233,47 +210,38 @@ function tallyDetail(rate: InputRate | null): string {
  *
  * Carries this call's dollar value once a rate is known, because the agent has
  * no way to price a token itself — the ask it's given has to contain the
- * number, not just request one. A declared list rate is worded as such: on a
- * host that reports no billing there is no cache discount to observe, so the
- * figure is an upper bound and must not claim to be what the session paid.
+ * number, not just request one. A list rate is worded as such: on a host that
+ * reports no billing there is no cache discount to observe, so the figure is an
+ * upper bound and must not claim to be what the session paid.
  *
- * When nothing can price the tokens, the tally now SAYS so — naming the model it
- * has no price for, or the empty config field — instead of quietly dropping the
- * money. "No figure" and "no figure because of this specific gap" look the same
- * to a reader, and only the second one can be acted on. The example phrasing
- * stays inside what `hasSavingsTally` (claude/tally.ts) recognises in every
- * branch, so wording changes here never quietly zero the reported-turns metric. */
+ * When no model can be named, no dollar figure is invented. Instead the agent is
+ * handed either a per-model table (Kilo, whose configuration lists the
+ * candidates) or nothing at all — a bare token count. The example phrasing stays
+ * inside what `hasSavingsTally` (claude/tally.ts) recognises in every branch, so
+ * wording changes here never quietly zero the reported-turns metric. */
 export function savingsTurnNudge(savedTokens: number): string {
   const sum = ' — sum each such line across your graft calls — e.g. ';
   const rate = savedTokens > 0 ? pricing.rate : null;
-  const example = `"\u{1F331} graft saved ~N tokens (${tallyDetail(rate)}) this turn"`;
+  const example = tallyExample(savedTokens, rate);
 
   if (rate === null) {
-    // Reached on exactly the hosts that report no billing and name no priced
-    // model. The prose points at the file, linked, because that is the fix; the
-    // example says the same thing in plain text, because that is what the user
-    // gets to read.
+    const priced = modelTableBlock(savedTokens)
+      ? 'Reproduce the table exactly, summed across your graft calls, in a ' +
+        'collapsed/expandable section. '
+      : '';
     return (
-      ' This call cannot be priced — set `model` in ' +
-      `${configTarget()} (or ${RATE_ENV}) to have savings valued in $. At the ` +
-      'end of your reply, tell the user the total graft tokens saved this turn ' +
-      `and why they could not be priced${sum}${example}.`
+      ' This call cannot be priced: nothing named the model you are running. ' +
+      'At the end of your reply, tell the user the total graft tokens saved ' +
+      `this turn. ${priced}Pass \`--agent-model <your model id>\` on your graft ` +
+      `calls to have savings priced directly${sum}${example}.`
     );
   }
 
   const usd = (savedTokens * rate.usdPerMtok) / 1_000_000;
-  const name = rate.model ?? null;
+  const name = modelLabel(rate);
   const basis = rate.measured
     ? 'the rate this session is actually paying for input tokens'
-    : rate.fromEnv
-      ? name
-        ? `the ${RATE_ENV} override (graft has no list price for ${name})`
-        : `the ${RATE_ENV} override (nothing here names a model)`
-      : name
-        ? pricing.model.confidence === 'declared'
-          ? `${name} list rates (declared in .graft/config.json — correct it there if you have since switched models)`
-          : `${name} list rates (the model named on this call)`
-        : 'the list input-token rate configured for this repo';
+    : `${name} list rates (the model named on this call)`;
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     'reply, tell the user the total graft tokens saved this turn and what they ' +

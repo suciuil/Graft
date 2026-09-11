@@ -15,13 +15,14 @@ import {
   dollarsSaved,
   formatDollars,
   blendedRate,
-  declaredRate,
-  envRate,
+  listRate,
   pricingFor,
   valueSaved,
   NO_MODEL,
-  RATE_ENV,
 } from '../src/context/price.js';
+
+const certain = (id: string, label?: string) =>
+  ({ id, confidence: 'certain', label }) as const;
 
 test('inputUsdPerMtok: known families are priced, anything else is null', () => {
   assert.equal(inputUsdPerMtok('claude-opus-5'), 5);
@@ -183,115 +184,53 @@ test('dollarsSaved: a non-finite accumulator never reaches a rendered surface', 
   assert.equal(dollarsSaved(Number.POSITIVE_INFINITY, 600_000, 1_000_000), null);
 });
 
-// ── the declared rate: the only number available on a host that measures none ──
+// ── the list rate: priced only for a model the AGENT named ────────────────
 
-test('declaredRate: a known model prices at list, and is marked unmeasured', () => {
-  delete process.env[RATE_ENV];
-  // The model rides along so every priced surface can name what it priced at;
-  // `named` separates "the agent said so on this call" from a standing config.
-  assert.deepEqual(declaredRate('gemini-3.8-flash'), { usdPerMtok: 0.75, measured: false, model: 'gemini-3.8-flash', named: false });
-  assert.deepEqual(declaredRate('gpt-5.6-sol', { named: true }), { usdPerMtok: 4, measured: false, model: 'gpt-5.6-sol', named: true });
+test('listRate: a model the agent named prices at list, marked unmeasured', () => {
+  // The model rides along so every priced surface can name what it priced at.
+  assert.deepEqual(listRate(certain('gemini-3.8-flash')), {
+    usdPerMtok: 0.75, measured: false, model: 'gemini-3.8-flash', label: undefined,
+  });
+  // A display name, when the host had one, travels with the rate: the user
+  // picked the model from a menu showing that string, not the wire id.
+  assert.deepEqual(listRate(certain('vertex_ai/claude-opus-5', 'Claude Opus 5')), {
+    usdPerMtok: 5, measured: false, model: 'vertex_ai/claude-opus-5', label: 'Claude Opus 5',
+  });
 });
 
-test('declaredRate: nothing declared, or a model with no price, stays null', () => {
-  delete process.env[RATE_ENV];
-  assert.equal(declaredRate(null), null, 'no model configured');
-  assert.equal(declaredRate(''), null, 'the scaffolded empty default');
-  assert.equal(declaredRate('some-future-model'), null, 'a model this table never priced');
+test('listRate: an unknown model, or none at all, prices nothing', () => {
+  assert.equal(listRate(NO_MODEL), null, 'nothing named a model');
+  assert.equal(listRate(certain('some-future-model')), null, 'a model this table never priced');
+  assert.equal(listRate({ id: '', confidence: 'certain' }), null, 'a blank id is not a model');
 });
 
-test('declaredRate: a known list price is NOT displaced by the env override', () => {
-  // The pair (model we know, price we have) is a fact about the world. The
-  // override is a number typed into a shell once, for a model the user may no
-  // longer run — letting it win would replace a correct price with a stale one,
-  // invisibly. So it fills holes and nothing else.
-  process.env[RATE_ENV] = '0.30';
-  try {
-    assert.deepEqual(declaredRate('gpt-5.6-sol'), {
-      usdPerMtok: 4,
-      measured: false,
-      model: 'gpt-5.6-sol',
-      named: false,
-    });
-  } finally {
-    delete process.env[RATE_ENV];
-  }
-});
-
-test('declaredRate: the env override fills in for an unpriced or unnamed model', () => {
-  process.env[RATE_ENV] = '0.30';
-  try {
-    // A model graft has never heard of: the override is the only number going.
-    assert.deepEqual(declaredRate('some-future-model', { named: true }), {
-      usdPerMtok: 0.3,
-      measured: false,
-      model: 'some-future-model',
-      named: true,
-      fromEnv: true,
-    });
-    // Nothing named a model at all: a bare number, nothing claimed about one.
-    assert.deepEqual(declaredRate(null), { usdPerMtok: 0.3, measured: false, fromEnv: true });
-  } finally {
-    delete process.env[RATE_ENV];
-  }
-});
-
-test('declaredRate: a malformed override prices nothing rather than falling through', () => {
-  // Falling back to something else here would quietly bill at a different
-  // number than the one the user typed, which is the failure mode this module
-  // exists to avoid. Silence sends them back to fix the typo.
-  for (const bad of ['abc', '0', '-1', 'NaN', 'Infinity']) {
-    process.env[RATE_ENV] = bad;
-    try {
-      assert.equal(declaredRate('some-future-model'), null, `override ${bad} must price nothing`);
-      assert.equal(declaredRate(null), null, `override ${bad} must price nothing`);
-    } finally {
-      delete process.env[RATE_ENV];
-    }
-  }
-});
-
-test('envRate: reads the override, and rejects everything unusable', () => {
-  delete process.env[RATE_ENV];
-  assert.equal(envRate(), null, 'unset');
-  process.env[RATE_ENV] = '   ';
-  assert.equal(envRate(), null, 'blank');
-  process.env[RATE_ENV] = '2.5';
-  assert.equal(envRate(), 2.5);
-  delete process.env[RATE_ENV];
+test('listRate: a model we are not sure of is never priced', () => {
+  // The whole point of the redesign: only a model the AGENT named prices
+  // anything. An id with no confidence behind it buys no dollar figure.
+  assert.equal(listRate({ id: 'claude-opus-5', confidence: 'unknown' }), null);
 });
 
 // ── pricingFor: the one precedence every savings surface reads ────────────
 
-test('pricingFor: measured billing outranks every list price and override', () => {
-  process.env[RATE_ENV] = '99';
-  try {
-    const measured = { usdPerMtok: 0.6, measured: true };
-    const p = pricingFor({ id: 'claude-opus-5', confidence: 'certain' }, measured);
-    assert.deepEqual(p.rate, measured);
-    assert.equal(p.model.confidence, 'certain');
-  } finally {
-    delete process.env[RATE_ENV];
-  }
+test('pricingFor: measured billing outranks the list price', () => {
+  const measured = { usdPerMtok: 0.6, measured: true };
+  const p = pricingFor(certain('claude-opus-5'), measured);
+  assert.deepEqual(p.rate, measured);
+  assert.equal(p.model.confidence, 'certain');
 });
 
-test('pricingFor: a certain model is marked named, a declared one is not', () => {
-  delete process.env[RATE_ENV];
-  // `named` is what tells the tally "this is the model that ran" rather than
-  // "this is what a config file last said".
-  assert.equal(pricingFor({ id: 'claude-opus-5', confidence: 'certain' }).rate?.named, true);
-  assert.equal(pricingFor({ id: 'claude-opus-5', confidence: 'declared' }).rate?.named, false);
+test('pricingFor: with no measurement, a named model gets its list price', () => {
+  assert.equal(pricingFor(certain('claude-opus-5')).rate?.usdPerMtok, 5);
 });
 
-test('pricingFor: no model and no override prices nothing, but keeps the model', () => {
-  delete process.env[RATE_ENV];
+test('pricingFor: no model prices nothing, but keeps the model knowledge', () => {
   const p = pricingFor(NO_MODEL);
   assert.equal(p.rate, null);
-  // The model travels even with no rate: the unpriced wording has to name what
-  // it could not price.
+  // The model travels even with no rate: the caller still has to know whether
+  // it is looking at "unknown model" or "known model, unknown price".
   assert.deepEqual(p.model, NO_MODEL);
 
-  const unpriced = pricingFor({ id: 'claude-opus-6', confidence: 'certain' });
+  const unpriced = pricingFor(certain('claude-opus-6'));
   assert.equal(unpriced.rate, null);
   assert.equal(unpriced.model.id, 'claude-opus-6');
 });
@@ -307,9 +246,9 @@ test('valueSaved: the measured flag travels with the number', () => {
   assert.equal(measured?.measured, true);
   assert.ok(Math.abs(measured!.usd - 0.06) < 1e-9, `got ${measured?.usd}`);
 
-  const declared = valueSaved(100_000, { usdPerMtok: 0.75, measured: false });
-  assert.equal(declared?.measured, false);
-  assert.ok(Math.abs(declared!.usd - 0.075) < 1e-9, `got ${declared?.usd}`);
+  const list = valueSaved(100_000, { usdPerMtok: 0.75, measured: false });
+  assert.equal(list?.measured, false);
+  assert.ok(Math.abs(list!.usd - 0.075) < 1e-9, `got ${list?.usd}`);
 
   assert.equal(valueSaved(100_000, null), null, 'no rate, no figure');
   assert.equal(valueSaved(0, { usdPerMtok: 5, measured: true }), null, 'nothing saved');

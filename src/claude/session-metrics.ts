@@ -41,6 +41,7 @@ import {
   type Pricing,
 } from '../context/price.js';
 import { agentModel, currentModel, recordSavedTokens } from './ledger.js';
+import { withHostLabel } from '../hosts/models.js';
 import { readSession, writeSession, sessionDir, listSessionIds, type SessionState } from './state.js';
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
@@ -207,7 +208,11 @@ export function latestSession(dir: string): SessionSummary | null {
  */
 export function sessionPricing(dir: string): Pricing {
   const s = latestSession(dir);
-  return pricingFor(agentModel(dir, s?.model), blendedRate(s?.inputCostMicros, s?.inputTokensBilled));
+  // The host's display name is attached here rather than at the naming site:
+  // `--agent-model` and a transcript stamp both carry a wire id, while the user
+  // picked that model from a menu showing something friendlier.
+  const model = withHostLabel(agentModel(dir, s?.model));
+  return pricingFor(model, blendedRate(s?.inputCostMicros, s?.inputTokensBilled));
 }
 
 /** Just the rate, for the surfaces (stats readout) that show a number and never

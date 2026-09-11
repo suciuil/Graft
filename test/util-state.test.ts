@@ -13,9 +13,9 @@ import { join } from "node:path";
 import {
   buildConfigPath,
   cacheDir,
+  ensureDefaultBuildConfig,
   patchBuildConfig,
   readBuildConfig,
-  readDeclaredModel,
   readFollowSubmodules,
   readExcludeDirs,
   readIncludeDirs,
@@ -143,10 +143,23 @@ test("resolveContextDir takes an absolute GRAFT_DIR verbatim", () => {
   });
 });
 
-test("readDeclaredModel resolves from graft config or host configs", () => {
+test("a `model` left in an old config is preserved on disk but never read", () => {
+  // The field was removed from the schema, not from users' files. Rewriting a
+  // file the user owns to delete a key is worse than ignoring the key.
   const d = fresh();
-  assert.equal(readDeclaredModel(d), null);
-
-  writeBuildConfig(d, { model: "claude-3.7-sonnet" });
-  assert.equal(readDeclaredModel(d), "claude-3.7-sonnet");
+  writeBuildConfig(d, { model: "claude-3.7-sonnet" } as Record<string, unknown>);
+  ensureDefaultBuildConfig(d);
+  assert.equal(
+    (readBuildConfig(d) as Record<string, unknown>).model,
+    "claude-3.7-sonnet",
+    "the stale value survives a top-up",
+  );
+  // ...and the scaffold no longer offers the key to anyone new.
+  assert.ok(!("model" in (pendingKeys(fresh()) ?? {})), "a fresh scaffold has no model field");
 });
+
+/** The keys `ensureDefaultBuildConfig` would write into a virgin repo. */
+function pendingKeys(d: string): Record<string, unknown> | null {
+  ensureDefaultBuildConfig(d);
+  return readBuildConfig(d) as Record<string, unknown> | null;
+}

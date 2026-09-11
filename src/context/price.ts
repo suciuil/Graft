@@ -8,22 +8,22 @@
  * how much of its context was served from cache — facts only the host's
  * transcript knows.
  *
- * Nothing here guesses. A model we don't have a price for yields null, and the
- * callers then render the token count alone rather than a dollar figure we made
- * up. The one way a number appears without a measurement is when the user
- * declares one — a `model` in `.graft/config.json`, or the bare
- * `GRAFT_INPUT_USD_PER_MTOK` override — which is what the many hosts that expose
- * no billing at all (Copilot, Kilo, Codex, Cursor) have to fall back on. A
- * declared rate is still not a guess, but it IS a list rate with no observable
- * cache discount, so it carries `measured: false` and every surface labels it. A
- * wrong number on the statusline is worse than no number; an unlabelled one is
- * worse still.
+ * Nothing here guesses, and nothing here is declared. A price is only ever
+ * attached to a model the AGENT ITSELF named — via `--agent-model`, or a stamp
+ * the host wrote into its own transcript — because that is the only kind of
+ * claim that cannot silently rot. Standing declarations (a `model` field in a
+ * config file, a `$/Mtok` env override) were both removed for exactly that
+ * reason: they outlive the session that justified them, and a stale price reads
+ * on screen precisely like a correct one.
  *
- * Precedence, once and for all (see {@link pricingFor}): what the session was
- * BILLED, else this table's list price for the model we know we ran, else the
- * env override. The override is last because it is the crudest of the three —
- * a bare number nobody can check against a model — so it fills the hole the
- * other two leave rather than papering over an answer they already have.
+ * So there are two states and no third. Either we know the model and this table
+ * prices it — one figure, attributable — or we do not, and the saving is
+ * reported in tokens alone. What fills that second gap is NOT a guessed rate: it
+ * is the per-model table in `hosts/models.ts`, which prices the same saving under
+ * every model the user's agent offers and lets them read their own row.
+ *
+ * Precedence (see {@link pricingFor}): what the session was BILLED, else this
+ * table's list price for the model we were told we are running. Nothing else.
  */
 
 /** Input $/Mtok, list price, per model family. Output tokens are irrelevant —
@@ -159,42 +159,34 @@ export function turnInputTokens(usage: TurnUsage): number {
 export interface InputRate {
   usdPerMtok: number;
   measured: boolean;
-  /** The model this rate is being applied TO, so surfaces can name it. Named
-   * even when the number came from the env override: the user still wants to
-   * read which model their tokens were priced for, and a rate that names the
-   * model it assumed is the only kind a reader can catch out. Absent for a
-   * measured rate (the session is the proof) and when nothing named a model. */
+  /** The model this rate prices, so every surface can name it. A figure that
+   * names the model behind it is one the reader can check; a bare one is not.
+   * Absent for a measured rate, where the session itself is the proof. */
   model?: string;
-  /** We KNOW this is the model that ran: the host stamped it in the transcript,
-   * or the agent named itself on this very call with `--agent-model`. The price
-   * may still be list, but the model is not a guess — the distinction the
-   * user-facing tally has to make, or a standing `.graft/config.json`
-   * declaration (which a mid-session model switch silently invalidates) reads as
-   * confidently as a measured turn. */
-  named?: boolean;
-  /** The NUMBER came from `GRAFT_INPUT_USD_PER_MTOK` rather than from graft's
-   * own table. Only ever set when the table had no price to offer: a rate we
-   * know is right is never overridden by a bare number the user typed once. */
-  fromEnv?: boolean;
+  /** Display name for {@link model}, when the host gave one ("Claude Opus 5"
+   * rather than `vertex_ai/claude-opus-5`). The tally prefers it: the user
+   * picked the model from a menu showing this string, not the wire id. */
+  label?: string;
 }
 
 /**
- * How sure we are of the model a saving should be priced at — the axis the
- * whole precedence below turns on.
+ * How sure we are of the model a saving should be priced at.
  *
- * `certain` is a model the host stamped in its transcript or the agent named on
- * this very call: it is what the turn actually ran, so nothing may override it.
- * `declared` is the standing `model` in `.graft/config.json`, which is the
- * user's best guess and goes stale the moment they switch models in their host's
- * UI. `unknown` is a host that names no model over a repo that declares none.
+ * Only two values, deliberately. `certain` is a model the host stamped in its
+ * transcript or the agent named on this very call — what the turn actually ran.
+ * `unknown` is everything else. The old middle ground (`declared`, a model
+ * standing in a config file) is gone: it was a guess wearing the same clothes as
+ * a fact, and on screen the two were indistinguishable.
  */
-export type ModelConfidence = 'certain' | 'declared' | 'unknown';
+export type ModelConfidence = 'certain' | 'unknown';
 
 /** The model a saving belongs to, and how sure we are of it. */
 export interface AgentModel {
   /** The model id, or null when nothing named one (`confidence: 'unknown'`). */
   id: string | null;
   confidence: ModelConfidence;
+  /** The host's display name for it, when one is known. */
+  label?: string;
 }
 
 /** Nothing named a model. */
@@ -231,53 +223,21 @@ export function blendedRate(
   return Number.isFinite(usdPerMtok) && usdPerMtok > 0 ? { usdPerMtok, measured: true } : null;
 }
 
-/** Overrides the model lookup, for a host that reports no model at all or one
- * this table has never heard of. */
-export const RATE_ENV = 'GRAFT_INPUT_USD_PER_MTOK';
-
-/** The env override as a number, or null when it is unset, blank or malformed.
- * A malformed value prices nothing rather than being coerced: silently billing
- * at a different number than the one that was typed is exactly the class of
- * quiet wrongness this module exists to avoid. */
-export function envRate(): number | null {
-  const raw = process.env[RATE_ENV];
-  if (raw === undefined || raw.trim() === '') return null;
-  const usdPerMtok = Number(raw);
-  return Number.isFinite(usdPerMtok) && usdPerMtok > 0 ? usdPerMtok : null;
-}
-
 /**
- * The rate the user declared, for the hosts that measure nothing.
+ * The list price for a model the agent named, or null when this table has never
+ * heard of it (or nothing named a model at all).
  *
- * Codex and Cursor fire no turn-end event carrying a transcript, and Copilot and
- * Kilo expose no billing surface whatsoever — so for them the measured path can
- * never produce a number. Declaring one is the only honest alternative to
- * silence, and it stays honest because the user chose it: a `model` in
- * `.graft/config.json` (or one the host/agent named outright) that this table
- * prices, else the `GRAFT_INPUT_USD_PER_MTOK` number.
- *
- * The table BEATS the override, which is the one ordering choice here worth
- * arguing about. When we know the model and know its price, that pair is a fact
- * about the world; the override is a number the user typed into their shell
- * once, months ago, for a model they may no longer run. Letting it win would
- * mean a correct price could be silently replaced by a stale one, and the user
- * would have no way to see it happen. So the override does what an override of
- * last resort should: it fills the hole — an unpriced or unnamed model — and
- * touches nothing else.
+ * Named `listRate` rather than the old `declaredRate` because the distinction is
+ * now the whole point: nothing is DECLARED to graft any more. The only input is a
+ * model the agent itself reported for THIS session, and the only output is that
+ * model's published rate. A model we were merely told about once, in a file, no
+ * longer prices anything.
  */
-export function declaredRate(model?: string | null, opts: { named?: boolean } = {}): InputRate | null {
-  const named = opts.named === true;
-  const id = typeof model === 'string' && model.trim() ? model.trim() : null;
-  const list = inputUsdPerMtok(id);
-  if (list !== null) return { usdPerMtok: list, measured: false, model: id!, named };
-  const env = envRate();
-  if (env === null) return null;
-  // The model rides along even here: the number is the user's, but it is still
-  // being applied to THIS model, and a tally that names it is one the reader can
-  // check. `id === null` (nothing named a model) simply omits it.
-  return id === null
-    ? { usdPerMtok: env, measured: false, fromEnv: true }
-    : { usdPerMtok: env, measured: false, model: id, named, fromEnv: true };
+export function listRate(model: AgentModel): InputRate | null {
+  if (model.confidence !== 'certain' || !model.id) return null;
+  const usdPerMtok = inputUsdPerMtok(model.id);
+  if (usdPerMtok === null) return null;
+  return { usdPerMtok, measured: false, model: model.id, label: model.label };
 }
 
 /**
@@ -289,15 +249,12 @@ export function declaredRate(model?: string | null, opts: { named?: boolean } = 
  * switches already folded in, and no list price can improve on that.
  */
 export function pricingFor(model: AgentModel, measured: InputRate | null = null): Pricing {
-  if (measured) return { rate: measured, model };
-  return {
-    rate: declaredRate(model.id, { named: model.confidence === 'certain' }),
-    model,
-  };
+  return { rate: measured ?? listRate(model), model };
 }
 
 /** What a saving was worth, carrying through whether the rate behind it was
- * measured or merely declared. Null when there is no rate, or nothing saved. */
+ * measured or a published list price. Null when there is no rate, or nothing
+ * saved. */
 export function valueSaved(
   savedTokens: number,
   rate: InputRate | null,
@@ -311,7 +268,7 @@ export function valueSaved(
 
 /**
  * Dollars saved, at the rate the session has actually been paying — the
- * measured path only, with no declared-rate fallback.
+ * measured path only, with no list-price fallback.
  */
 export function dollarsSaved(
   savedTokens: number,

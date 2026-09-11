@@ -63,11 +63,12 @@ same answer for a fraction of the tokens, and the graph edges behind
 Pass \`--agent-model <your own model id>\` on your graft calls when you know it
 (e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices
 the tokens it saves at YOUR model's rate, and it cannot see which model you are;
-without this it reports the saving in tokens alone. On an MCP host, where no
-flag can be passed, set \`model\` in \`.graft/config.json\` instead.
-When you report the saving, reuse the parenthetical from the example tally in
-graft's output verbatim: it names the model and rate the dollar figure rests on,
-or the exact reason there is none.
+without this it reports the saving in tokens alone. Graft never guesses a model
+and never reads one from a config file, so this flag is the only way to get a
+dollar figure.
+Every graft output ends with an example tally in quotes. Close your reply with
+it, verbatim, substituting the summed tokens and dollars — it already says
+exactly what may and may not be claimed about the price.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }
@@ -92,9 +93,38 @@ ${instructionBody()}
 /**
  * Kilo Code rule files are plain markdown — no frontmatter. They are loaded by
  * being listed in `instructions` in kilo.jsonc, which hosts/kilo.ts writes.
+ *
+ * Kilo gets one section nobody else does. It reaches graft over MCP, where no
+ * `--agent-model` flag can be passed and no transcript is stamped, so its
+ * savings can never be priced at a single model. What it CAN do — uniquely —
+ * is enumerate the models its own configuration offers, so graft hands it a
+ * per-model table instead of a bare token count. The rule has to explain what to
+ * do with that table, because the shape of the reply is otherwise unguessable.
  */
 export function kiloRule(): string {
   return `${instructionBody()}
+
+### Reporting what graft saved (Kilo Code)
+
+Graft cannot know which model you are running: Kilo reaches it over MCP, which
+passes no model and stamps no transcript. So instead of a single dollar figure,
+graft's output carries a table pricing this turn's saving under every model your
+Kilo configuration offers.
+
+Close any reply where you used graft with that tally, summed across your graft
+calls, and put the table in a **collapsed/expandable section** so it never
+crowds out the answer itself:
+
+\`\`\`
+🌱 graft saved ~5,548 tokens by this turn, which estimates in $ as following:
+| Claude Opus 5     | $0.03 |
+| Claude Sonnet 4.6 | $0.02 |
+| Gemini 3.8 Flash  | $0.01 |
+\`\`\`
+
+Reproduce the rows graft gives you — do not add models, drop models, or reorder
+them, and never price a token yourself. A model graft has no published rate for
+is already absent from the table by design.
 `;
 }
 

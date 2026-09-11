@@ -137,21 +137,18 @@ skip it. This is the per-turn figure; the statusline carries the running
 session total.
 
 Each line also carries an example tally in quotes, ending in `this turn`. Use
-its parenthetical **verbatim**, with `~$X` replaced by the summed dollar value
-and `~N` by the summed tokens — it states which model and rate the figure rests
-on, e.g. `🌱 graft saved ~12,400 tokens (~$0.04 at $5/input mtok for
-claude-opus-5) this turn`. Never price tokens yourself and never simplify that
-parenthetical away: it is the only place the user learns what their saving was
-priced at, and whether the price was measured, listed, or assumed. When it says
-the saving cannot be valued in dollars, relay that reason too — it names the
-exact thing the user would have to set to get a figure.
+it **verbatim**, with `~$X` replaced by the summed dollar value and `~N` by the
+summed tokens, e.g. `🌱 graft saved ~12,400 tokens (~$0.04 for Claude Opus 5)
+this turn`. Never price tokens yourself and never simplify the parenthetical
+away: it is the only place the user learns which model their saving was priced
+at. When the example carries no dollar figure, report the tokens alone — graft
+could not identify the model, and a number you invent is worse than none.
 
 Pass `--agent-model <your own model id>` on your graft calls when you know it
 (e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices the
-tokens it saves at YOUR model's rate and cannot see which model you are; on a
-host that reports no billing, this flag is the only thing standing between a
-priced saving and one filed unpriced forever. Can't pass flags (an MCP host)?
-Set `model` in `.graft/config.json` instead.
+tokens it saves at YOUR model's rate and cannot see which model you are, and it
+will not read one from a config file — so this flag is the only thing standing
+between a priced saving and one reported in tokens forever.
 
 **Never pipe a graft command through `head`, `tail`, or `sed -n`.** Every tool
 is already capped and states what it dropped; clipping it costs you hits you
