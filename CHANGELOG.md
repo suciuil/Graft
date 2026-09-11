@@ -1,75 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.18.0
 
-### Changed
+### Added
 
-- **Saved tokens are priced at the coding agent's model, never at `GRAFT_MODEL`.**
-  That variable names the model graft's own `--deep` enrichment pass calls — in
-  practice a cheap summariser behind a different gateway than the agent the user
-  is talking to — so pricing a saving with it was off by whatever the two list
-  rates differ by, silently and in either direction. The agent's model now comes
-  from the host's transcript when it stamps one, else `--agent-model <id>` (a new
-  global flag the agent passes to name itself), else `model` in
-  `.graft/config.json`. As before, nothing named means the saving is reported in
-  tokens alone rather than priced at a guess. Hosts that stamp a model — Claude
-  Code — are unaffected; a repo that was relying on `GRAFT_MODEL` to price should
-  set the config field instead.
-- **A saving is priced only at a model the agent itself named.** Graft used to
-  accept standing declarations — a `model` field in `.graft/config.json`, a
-  `$/Mtok` figure in `GRAFT_INPUT_USD_PER_MTOK` — and price from whichever it
-  found. Both outlive the session that justified them, and on screen a stale
-  price is indistinguishable from a correct one, so a user who switched models
-  months ago was quietly shown the wrong number every turn. There are now two
-  states and no third: either the model is known for THIS turn (the host stamped
-  it, or `--agent-model` named it) and the tally reads
-  `🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this turn`, or it is
-  not, and the saving is reported in tokens alone.
-- **The tally names the model the way the user's host does.** `--agent-model
-  vertex_ai/claude-opus-5` reports as "Claude Opus 5" when the host config gives
-  that display name — the string the user actually picked from a menu, rather
-  than the routing-prefixed wire id they would have to decode.
-- **Kilo Code gets a per-model table instead of a bare token count.** Kilo
-  reaches graft over MCP, where no flag can be passed and no transcript is
-  stamped, so its savings can never be attributed to one model. But its own
-  configuration lists the models it can run, so graft now prices the saving under
-  every one of them and hands the agent a ready-made table to relay in a
-  collapsed section. A table of honest alternatives beats one confident wrong
-  figure, and beats silence. Models graft has no published rate for are omitted
-  rather than shown as `—`.
-- **Kilo Code 5.x configs are read too.** The 5.x extension keeps its model list
-  in `~/.kilocode/secrets.json`, as a JSON-encoded string nested inside the outer
-  JSON, one entry per API profile — a completely different shape from 7.x's
-  `~/.config/kilo/kilo.jsonc`. Both are read and merged into one de-duplicated
-  list, so a user mid-upgrade sees a single table rather than two or none.
-
-### Removed
-
-- **`GRAFT_AGENT_MODEL`, `GRAFT_INPUT_USD_PER_MTOK`, and the `model` field in
-  `.graft/config.json` no longer affect pricing.** All three were standing
-  declarations of the same kind, and all three had the same failure mode: they
-  kept producing confident numbers long after they stopped being true. Pass
-  `--agent-model <id>` on the call instead — a model named per call cannot go
-  stale. An existing `model` field is left in place on disk (rewriting a file the
-  user owns to delete a key is worse than ignoring it) but is read by nothing.
+- **Trail Brain integration** (#322): graft can build a *brain* from a repo and
+  carry its rules into every `ask` — a two-way link, so retrieval is shaped by
+  the team context a brain accumulates, not the code graph alone.
+- **A brain verifies the checkout before it mines** (#344): graft checks the
+  working copy against the repo a brain expects, so rules are never mined from
+  the wrong tree.
 
 ### Fixed
 
-- **`graft savings` counts what the CLI saved.** The ledger had two writers —
-  the Claude Code hooks and the MCP server — so a host that drives graft from a
-  *terminal*, which is how Copilot and Kilo reach it when the MCP server isn't
-  wired, printed a savings footer on every call and filed none of them. `graft
-  savings` was permanently empty for those users. Each retrieval command now
-  files what it claimed, once, on the way out; the MCP server still files per
-  call and clears the accumulator so its long-lived process cannot carry one
-  call's tokens into the next.
-- **A gateway-routed model id is priced like the model it names.** The list-price
-  patterns are anchored, so a host reporting `anthropic/claude-opus-5` or
-  `azure/eastus/gpt-5.6-luna` — the shape Kilo, Copilot and any LiteLLM-style
-  proxy use — matched nothing and reported tokens without dollars. The routing
-  prefix says who serves the model, not which one it is, so it is dropped before
-  the lookup. Savings are still filed under the id the host reported, leaving two
-  routes to the same model distinguishable in `graft savings`.
+- **A brain refreshes its rules from upkeep** (#343), so a single empty pull no
+  longer leaves it stuck without rules.
 
 ## 0.17.0
 
