@@ -58,7 +58,11 @@ same answer for a fraction of the tokens, and the graph edges behind
 Pass `--agent-model <your own model id>` on your graft calls when you know it
 (e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices
 the tokens it saves at YOUR model's rate, and it cannot see which model you are;
-without this it reports the saving in tokens alone.
+without this it reports the saving in tokens alone. On an MCP host, where no
+flag can be passed, set `model` in `.graft/config.json` instead.
+When you report the saving, reuse the parenthetical from the example tally in
+graft's output verbatim: it names the model and rate the dollar figure rests on,
+or the exact reason there is none.
 After big code changes, refresh the graph with `graft build` (deterministic,
 no API key, $0).
 <!-- graft:end -->

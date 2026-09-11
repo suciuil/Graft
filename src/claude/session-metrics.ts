@@ -32,8 +32,15 @@
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatCount, sumSavingsFooters } from '../context/savings.js';
-import { blendedRate, declaredRate, formatDollars, valueSaved, type InputRate } from '../context/price.js';
-import { currentModel, recordSavedTokens } from './ledger.js';
+import {
+  blendedRate,
+  formatDollars,
+  pricingFor,
+  valueSaved,
+  type InputRate,
+  type Pricing,
+} from '../context/price.js';
+import { agentModel, currentModel, recordSavedTokens } from './ledger.js';
 import { readSession, writeSession, sessionDir, listSessionIds, type SessionState } from './state.js';
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
@@ -179,27 +186,34 @@ export function latestSession(dir: string): SessionSummary | null {
  * Reads local JSON only; sends nothing.
  */
 /**
- * What this repo's most recent session pays per million input tokens, and
- * whether that was measured or declared.
+ * What this repo's most recent session pays per million input tokens, the model
+ * behind that price, and how sure we are of the model.
  *
- * Prefers the session's own blended rate; falls back to the rate the user
- * declared, which is the only number available on a host that reports no
- * billing (Copilot, Kilo, Codex, Cursor). Null when neither exists, so the
- * caller renders the token count alone.
+ * Prefers the session's own blended rate — what the user was actually billed,
+ * cache discounts and all — and falls back to the declared path, which is the
+ * only number available on a host that reports no billing (Copilot, Kilo, Codex,
+ * Cursor). The result always carries the model knowledge, even when it carries
+ * no rate: "we cannot price this" is only useful to a reader if it also says
+ * WHICH model went unpriced.
  *
- * The fallback goes through {@link currentModel}, not the config file alone: a
- * host that names its model only in `--agent-model` or `GRAFT_AGENT_MODEL`
- * would otherwise be priced at nothing while the savings ledger — which does
- * read them — prices the same tokens fine.
+ * The model goes through {@link agentModel}, not the config file alone, so a
+ * host that names its model only on the call (`--agent-model`) is priced as
+ * confidently as one that stamps it in a transcript.
  *
  * `latestSession` rather than a session id because the callers are CLI and MCP
  * processes answering one query: they know the repo, never the host's session
  * id. The rate belongs to the repo's current session, which is the one whose
  * reply the number is about to appear in.
  */
-export function sessionInputRate(dir: string): InputRate | null {
+export function sessionPricing(dir: string): Pricing {
   const s = latestSession(dir);
-  return blendedRate(s?.inputCostMicros, s?.inputTokensBilled) ?? declaredRate(currentModel(dir, s?.model));
+  return pricingFor(agentModel(dir, s?.model), blendedRate(s?.inputCostMicros, s?.inputTokensBilled));
+}
+
+/** Just the rate, for the surfaces (stats readout) that show a number and never
+ * have to explain its absence. */
+export function sessionInputRate(dir: string): InputRate | null {
+  return sessionPricing(dir).rate;
 }
 
 export function formatSessionStats(s: SessionSummary | null, rate: InputRate | null = null): string {

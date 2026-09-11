@@ -166,24 +166,45 @@ const BUILD_CONFIG_NOTE =
   "on hosts that report no billing; leave empty to show token counts alone.";
 
 /**
- * Scaffold `.graft/config.json` with every option at its default, unless the repo
- * already has one. Returns the path when it wrote, null when it left an existing
- * file alone — an existing config is the user's, and init must never overwrite it.
+ * The config `ensureDefaultBuildConfig` would write for repo `d`, or null when
+ * the file is already complete. The single source of truth for "would init
+ * touch this file?", so the real run and `--dry-run` cannot disagree.
+ *
+ * A top-up only ever ADDS absent keys and refreshes the `//` note; a value the
+ * user set is spread in last and never rewritten.
+ */
+function pendingBuildConfig(d: string): Record<string, unknown> | null {
+  const existing = readBuildConfig(d);
+  if (!existing) return { "//": BUILD_CONFIG_NOTE, ...DEFAULT_BUILD_CONFIG };
+  const complete = Object.keys(DEFAULT_BUILD_CONFIG).every((k) => k in existing);
+  if (complete && (existing as Record<string, unknown>)["//"] === BUILD_CONFIG_NOTE) return null;
+  return { ...DEFAULT_BUILD_CONFIG, ...existing, "//": BUILD_CONFIG_NOTE };
+}
+
+/**
+ * Scaffold `.graft/config.json` with every option at its default, or top up an
+ * existing one with the options it predates. Returns the path when it wrote,
+ * null when the file was already complete.
+ *
+ * Without the top-up, a repo initialized by an older graft keeps a config that
+ * silently lacks `model`, and its savings stay unpriced forever because nothing
+ * on a no-billing host can name the agent's model.
  */
 export function ensureDefaultBuildConfig(d: string): string | null {
-  const path = missingBuildConfigPath(d);
-  if (!path) return null;
+  const next = pendingBuildConfig(d);
+  if (!next) return null;
+  const path = buildConfigPath(d);
   ensureBuildConfigIgnored(d);
-  writeJsonAtomic(path, { "//": BUILD_CONFIG_NOTE, ...DEFAULT_BUILD_CONFIG });
+  writeJsonAtomic(path, next);
   return path;
 }
 
-/** The config path `graft init` would create for repo `d`, or null when one is
- * already there. Lets `--dry-run` report exactly what the real run would write
- * without duplicating the "only if absent" rule. */
+/** The config path `graft init` would write for repo `d` — creating it, or
+ * topping up one that predates an option — or null when the file is already
+ * complete. Lets `--dry-run` report exactly what the real run would write
+ * without duplicating the rule. */
 export function missingBuildConfigPath(d: string): string | null {
-  const path = buildConfigPath(d);
-  return existsSync(path) ? null : path;
+  return pendingBuildConfig(d) ? buildConfigPath(d) : null;
 }
 
 export function readBuildConfig(d: string): BuildConfig | null { return readJson<BuildConfig>(buildConfigPath(d)); }

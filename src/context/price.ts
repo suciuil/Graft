@@ -11,12 +11,19 @@
  * Nothing here guesses. A model we don't have a price for yields null, and the
  * callers then render the token count alone rather than a dollar figure we made
  * up. The one way a number appears without a measurement is when the user
- * declares one — `GRAFT_INPUT_USD_PER_MTOK`, or a `model` in
- * `.graft/config.json` — which is what the many hosts that expose no billing at
- * all (Copilot, Kilo, Codex, Cursor) have to fall back on. A declared rate is
- * still not a guess, but it IS a list rate with no observable cache discount, so
- * it carries `measured: false` and every surface labels it. A wrong number on
- * the statusline is worse than no number; an unlabelled one is worse still.
+ * declares one — a `model` in `.graft/config.json`, or the bare
+ * `GRAFT_INPUT_USD_PER_MTOK` override — which is what the many hosts that expose
+ * no billing at all (Copilot, Kilo, Codex, Cursor) have to fall back on. A
+ * declared rate is still not a guess, but it IS a list rate with no observable
+ * cache discount, so it carries `measured: false` and every surface labels it. A
+ * wrong number on the statusline is worse than no number; an unlabelled one is
+ * worse still.
+ *
+ * Precedence, once and for all (see {@link pricingFor}): what the session was
+ * BILLED, else this table's list price for the model we know we ran, else the
+ * env override. The override is last because it is the crudest of the three —
+ * a bare number nobody can check against a model — so it fills the hole the
+ * other two leave rather than papering over an answer they already have.
  */
 
 /** Input $/Mtok, list price, per model family. Output tokens are irrelevant —
@@ -28,43 +35,60 @@
  * count, and quoting the higher tier would overstate every figure. */
 const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
   [/^claude-(fable|mythos)-5/i, 10],
-  [/^claude-opus-(5(-0)?|4-[5-8])/i, 5],
+  [/^claude-opus-(5(-0)?|4[.-][5-8])/i, 5],
   [/^claude-sonnet-5(-0)?/i, 2],
-  [/^claude-sonnet-4-[56]/i, 3],
+  [/^claude-sonnet-4[.-][56]/i, 3],
   [/^claude-3[.-]7-sonnet/i, 3],
-  [/^claude-haiku-4-5/i, 1],
-  [/^gpt-5\.6-sol/i, 4],
-  [/^gpt-5\.6-terra/i, 2],
-  [/^gpt-5\.6-luna/i, 0.2],
-  [/^gpt-5\.5/i, 5],
-  [/^gpt-5\.4-mini/i, 0.75],
-  [/^gpt-5\.4-nano/i, 0.2],
-  [/^gpt-5\.4/i, 2.5],
-  [/^gpt-5\.3-codex/i, 1.75],
-  [/^gpt-5\.2/i, 1.75],
-  [/^gpt-5\.1/i, 1.25],
+  [/^claude-haiku-4[.-]5/i, 1],
+  [/^gpt-5[.-]6-sol/i, 4],
+  [/^gpt-5[.-]6-terra/i, 2],
+  [/^gpt-5[.-]6-luna/i, 0.2],
+  [/^gpt-5[.-]5/i, 5],
+  [/^gpt-5[.-]4-mini/i, 0.75],
+  [/^gpt-5[.-]4-nano/i, 0.2],
+  [/^gpt-5[.-]4/i, 2.5],
+  [/^gpt-5[.-]3-codex/i, 1.75],
+  [/^gpt-5[.-]2/i, 1.75],
+  [/^gpt-5[.-]1/i, 1.25],
   [/^gpt-5-mini/i, 0.25],
   [/^gpt-5-nano/i, 0.05],
   [/^gpt-5(-chat)?$/i, 1.25],
   [/^gpt-4o-mini/i, 0.15],
   [/^gpt-3\.?5-turbo/i, 0.5],
   [/^(gpt-)?o3-mini/i, 1.1],
-  [/^gemini-3\.[678]-flash/i, 0.75],
-  [/^gemini-3\.5-flash-lite/i, 0.3],
-  [/^gemini-3\.5-flash/i, 1.5],
-  [/^gemini-3\.1-flash-lite/i, 0.25],
-  [/^gemini-2\.5-pro/i, 1.25],
-  [/^gemini-2\.5-flash-lite/i, 0.1],
-  [/^gemini-2\.5-flash/i, 0.3],
-  [/^grok-4\.3/i, 1.25],
+  [/^gemini-3[.-][678]-flash/i, 0.75],
+  [/^gemini-3[.-]5-flash-lite/i, 0.3],
+  [/^gemini-3[.-]5-flash/i, 1.5],
+  [/^gemini-3[.-]1-flash-lite/i, 0.25],
+  [/^gemini-2[.-]5-pro/i, 1.25],
+  [/^gemini-2[.-]5-flash-lite/i, 0.1],
+  [/^gemini-2[.-]5-flash/i, 0.3],
+  [/^grok-4[.-]3/i, 1.25],
   [/^grok-4-fast/i, 0.2],
   [/^grok-3/i, 2],
-  [/^deepseek-v4-pro/i, 1.32],
-  [/^deepseek-v4-flash/i, 0.44],
-  [/^deepseek-v3\.2/i, 0.27],
-  [/^kimi-k2\.6/i, 0.8],
+  [/^deepseek-v4[.-]pro/i, 1.32],
+  [/^deepseek-v4[.-]flash/i, 0.44],
+  [/^deepseek-v3[.-]2/i, 0.27],
+  [/^kimi-k2[.-]6/i, 0.8],
   [/^kimi-k2-thinking/i, 0.6],
 ];
+
+/**
+ * A model id reduced to the form the table is written in: routing prefix
+ * dropped, and the separators a human types (spaces, underscores) folded to the
+ * hyphens a model id uses.
+ *
+ * The two prefix shapes are what hosts and marketplaces actually display:
+ * `anthropic/claude-opus-5` names who SERVES the model, and `Google: Gemini 3.8
+ * Flash` is a vendor label on a UI row. The `word:` rule is deliberately
+ * letters-only so it can strip `Google:` without touching a real suffix like
+ * `gemini-3.8-flash:free`, whose left side carries digits and dots.
+ */
+export function normalizeModelId(model: string): string {
+  const trimmed = model.trim();
+  const routed = trimmed.slice(trimmed.lastIndexOf('/') + 1).trim();
+  return routed.replace(/^[A-Za-z]+\s*:\s*/, '').replace(/[\s_]+/g, '-');
+}
 
 /** List input price for a model id, or null when we don't know it — a model
  * released after this table was written, or a host reporting something else
@@ -79,8 +103,10 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
  * model stay distinguishable in the ledger. */
 export function inputUsdPerMtok(model: unknown): number | null {
   if (typeof model !== 'string') return null;
-  const named = model.trim();
-  const id = named.slice(named.lastIndexOf('/') + 1);
+  const raw = model.trim();
+  if (!raw) return null;
+  const id = normalizeModelId(raw);
+  if (!id) return null;
   for (const [pattern, usd] of INPUT_USD_PER_MTOK) if (pattern.test(id)) return usd;
   return null;
 }
@@ -133,6 +159,58 @@ export function turnInputTokens(usage: TurnUsage): number {
 export interface InputRate {
   usdPerMtok: number;
   measured: boolean;
+  /** The model this rate is being applied TO, so surfaces can name it. Named
+   * even when the number came from the env override: the user still wants to
+   * read which model their tokens were priced for, and a rate that names the
+   * model it assumed is the only kind a reader can catch out. Absent for a
+   * measured rate (the session is the proof) and when nothing named a model. */
+  model?: string;
+  /** We KNOW this is the model that ran: the host stamped it in the transcript,
+   * or the agent named itself on this very call with `--agent-model`. The price
+   * may still be list, but the model is not a guess — the distinction the
+   * user-facing tally has to make, or a standing `.graft/config.json`
+   * declaration (which a mid-session model switch silently invalidates) reads as
+   * confidently as a measured turn. */
+  named?: boolean;
+  /** The NUMBER came from `GRAFT_INPUT_USD_PER_MTOK` rather than from graft's
+   * own table. Only ever set when the table had no price to offer: a rate we
+   * know is right is never overridden by a bare number the user typed once. */
+  fromEnv?: boolean;
+}
+
+/**
+ * How sure we are of the model a saving should be priced at — the axis the
+ * whole precedence below turns on.
+ *
+ * `certain` is a model the host stamped in its transcript or the agent named on
+ * this very call: it is what the turn actually ran, so nothing may override it.
+ * `declared` is the standing `model` in `.graft/config.json`, which is the
+ * user's best guess and goes stale the moment they switch models in their host's
+ * UI. `unknown` is a host that names no model over a repo that declares none.
+ */
+export type ModelConfidence = 'certain' | 'declared' | 'unknown';
+
+/** The model a saving belongs to, and how sure we are of it. */
+export interface AgentModel {
+  /** The model id, or null when nothing named one (`confidence: 'unknown'`). */
+  id: string | null;
+  confidence: ModelConfidence;
+}
+
+/** Nothing named a model. */
+export const NO_MODEL: AgentModel = { id: null, confidence: 'unknown' };
+
+/**
+ * A rate to price a saving at, plus the model knowledge behind it — including
+ * when there is no rate, because the ABSENCE has to be explained too ("graft has
+ * no price for claude-opus-6, and you set no override") and only the model
+ * knowledge can explain it.
+ */
+export interface Pricing {
+  /** What to price at, or null when nothing here can price anything. */
+  rate: InputRate | null;
+  /** The model this was resolved for, wording material for either branch. */
+  model: AgentModel;
 }
 
 /**
@@ -157,28 +235,65 @@ export function blendedRate(
  * this table has never heard of. */
 export const RATE_ENV = 'GRAFT_INPUT_USD_PER_MTOK';
 
+/** The env override as a number, or null when it is unset, blank or malformed.
+ * A malformed value prices nothing rather than being coerced: silently billing
+ * at a different number than the one that was typed is exactly the class of
+ * quiet wrongness this module exists to avoid. */
+export function envRate(): number | null {
+  const raw = process.env[RATE_ENV];
+  if (raw === undefined || raw.trim() === '') return null;
+  const usdPerMtok = Number(raw);
+  return Number.isFinite(usdPerMtok) && usdPerMtok > 0 ? usdPerMtok : null;
+}
+
 /**
  * The rate the user declared, for the hosts that measure nothing.
  *
  * Codex and Cursor fire no turn-end event carrying a transcript, and Copilot and
  * Kilo expose no billing surface whatsoever — so for them the measured path can
  * never produce a number. Declaring one is the only honest alternative to
- * silence, and it stays honest because the user chose it: the env var outright,
- * or an agent model — `--agent-model`, `GRAFT_AGENT_MODEL`, or `model` in
- * `.graft/config.json` — that this table prices.
+ * silence, and it stays honest because the user chose it: a `model` in
+ * `.graft/config.json` (or one the host/agent named outright) that this table
+ * prices, else the `GRAFT_INPUT_USD_PER_MTOK` number.
  *
- * A malformed env value yields null rather than falling through to the model.
- * Silently pricing at a different number than the one that was typed is exactly
- * the class of quiet wrongness this module exists to avoid.
+ * The table BEATS the override, which is the one ordering choice here worth
+ * arguing about. When we know the model and know its price, that pair is a fact
+ * about the world; the override is a number the user typed into their shell
+ * once, months ago, for a model they may no longer run. Letting it win would
+ * mean a correct price could be silently replaced by a stale one, and the user
+ * would have no way to see it happen. So the override does what an override of
+ * last resort should: it fills the hole — an unpriced or unnamed model — and
+ * touches nothing else.
  */
-export function declaredRate(model?: string | null): InputRate | null {
-  const raw = process.env[RATE_ENV];
-  if (raw !== undefined && raw.trim() !== '') {
-    const usdPerMtok = Number(raw);
-    return Number.isFinite(usdPerMtok) && usdPerMtok > 0 ? { usdPerMtok, measured: false } : null;
-  }
-  const list = inputUsdPerMtok(model);
-  return list === null ? null : { usdPerMtok: list, measured: false };
+export function declaredRate(model?: string | null, opts: { named?: boolean } = {}): InputRate | null {
+  const named = opts.named === true;
+  const id = typeof model === 'string' && model.trim() ? model.trim() : null;
+  const list = inputUsdPerMtok(id);
+  if (list !== null) return { usdPerMtok: list, measured: false, model: id!, named };
+  const env = envRate();
+  if (env === null) return null;
+  // The model rides along even here: the number is the user's, but it is still
+  // being applied to THIS model, and a tally that names it is one the reader can
+  // check. `id === null` (nothing named a model) simply omits it.
+  return id === null
+    ? { usdPerMtok: env, measured: false, fromEnv: true }
+    : { usdPerMtok: env, measured: false, model: id, named, fromEnv: true };
+}
+
+/**
+ * Everything a savings surface needs to word itself: what to price at, and what
+ * we know about the model behind it — including when the answer is "nothing".
+ *
+ * `measured` (the session's own blended billing) always wins when it exists: it
+ * is what the user was actually charged, cache discounts and mid-session model
+ * switches already folded in, and no list price can improve on that.
+ */
+export function pricingFor(model: AgentModel, measured: InputRate | null = null): Pricing {
+  if (measured) return { rate: measured, model };
+  return {
+    rate: declaredRate(model.id, { named: model.confidence === 'certain' }),
+    model,
+  };
 }
 
 /** What a saving was worth, carrying through whether the rate behind it was

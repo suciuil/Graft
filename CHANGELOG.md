@@ -10,11 +10,38 @@
   is talking to — so pricing a saving with it was off by whatever the two list
   rates differ by, silently and in either direction. The agent's model now comes
   from the host's transcript when it stamps one, else `--agent-model <id>` (a new
-  global flag the agent passes to name itself), else `GRAFT_AGENT_MODEL`, else
-  `model` in `.graft/config.json`. As before, nothing named means the saving is
-  reported in tokens alone rather than priced at a guess. Hosts that stamp a
-  model — Claude Code — are unaffected; a repo that was relying on `GRAFT_MODEL`
-  to price should set `GRAFT_AGENT_MODEL` or the config field instead.
+  global flag the agent passes to name itself), else `model` in
+  `.graft/config.json`. As before, nothing named means the saving is reported in
+  tokens alone rather than priced at a guess. Hosts that stamp a model — Claude
+  Code — are unaffected; a repo that was relying on `GRAFT_MODEL` to price should
+  set the config field instead.
+- **The savings tally says what it priced at, and why, in the line the user
+  actually reads.** The dollar figure the agent relays used to arrive with its
+  caveats stripped: the sentence explaining that `$0.04` was a list price for a
+  model read out of a config file was written for the agent, and the agent
+  relayed only the example. So a stale `model` entry produced a number that read
+  exactly as confidently as one measured from real billing. The example now
+  carries the whole basis — `🌱 graft saved ~5,548 tokens (~$0.03 at $5/input
+  mtok for claude-opus-5) this turn`, or `… for claude-opus-5 specified as model
+  in .graft/config.json`, or the specific reason no figure exists — so the reader
+  can tell a measured price from an assumed one and knows what to change.
+  Previously an unpriced saving simply dropped the money and said nothing.
+- **A price graft is sure of is no longer overridden by
+  `GRAFT_INPUT_USD_PER_MTOK`.** The override used to win over everything, so a
+  number exported into a shell months ago silently repriced a model graft knows
+  the list rate for — replacing a correct figure with a stale one, invisibly. It
+  is now the fallback it was always meant to be: measured billing first, then the
+  list price for the model we know we ran, then the override, which fills in only
+  for a model graft has no price for (or none at all) and says so when it does.
+
+### Removed
+
+- **`GRAFT_AGENT_MODEL` no longer names the model a saving is priced at.** It was
+  a second standing declaration alongside `model` in `.graft/config.json`, but
+  invisible in the repo and outranking it — a variable in a shell profile quietly
+  out-voting the file the user was staring at while wondering why the number was
+  wrong. One reviewable declaration is enough. Set `model` in
+  `.graft/config.json`, or pass `--agent-model <id>` on the call.
 
 ### Fixed
 

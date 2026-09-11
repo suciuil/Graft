@@ -16,7 +16,10 @@ import {
   formatDollars,
   blendedRate,
   declaredRate,
+  envRate,
+  pricingFor,
   valueSaved,
+  NO_MODEL,
   RATE_ENV,
 } from '../src/context/price.js';
 
@@ -93,9 +96,27 @@ test('inputUsdPerMtok: a provider routing prefix names the server, not the model
   assert.equal(inputUsdPerMtok('copilot/gpt-5.6-terra'), 2);
   assert.equal(inputUsdPerMtok('azure/eastus/gpt-5.6-luna'), 0.2, 'a multi-segment route reduces too');
   assert.equal(inputUsdPerMtok('  google/gemini-3.8-flash  '), 0.75, 'surrounding whitespace is not an id');
+  assert.equal(inputUsdPerMtok('openrouter/google/gemini-3.8-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('kilo/gemini-3.8-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('Google: Gemini 3.8 Flash'), 0.75);
   // Stripping is prefix-only: it must not rescue a model this table cannot price.
   assert.equal(inputUsdPerMtok('anthropic/some-future-model'), null);
   assert.equal(inputUsdPerMtok('claude-opus-5/'), null, 'nothing after the slash is no model at all');
+});
+
+test('inputUsdPerMtok: human-formatted and UI model names match via normalisation', () => {
+  assert.equal(inputUsdPerMtok('Gemini 3.8 Flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini 3.8 flash'), 0.75);
+  assert.equal(inputUsdPerMtok('Gemini 3.7 Flash'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3-8-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('Gemini 3.8 Flash (Preview)'), 0.75);
+  assert.equal(inputUsdPerMtok('gemini-3.8-flash:free'), 0.75);
+  assert.equal(inputUsdPerMtok('Claude 3.7 Sonnet'), 3);
+  assert.equal(inputUsdPerMtok('Claude Sonnet 4.5'), 3);
+  assert.equal(inputUsdPerMtok('Claude Opus 4.6'), 5);
+  assert.equal(inputUsdPerMtok('GPT 5.4'), 2.5);
+  assert.equal(inputUsdPerMtok('GPT-5.4'), 2.5);
+  assert.equal(inputUsdPerMtok('GPT 5.4 Mini'), 0.75);
 });
 
 test('turnInputCostMicros: fresh tokens cost list price', () => {
@@ -166,8 +187,10 @@ test('dollarsSaved: a non-finite accumulator never reaches a rendered surface', 
 
 test('declaredRate: a known model prices at list, and is marked unmeasured', () => {
   delete process.env[RATE_ENV];
-  assert.deepEqual(declaredRate('gemini-3.8-flash'), { usdPerMtok: 0.75, measured: false });
-  assert.deepEqual(declaredRate('gpt-5.6-sol'), { usdPerMtok: 4, measured: false });
+  // The model rides along so every priced surface can name what it priced at;
+  // `named` separates "the agent said so on this call" from a standing config.
+  assert.deepEqual(declaredRate('gemini-3.8-flash'), { usdPerMtok: 0.75, measured: false, model: 'gemini-3.8-flash', named: false });
+  assert.deepEqual(declaredRate('gpt-5.6-sol', { named: true }), { usdPerMtok: 4, measured: false, model: 'gpt-5.6-sol', named: true });
 });
 
 test('declaredRate: nothing declared, or a model with no price, stays null', () => {
@@ -177,28 +200,100 @@ test('declaredRate: nothing declared, or a model with no price, stays null', () 
   assert.equal(declaredRate('some-future-model'), null, 'a model this table never priced');
 });
 
-test('declaredRate: the env override wins over the configured model', () => {
+test('declaredRate: a known list price is NOT displaced by the env override', () => {
+  // The pair (model we know, price we have) is a fact about the world. The
+  // override is a number typed into a shell once, for a model the user may no
+  // longer run — letting it win would replace a correct price with a stale one,
+  // invisibly. So it fills holes and nothing else.
   process.env[RATE_ENV] = '0.30';
   try {
-    assert.deepEqual(declaredRate('gpt-5.6-sol'), { usdPerMtok: 0.3, measured: false });
-    assert.deepEqual(declaredRate(null), { usdPerMtok: 0.3, measured: false });
+    assert.deepEqual(declaredRate('gpt-5.6-sol'), {
+      usdPerMtok: 4,
+      measured: false,
+      model: 'gpt-5.6-sol',
+      named: false,
+    });
+  } finally {
+    delete process.env[RATE_ENV];
+  }
+});
+
+test('declaredRate: the env override fills in for an unpriced or unnamed model', () => {
+  process.env[RATE_ENV] = '0.30';
+  try {
+    // A model graft has never heard of: the override is the only number going.
+    assert.deepEqual(declaredRate('some-future-model', { named: true }), {
+      usdPerMtok: 0.3,
+      measured: false,
+      model: 'some-future-model',
+      named: true,
+      fromEnv: true,
+    });
+    // Nothing named a model at all: a bare number, nothing claimed about one.
+    assert.deepEqual(declaredRate(null), { usdPerMtok: 0.3, measured: false, fromEnv: true });
   } finally {
     delete process.env[RATE_ENV];
   }
 });
 
 test('declaredRate: a malformed override prices nothing rather than falling through', () => {
-  // Falling back to the model here would quietly bill at a different number
-  // than the one the user typed, which is the failure mode this module exists
-  // to avoid. Silence sends them back to fix the typo.
+  // Falling back to something else here would quietly bill at a different
+  // number than the one the user typed, which is the failure mode this module
+  // exists to avoid. Silence sends them back to fix the typo.
   for (const bad of ['abc', '0', '-1', 'NaN', 'Infinity']) {
     process.env[RATE_ENV] = bad;
     try {
-      assert.equal(declaredRate('gpt-5.6-sol'), null, `override ${bad} must price nothing`);
+      assert.equal(declaredRate('some-future-model'), null, `override ${bad} must price nothing`);
+      assert.equal(declaredRate(null), null, `override ${bad} must price nothing`);
     } finally {
       delete process.env[RATE_ENV];
     }
   }
+});
+
+test('envRate: reads the override, and rejects everything unusable', () => {
+  delete process.env[RATE_ENV];
+  assert.equal(envRate(), null, 'unset');
+  process.env[RATE_ENV] = '   ';
+  assert.equal(envRate(), null, 'blank');
+  process.env[RATE_ENV] = '2.5';
+  assert.equal(envRate(), 2.5);
+  delete process.env[RATE_ENV];
+});
+
+// ── pricingFor: the one precedence every savings surface reads ────────────
+
+test('pricingFor: measured billing outranks every list price and override', () => {
+  process.env[RATE_ENV] = '99';
+  try {
+    const measured = { usdPerMtok: 0.6, measured: true };
+    const p = pricingFor({ id: 'claude-opus-5', confidence: 'certain' }, measured);
+    assert.deepEqual(p.rate, measured);
+    assert.equal(p.model.confidence, 'certain');
+  } finally {
+    delete process.env[RATE_ENV];
+  }
+});
+
+test('pricingFor: a certain model is marked named, a declared one is not', () => {
+  delete process.env[RATE_ENV];
+  // `named` is what tells the tally "this is the model that ran" rather than
+  // "this is what a config file last said".
+  assert.equal(pricingFor({ id: 'claude-opus-5', confidence: 'certain' }).rate?.named, true);
+  assert.equal(pricingFor({ id: 'claude-opus-5', confidence: 'declared' }).rate?.named, false);
+});
+
+test('pricingFor: no model and no override prices nothing, but keeps the model', () => {
+  delete process.env[RATE_ENV];
+  const p = pricingFor(NO_MODEL);
+  assert.equal(p.rate, null);
+  // The model travels even with no rate: the unpriced wording has to name what
+  // it could not price.
+  assert.deepEqual(p.model, NO_MODEL);
+
+  const unpriced = pricingFor({ id: 'claude-opus-6', confidence: 'certain' });
+  assert.equal(unpriced.rate, null);
+  assert.equal(unpriced.model.id, 'claude-opus-6');
 });
 
 test('blendedRate: a measured rate is the session cost over the tokens it bought', () => {

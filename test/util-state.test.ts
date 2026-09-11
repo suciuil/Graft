@@ -15,6 +15,7 @@ import {
   cacheDir,
   patchBuildConfig,
   readBuildConfig,
+  readDeclaredModel,
   readFollowSubmodules,
   readExcludeDirs,
   readIncludeDirs,
@@ -140,4 +141,12 @@ test("resolveContextDir takes an absolute GRAFT_DIR verbatim", () => {
     assert.equal(resolveContextDir(d), abs);
     assert.equal(cacheDir(d), join(abs, ".cache"));
   });
+});
+
+test("readDeclaredModel resolves from graft config or host configs", () => {
+  const d = fresh();
+  assert.equal(readDeclaredModel(d), null);
+
+  writeBuildConfig(d, { model: "claude-3.7-sonnet" });
+  assert.equal(readDeclaredModel(d), "claude-3.7-sonnet");
 });
