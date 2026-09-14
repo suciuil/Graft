@@ -142,13 +142,16 @@ tally summing those numbers across every graft call you made, e.g.
 skip it. This is the per-turn figure; the statusline carries the running
 session total.
 
-Each line also carries an example tally in quotes, ending in \`this turn\`. Use
-it **verbatim**, with \`~$X\` replaced by the summed dollar value and \`~N\` by the
-summed tokens, e.g. \`🌱 graft saved ~12,400 tokens (~$0.04 for Claude Opus 5)
-this turn\`. Never price tokens yourself and never simplify the parenthetical
-away: it is the only place the user learns which model their saving was priced
-at. When the example carries no dollar figure, report the tokens alone — graft
-could not identify the model, and a number you invent is worse than none.
+Each line also ends with an example tally, closing the sentence and ending in
+\`this turn\`. Use its **wording** verbatim, with \`~$X\` replaced by the summed
+dollar value and \`~N\` by the summed tokens, e.g. \`🌱 graft saved ~12,400 tokens
+(~$0.04 for Claude Opus 5) this turn\`. Write it as a plain line of your reply:
+do not wrap it in quotation marks, and do not keep any punctuation that merely
+ended graft's own sentence. Never price tokens yourself and never simplify the
+parenthetical away: it is the only place the user learns which model their
+saving was priced at. When the example carries no dollar figure, report the
+tokens alone — graft could not identify the model, and a number you invent is
+worse than none.
 
 Pass \`--agent-model <your own model id>\` on your graft calls when you know it
 (e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices the

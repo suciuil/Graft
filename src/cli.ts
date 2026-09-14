@@ -18,6 +18,7 @@ import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { KILO_RULE_REL } from "./hosts/kilo.js";
 import { formatModelPrices, readHostModels } from "./hosts/models.js";
+import { hostModelFor } from "./hosts/host-model.js";
 import { hostIds } from "./hosts/registry.js";
 import { parseBrainArg, connectBrain, pullBrain, brainStatus } from "./brain/connect.js";
 import { rulesForPointers } from "./brain/attach.js";
@@ -49,7 +50,7 @@ import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurren
 import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
 import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
-import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel } from "./claude/ledger.js";
+import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel, setHostModel } from "./claude/ledger.js";
 import { claimedSavings, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
@@ -87,6 +88,18 @@ let queryNote: { repo?: string; hit?: "yes" | "no" } = {};
  *  sites stay one line. */
 function noteQuery(dir: string): string {
   queryNote.repo = dir;
+  // The backstop for a terminal-driven agent that passed no `--agent-model`,
+  // which in practice is most of them. GitHub Copilot is the case that needs it:
+  // graft registers no MCP server for it, so it drives the CLI from a VS Code
+  // terminal, and with no hook surface either there was nothing left to name the
+  // model — every Copilot session reported tokens and no dollars. VS Code writes
+  // the running model into its own chat session files; `hostModelFor` reads it
+  // and owns the per-host gating. Set BEFORE `sessionPricing`, which resolves
+  // the model through the call scope this writes to.
+  //
+  // Ranked below `--agent-model` (see `resolveModel`), so an agent that names
+  // itself is unaffected.
+  setHostModel(hostModelFor(dir));
   // Every retrieval command funnels through here, which makes it the one place
   // that can price this session's tokens before a formatter needs the number.
   setPricing(sessionPricing(dir));
