@@ -272,6 +272,103 @@ test('concurrent calls each claim only their own tokens', async () => {
   }
 });
 
+// ── the host-record backstop ──────────────────────────────────────────────
+
+/**
+ * Kilo's session database, with one row naming `model` as the live session for
+ * `dir`. Written to a scratch HOME which `kiloSessionModel` is pointed at by the
+ * env below.
+ */
+function kiloSessionDb(home: string, dir: string, model: string): void {
+  const sqlite = process.getBuiltinModule?.('node:sqlite') as any;
+  const dbDir = join(home, 'kilo');
+  mkdirSync(dbDir, { recursive: true });
+  const path = join(dbDir, 'kilo.db');
+  const db = new sqlite.DatabaseSync(path);
+  db.exec('create table session (id text primary key, directory text, model text, time_updated integer)');
+  db.prepare('insert into session values (?, ?, ?, ?)')
+    .run('ses_1', dir.replace(/\\/g, '/'), JSON.stringify({ id: model }), Date.now());
+  db.close();
+}
+
+const noSqlite = (process.getBuiltinModule?.('node:sqlite') as any)?.DatabaseSync === undefined
+  ? 'node:sqlite is unavailable on this runtime (Node < 22.5)'
+  : false;
+
+test('an agent that sends no model is still priced from Kilo\'s session record', { skip: noSqlite }, async () => {
+  // The defect, end to end. Measured on a real machine, 349 of 361 graft calls
+  // over MCP omitted `model` — every one of them filed as `unknown` and reported
+  // in tokens. The protocol has no field for the model, so the agent was the
+  // only source; this adds the one other place that knows.
+  const d = builtFixture('graft-mcp-hostmodel-');
+  const xdg = tmpRepo('graft-mcp-hostmodel-home-');
+  kiloSessionDb(xdg, d, 'vertex_ai/claude-opus-5');
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = xdg;
+  setMcpClient('Kilo Code');
+  try {
+    const res = await callTool(d, 'graft_find_code', { query: 'add two numbers to a total' });
+    assert.match(res.text, /\(~\$X for [^)]+\) this turn/, 'priced despite the agent saying nothing');
+    assert.doesNotMatch(res.text, /as estimated below/, 'a named model beats the fallback table');
+    const day = readLedger(d).days[dayKey()];
+    assert.ok(day['claude-opus-5']?.savedTokens > 0, 'filed under the model Kilo is running');
+    assert.equal(day[UNKNOWN_MODEL], undefined, 'and nothing left unattributed');
+  } finally {
+    if (prev === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prev;
+    setAgentModel(null);
+    setMcpClient(undefined);
+  }
+});
+
+test('what the agent sends still wins over the session record', { skip: noSqlite }, async () => {
+  // The backstop must never override a cooperating agent: it is matched on a
+  // directory and cannot tell two sessions in one directory apart, while the
+  // argument is scoped to this exact call.
+  const d = builtFixture('graft-mcp-hostmodel-loses-');
+  const xdg = tmpRepo('graft-mcp-hostmodel-loses-home-');
+  kiloSessionDb(xdg, d, 'gemini-3.8-flash');
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = xdg;
+  setMcpClient('Kilo Code');
+  try {
+    await callTool(d, 'graft_find_code', {
+      query: 'add two numbers to a total',
+      model: 'claude-opus-5',
+    });
+    const day = readLedger(d).days[dayKey()];
+    assert.ok(day['claude-opus-5']?.savedTokens > 0, 'filed under what the agent said');
+    assert.equal(day['gemini-3.8-flash'], undefined, 'not under the directory match');
+  } finally {
+    if (prev === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prev;
+    setAgentModel(null);
+    setMcpClient(undefined);
+  }
+});
+
+test('a non-Kilo client never reads Kilo\'s session database', { skip: noSqlite }, async () => {
+  // Same gate as the model table, for the same reason: this reads Kilo's schema
+  // and nothing else's, so on another host the row describes a different tool's
+  // session and must not price anything.
+  const d = builtFixture('graft-mcp-hostmodel-cursor-');
+  const xdg = tmpRepo('graft-mcp-hostmodel-cursor-home-');
+  kiloSessionDb(xdg, d, 'vertex_ai/claude-opus-5');
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = xdg;
+  setMcpClient('Cursor');
+  try {
+    const res = await callTool(d, 'graft_find_code', { query: 'add two numbers to a total' });
+    assert.doesNotMatch(res.text, /\(~\$X for/, 'Cursor is not priced from Kilo\'s record');
+    assert.ok(readLedger(d).days[dayKey()][UNKNOWN_MODEL]?.savedTokens > 0);
+  } finally {
+    if (prev === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prev;
+    setAgentModel(null);
+    setMcpClient(undefined);
+  }
+});
+
 test('the CLI path never gets a table either — Kilo only ever arrives over MCP', () => {
   const d = builtFixture('graft-cli-notable-');
   const out = execFileSync(

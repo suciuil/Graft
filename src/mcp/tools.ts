@@ -16,7 +16,8 @@ import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
 import { kiloModelRows } from '../hosts/models.js';
 import { isKiloClient } from './client.js';
-import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel } from '../claude/ledger.js';
+import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel, setHostModel } from '../claude/ledger.js';
+import { kiloSessionModel } from '../hosts/kilo-session.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
 import { buildRepoMap, formatRepoMap } from '../graph/map.js';
@@ -58,13 +59,21 @@ function unknownSymbolText(query: string): string {
  * it silently reverts to unattributed savings. Riding along on the call that
  * already happens cannot be forgotten halfway.
  *
- * Optional throughout. An agent that omits it gets exactly today's behaviour.
+ * Optional throughout. An agent that omits it falls back to whatever the host's
+ * own session record can say (`hosts/kilo-session.ts`), and to an unpriced token
+ * count where even that is unavailable.
+ *
+ * The description is written as an instruction rather than a definition because
+ * that is what it has to be: measured against real usage, a description that
+ * merely NAMED the field was honoured on a small minority of calls. It is
+ * phrased for an agent deciding what to put in an optional argument — say what
+ * to send, give the shape of a valid value, and say what is lost by omitting it.
  */
 const MODEL_PROP = {
   model: {
     type: 'string',
     description:
-      'the model YOU are running (e.g. "claude-opus-5"), so graft can price the tokens it saved and file them under that model rather than as unknown. Send it on every call.',
+      'REQUIRED IN PRACTICE — send your own model id on every call, e.g. "claude-opus-5", "gpt-5.6-sol", "gemini-3.8-flash". This is the model YOU are running right now, not a model to use for anything: graft cannot see it, and uses it only to price the tokens this call saved and file them under that model. Omitting it files the saving as "unknown" and the user gets no dollar figure. Copy the id verbatim from your own configuration; do not guess a version number and do not leave it blank.',
   },
 } as const;
 
@@ -293,6 +302,16 @@ async function callToolScoped(
     // available on this surface: the model the agent says it is running, for the
     // very call being priced.
     setAgentModel(typeof args.model === 'string' ? args.model : null);
+    // The backstop for when it doesn't, which measured against real usage is
+    // most calls: a strong model sends `model` while the rule file is fresh in
+    // context and stops as the conversation grows, and a fast model never sends
+    // it at all. Kilo records the running model in its own session database, so
+    // on that host the saving can be filed correctly regardless of whether the
+    // agent cooperated. Gated on the client actually BEING Kilo for the same
+    // reason the model table is: this reads Kilo's schema and nothing else's.
+    // Ranked below the agent's own word (see `resolveModel`), so a cooperating
+    // agent is unaffected by this line.
+    setHostModel(isKiloClient() ? kiloSessionModel(root) : null);
     // Freshness first: an answer that cites file:line has to be about the code as
     // it is right now, including edits nobody has committed (or even saved through
     // this agent). ~3ms when nothing moved; a structural, $0 rebuild when it did.
@@ -303,12 +322,13 @@ async function callToolScoped(
     // The unpriced nudge must not advise `--agent-model`, a CLI flag this
     // surface does not have — it advertises the `model` ARGUMENT instead.
     setMcpSurface(true);
-    // The fallback for an agent that sent no `model`: price the saving under
-    // every model the host offers and let the user read their own row. Gated on
-    // the client actually BEING Kilo, not merely on a Kilo config existing —
-    // `readHostModels` can only read Kilo's config shapes, so on any other
-    // client that config describes somebody else's models. Skipped entirely once
-    // the agent has named itself, since one exact figure beats a menu.
+    // The fallback for when no single model could be named at all: price the
+    // saving under every model the host offers and let the user read their own
+    // row. Gated on the client actually BEING Kilo, not merely on a Kilo config
+    // existing — `readHostModels` can only read Kilo's config shapes, so on any
+    // other client that config describes somebody else's models. Skipped once
+    // anything has named the model, whether that was the agent or the host's own
+    // session record above, since one exact figure beats a menu.
     const named = currentModel(root, latestSession(root)?.model) !== UNKNOWN_MODEL;
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     let note: string | null = null;
