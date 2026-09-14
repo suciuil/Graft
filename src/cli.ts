@@ -17,7 +17,7 @@ import { buildGraphIfMissing, runInit } from "./claude/init.js";
 import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { KILO_RULE_REL } from "./hosts/kilo.js";
-import { formatModelPrices, installModelTable, readHostModels } from "./hosts/models.js";
+import { formatModelPrices, readHostModels } from "./hosts/models.js";
 import { hostIds } from "./hosts/registry.js";
 import { parseBrainArg, connectBrain, pullBrain, brainStatus } from "./brain/connect.js";
 import { rulesForPointers } from "./brain/attach.js";
@@ -50,7 +50,7 @@ import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, typ
 import { normalizePathPrefix } from "./util/paths.js";
 import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel } from "./claude/ledger.js";
-import { claimedSavings, setPricing, setRepoRoot } from "./context/savings.js";
+import { claimedSavings, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   errorCode,
@@ -91,10 +91,13 @@ function noteQuery(dir: string): string {
   // that can price this session's tokens before a formatter needs the number.
   setPricing(sessionPricing(dir));
   setRepoRoot(dir);
-  // Same reason as the MCP dispatch: when nothing named the model, the host's
-  // own model list is the honest alternative to a made-up rate. Lazy — a query
-  // that IS priced never reads the config.
-  installModelTable();
+  // Deliberately NO per-model table here. That table is only correct for a host
+  // whose model list graft can read, which today means Kilo — and Kilo reaches
+  // graft over MCP, never through this CLI. Wiring it unconditionally meant any
+  // terminal-driven agent on a machine that merely HAS Kilo installed was shown
+  // Kilo's price list. Every caller on this path can pass `--agent-model` and
+  // get one exact figure instead, which is the better answer anyway.
+  setModelTable(null);
   return dir;
 }
 
@@ -773,7 +776,7 @@ program
 program
   .command("models")
   .description(
-    "Price this session's saved tokens under every model your agent offers — the cross-check for when the declared model isn't the one you ran",
+    "Price this session's saved tokens under every model your agent offers — the answer when nothing named the model you actually ran",
   )
   .argument(...DIR_ARG)
   .option("--tokens <n>", "price this many saved tokens instead of the session's total")

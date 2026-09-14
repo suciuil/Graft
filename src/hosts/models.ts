@@ -25,7 +25,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { formatDollars, inputUsdPerMtok, normalizeModelId } from '../context/price.js';
-import { formatCount, setModelTable } from '../context/savings.js';
+import { formatCount, type ModelTable } from '../context/savings.js';
 import { stripJsonc } from './kilo.js';
 
 /** One model the host offers, priced if graft's table knows it. */
@@ -290,20 +290,23 @@ export function valueUnder(model: HostModel, savedTokens: number): number | null
 }
 
 /**
- * Point the savings nudge at this host's model list, so an unpriceable saving is
- * still reported with per-model values instead of tokens alone.
+ * The per-model rows for Kilo Code, as a callback the savings nudge can hold.
  *
- * Only wired when a Kilo config is actually on disk: on every other host the
- * table would be empty, and the nudge falls back to the bare token count. The
- * read is deferred into the callback (and memoised) so a retrieval that never
- * reaches the unpriced branch never touches the filesystem at all.
+ * Returned rather than installed, so the ONE caller that knows it is talking to
+ * Kilo decides whether to use it. That asymmetry is the point: this reads Kilo's
+ * config shapes and nothing else, so handing the result to any other host would
+ * price a saving under models that host cannot run. The only surface allowed to
+ * wire it is the MCP dispatch, and only after `isKiloClient()`.
+ *
+ * The disk read is deferred into the callback and memoised, so a retrieval that
+ * never reaches the unpriced branch never touches the filesystem at all.
  */
-export function installModelTable(opts: { home?: string } = {}): void {
+export function kiloModelRows(opts: { home?: string } = {}): ModelTable {
   let cached: HostModels | null | undefined;
-  setModelTable((savedTokens: number) => {
+  return (savedTokens: number) => {
     cached ??= readHostModels(opts);
     return cached ? pricedRows(cached, savedTokens) : [];
-  });
+  };
 }
 
 /**

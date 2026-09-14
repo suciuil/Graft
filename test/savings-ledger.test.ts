@@ -70,6 +70,43 @@ test('savings accumulate per day and per model', () => {
   assert.equal(l.days['2026-08-01']['claude-opus-5'].savedTokens, 7);
 });
 
+test('the provider routing prefix is stripped before filing', () => {
+  // The prefix names who SERVES the model, not which model it is. Keeping it
+  // would split one model's lifetime total across every gateway it was reached
+  // through — three rows that never add up to the answer the user wants.
+  const d = fresh();
+  recordSavedTokens(d, 'vertex_ai/claude-opus-5', 100, day('2026-09-08'));
+  recordSavedTokens(d, 'anthropic/claude-opus-5', 200, day('2026-09-08'));
+  recordSavedTokens(d, 'claude-opus-5', 300, day('2026-09-08'));
+  recordSavedTokens(d, 'azure/eastus/gpt-5.6-luna', 7, day('2026-09-08'));
+
+  const bucket = readLedger(d).days['2026-09-08'];
+  assert.deepEqual(Object.keys(bucket).sort(), ['claude-opus-5', 'gpt-5.6-luna']);
+  assert.equal(bucket['claude-opus-5'].savedTokens, 600, 'three routes, one row');
+  assert.equal(bucket['gpt-5.6-luna'].savedTokens, 7, 'a multi-segment route is stripped whole');
+});
+
+test('billing is filed under the same stripped key as the savings', () => {
+  // Both writers go through one funnel, so a turn billed via a gateway lands in
+  // the same row as the tokens that turn saved — otherwise the measured rate
+  // would never find its own savings.
+  const d = fresh();
+  recordSavedTokens(d, 'vertex_ai/claude-opus-5', 100_000, day('2026-09-08'));
+  recordTurnBilling(d, [{ model: 'anthropic/claude-opus-5', costMicros: 600_000, tokens: 1_000_000 }], day('2026-09-08'));
+
+  const bucket = readLedger(d).days['2026-09-08'];
+  assert.deepEqual(Object.keys(bucket), ['claude-opus-5']);
+  assert.equal(bucket['claude-opus-5'].savedTokens, 100_000);
+  assert.equal(bucket['claude-opus-5'].costMicros, 600_000);
+});
+
+test('a model that normalises to nothing is filed as unknown, not as ""', () => {
+  const d = fresh();
+  recordSavedTokens(d, '   ', 50, day('2026-09-08'));
+  recordSavedTokens(d, '/', 50, day('2026-09-08'));
+  assert.deepEqual(Object.keys(readLedger(d).days['2026-09-08']), [UNKNOWN_MODEL]);
+});
+
 test('a zero or negative saving writes nothing at all', () => {
   const d = fresh();
   recordSavedTokens(d, 'claude-opus-5', 0);

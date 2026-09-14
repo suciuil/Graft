@@ -98,9 +98,9 @@ export function normalizeModelId(model: string): string {
  * the model `anthropic/claude-opus-5` or `azure/eastus/gpt-5.6-luna`, where
  * everything up to the last `/` says who SERVES the model rather than which one
  * it is — and the table's patterns are anchored, so the prefix would otherwise
- * turn a priced model into an unpriced one. Only the lookup normalises; callers
- * keep filing savings under the id the host reported, so two routes to the same
- * model stay distinguishable in the ledger. */
+ * turn a priced model into an unpriced one. The savings ledger normalises the
+ * same way before filing (see `ledgerKey`), so one model reached by two gateways
+ * is one row rather than two lines that never add up. */
 export function inputUsdPerMtok(model: unknown): number | null {
   if (typeof model !== 'string') return null;
   const raw = model.trim();

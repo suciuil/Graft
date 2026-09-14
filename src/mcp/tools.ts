@@ -11,10 +11,12 @@ import { ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/ref
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setPricing, setRepoRoot, sumSavingsFooters, resetClaimedSavings } from '../context/savings.js';
+import { withSavings, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
+import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
-import { installModelTable } from '../hosts/models.js';
-import { currentModel, recordSavedTokens } from '../claude/ledger.js';
+import { kiloModelRows } from '../hosts/models.js';
+import { isKiloClient } from './client.js';
+import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel } from '../claude/ledger.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
 import { buildRepoMap, formatRepoMap } from '../graph/map.js';
@@ -41,7 +43,48 @@ function unknownSymbolText(query: string): string {
   return `no symbol "${query}" in the graph — check spelling or run \`graft build\``;
 }
 
-export const TOOLS: ToolDef[] = [
+/**
+ * The `model` argument every tool accepts — MCP's equivalent of the CLI's
+ * `--agent-model`.
+ *
+ * It exists because over MCP nothing else can name the model: no flag can be
+ * passed and no transcript is stamped, so a saving would otherwise be priced at
+ * nothing and filed in the lifetime ledger under `unknown`. The agent, however,
+ * knows perfectly well what it is running — it simply had no way to say so.
+ * This is that way.
+ *
+ * Deliberately on EVERY tool rather than in a one-off "declare your model" call:
+ * a separate handshake tool is one the agent forgets, and a session that forgets
+ * it silently reverts to unattributed savings. Riding along on the call that
+ * already happens cannot be forgotten halfway.
+ *
+ * Optional throughout. An agent that omits it gets exactly today's behaviour.
+ */
+const MODEL_PROP = {
+  model: {
+    type: 'string',
+    description:
+      'the model YOU are running (e.g. "claude-opus-5"), so graft can price the tokens it saved and file them under that model rather than as unknown. Send it on every call.',
+  },
+} as const;
+
+/** Every tool's schema, with {@link MODEL_PROP} folded in. Applied here rather
+ * than written into each schema by hand so a tool added later cannot quietly
+ * miss it — the one property that must be on all of them. */
+function withModelParam(tools: ToolDef[]): ToolDef[] {
+  return tools.map((t) => {
+    const schema = t.inputSchema as { properties?: Record<string, unknown> };
+    return {
+      ...t,
+      inputSchema: {
+        ...schema,
+        properties: { ...(schema.properties ?? {}), ...MODEL_PROP },
+      },
+    };
+  });
+}
+
+export const TOOLS: ToolDef[] = withModelParam([
   {
     name: 'graft_find_code',
     description:
@@ -125,7 +168,7 @@ export const TOOLS: ToolDef[] = [
       },
     },
   },
-];
+]);
 
 /** Render every resolved match's header + edge report (or the loud zero-edge
  * note), one block per match, joined with a blank line — the same grouping
@@ -215,7 +258,28 @@ const NO_REFRESH_TOOLS = new Set(['graft_check_freshness']);
  */
 export { canonicalToolName };
 
+/**
+ * One tool call, in its own state scope.
+ *
+ * The scope is what makes concurrent calls safe. This server is long-lived and
+ * this function is `async`, so a client issuing two tool calls at once — which
+ * JSON-RPC ids exist to permit — interleaves them at every `await`. With the
+ * per-call facts (the model the agent named, the rate, the model table) in
+ * module-level slots, the second call's model landed before the first had read
+ * its own, and the first was priced, reported and filed under a model that never
+ * ran it. `runInCallScope` gives each call storage its awaits can see and its
+ * siblings cannot.
+ */
 export async function callTool(
+  root: string,
+  requestedName: string,
+  args: Record<string, unknown>,
+  dirOverride?: string,
+): Promise<{ text: string; isError: boolean }> {
+  return runInCallScope(() => callToolScoped(root, requestedName, args, dirOverride));
+}
+
+async function callToolScoped(
   root: string,
   requestedName: string,
   args: Record<string, unknown>,
@@ -224,6 +288,11 @@ export async function callTool(
   try {
     const name = canonicalToolName(requestedName);
     const ws = readWorkspace(root, dirOverride);
+    // The agent naming itself on this call — MCP's `--agent-model`. Recorded
+    // before pricing is resolved, because it is the highest-confidence thing
+    // available on this surface: the model the agent says it is running, for the
+    // very call being priced.
+    setAgentModel(typeof args.model === 'string' ? args.model : null);
     // Freshness first: an answer that cites file:line has to be about the code as
     // it is right now, including edits nobody has committed (or even saved through
     // this agent). ~3ms when nothing moved; a structural, $0 rebuild when it did.
@@ -231,11 +300,17 @@ export async function callTool(
     // here, so the formatters downstream can put a dollar figure in the nudge.
     setPricing(sessionPricing(root));
     setRepoRoot(root);
-    // MCP is the hookless path: no flag can be passed and no transcript is
-    // stamped, so this is exactly where a saving would otherwise go unpriced.
-    // The host's own model list is the honest substitute for a rate we cannot
-    // know — read lazily, and only if the unpriced branch is actually reached.
-    installModelTable();
+    // The unpriced nudge must not advise `--agent-model`, a CLI flag this
+    // surface does not have — it advertises the `model` ARGUMENT instead.
+    setMcpSurface(true);
+    // The fallback for an agent that sent no `model`: price the saving under
+    // every model the host offers and let the user read their own row. Gated on
+    // the client actually BEING Kilo, not merely on a Kilo config existing —
+    // `readHostModels` can only read Kilo's config shapes, so on any other
+    // client that config describes somebody else's models. Skipped entirely once
+    // the agent has named itself, since one exact figure beats a menu.
+    const named = currentModel(root, latestSession(root)?.model) !== UNKNOWN_MODEL;
+    setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     let note: string | null = null;
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
@@ -256,20 +331,22 @@ export async function callTool(
  * File this call's saving in the repo's lifetime ledger, the one `graft savings`
  * reads back.
  *
- * Here rather than in the hooks because this is the only place every host
- * reaches: Copilot, Kilo and Codex expose no hook surface at all, so a saving
- * they made would otherwise never be recorded. The hooks skip MCP calls for the
- * ledger (`viaMcp` in session-metrics.ts) precisely so the two can't both count
- * the same call.
+ * Here rather than in the hooks because this is the only place an MCP-driven
+ * host reaches: Kilo and the other plain MCP clients expose no hook surface at
+ * all, so a saving they made would otherwise never be recorded. (A host that
+ * drives graft from a terminal instead — Copilot, which graft registers no MCP
+ * server for — is covered by the CLI's own `postAction` writer.) The hooks skip
+ * MCP calls for the ledger (`viaMcp` in session-metrics.ts) precisely so the two
+ * can't both count the same call.
  *
  * The footer we just wrote is the source of the number, so no host cooperation
  * is needed to read it back.
  */
 function recordMcpSavings(root: string, res: { text: string; isError: boolean }): void {
-  // This server outlives every call it serves, so the CLI's process-level
-  // accumulator would carry each call's tokens into the next one. Cleared here
-  // because this function is the point past which they are already filed.
-  resetClaimedSavings();
+  // No accumulator reset needed: each call runs in its own scope (see
+  // `runInCallScope` above), so its claimed-token counter starts at zero and
+  // dies with the call. This used to be a manual `resetClaimedSavings()`, which
+  // worked only because calls were assumed never to overlap.
   if (res.isError) return;
   const saved = sumSavingsFooters(res.text);
   if (saved > 0) recordSavedTokens(root, currentModel(root, latestSession(root)?.model), saved);

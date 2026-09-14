@@ -36,9 +36,9 @@ export function renderStatusline(
   const saved = session?.savedTokens ?? 0;
   if (saved > 0) {
     // Dollars only once a rate exists — see context/price.ts. Until then (turn
-    // one, or a host with no transcript and no declared model) the token count
-    // stands alone rather than carrying a rate nobody measured. A declared rate
-    // is flagged `list` so the bar never passes an upper bound off as the bill.
+    // one, or a host with no transcript that named no model) the token count
+    // stands alone rather than carrying a rate nobody measured. A list price is
+    // flagged `list` so the bar never passes an upper bound off as the bill.
     const measured = blendedRate(session?.inputCostMicros, session?.inputTokensBilled);
     const value = valueSaved(saved, measured ?? ctx.rate ?? null);
     const money = value === null ? '' : ` · ~${formatDollars(value.usd)}${value.measured ? '' : ' list'}`;

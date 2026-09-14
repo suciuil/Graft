@@ -16,6 +16,7 @@ import type { GraphV1 } from '../graph/types.js';
 import { pathToFileURL } from 'node:url';
 import { buildConfigPath } from '../util/state.js';
 import { NO_MODEL, formatDollars, type InputRate, type Pricing } from './price.js';
+import { callScope, type ModelTable } from './call-scope.js';
 
 export interface Savings {
   /** How many source files the baseline covers. */
@@ -56,18 +57,17 @@ export function savingsFor(graph: GraphV1, paths: Iterable<string>): Savings | u
 }
 
 /**
- * What this session pays per input token and what we know about the model it is
+ * What this call pays per input token and what we know about the model it is
  * paying it for — or, when nothing prices anything, just the model knowledge, so
  * the nudge can explain the ABSENCE of a figure instead of going quiet.
  *
- * Process-level because it is a process-level fact: one CLI invocation answers
- * one query for one session, and the alternative — threading a rate through
- * `withSavings` and all seven of its callers — would put a billing parameter in
- * the signature of every retrieval formatter for no gain. Set by the CLI's
- * `noteQuery` and by the MCP dispatch, both of which already resolve the repo
- * root; unset everywhere else, which is why the default is "no rate, no model".
+ * Held in the call scope rather than threaded through `withSavings` and all
+ * seven of its callers, which would put a billing parameter in the signature of
+ * every retrieval formatter for no gain. Set by the CLI's `noteQuery` and by the
+ * MCP dispatch, both of which already resolve the repo root; unset everywhere
+ * else, which is why the default is "no rate, no model". See `call-scope.ts` for
+ * why this is per-call state and not a module-level slot.
  */
-let pricing: Pricing = { rate: null, model: NO_MODEL };
 
 /** Tell this module what an input token costs here, and for which model. Null
  * clears the rate, and so does anything that isn't a positive finite number — a
@@ -76,22 +76,15 @@ let pricing: Pricing = { rate: null, model: NO_MODEL };
  * exactly what the unpriced wording needs to name. */
 export function setPricing(p: Pricing | null): void {
   const rate = p?.rate ?? null;
-  pricing = {
+  callScope().pricing = {
     rate: rate && Number.isFinite(rate.usdPerMtok) && rate.usdPerMtok > 0 ? rate : null,
     model: p?.model ?? NO_MODEL,
   };
 }
 
-/**
- * The repo this process is answering for, held process-level for the same reason
- * {@link setPricing} is: one invocation answers one query for one repo, and the
- * alternative is threading a path through every retrieval formatter.
- */
-let repoRoot: string | null = null;
-
 /** Tell this module which repo is being answered for. */
 export function setRepoRoot(dir: string | null): void {
-  repoRoot = dir && dir.trim() ? dir : null;
+  callScope().repoRoot = dir && dir.trim() ? dir : null;
 }
 
 /**
@@ -103,43 +96,52 @@ export function setRepoRoot(dir: string | null): void {
  * ones under test — depend on whatever Kilo config the developer's machine
  * happens to have. The MCP dispatch and the CLI set it; tests set their own.
  */
-export type ModelTable = (savedTokens: number) => Array<{ label: string; value: string }>;
-
-let modelTable: ModelTable | null = null;
+export type { ModelTable };
 
 /** Supply the per-model rows shown when no single model can be named. Null
  * clears it, which is the correct state for every host that is not Kilo. */
 export function setModelTable(rows: ModelTable | null): void {
-  modelTable = rows;
+  callScope().modelTable = rows;
 }
 
 /**
- * Everything this process has claimed in a `[graft] tokens saved ≈ N` line so
- * far.
+ * Whether this call arrived over MCP rather than as a CLI invocation.
+ *
+ * The unpriced nudge otherwise tells the agent to pass `--agent-model`, which is
+ * a CLI flag: over MCP there is no such parameter, so the advice is impossible
+ * to act on. An instruction an agent cannot follow is worse than no instruction
+ * — it spends tokens and teaches the agent that graft's guidance can be ignored.
+ */
+export function setMcpSurface(on: boolean): void {
+  callScope().overMcp = on === true;
+}
+
+/**
+ * Everything this call has claimed in a `[graft] tokens saved ≈ N` line so far.
  *
  * The two emitters below are the only places a saving is ever asserted, so
  * counting here is what makes the number filable without every print site in
- * the CLI growing a ledger call. Process-level for the same reason
- * {@link setInputRate} is: one invocation answers one query for one session.
+ * the CLI growing a ledger call. Per-call, like the rest of the scope: on the
+ * MCP server two overlapping calls would otherwise both file the sum of their
+ * tokens, double-counting every concurrent pair.
  */
-let claimedTokens = 0;
 
-/** What this process has claimed, for the caller that files it. */
+/** What this call has claimed, for the caller that files it. */
 export function claimedSavings(): number {
-  return claimedTokens;
+  return callScope().claimedTokens;
 }
 
 /** Record a claim. Called by each footer emitter as it asserts a number —
  * including `ask`, which renders its own footer rather than going through
  * {@link savingsLine}. */
 export function noteClaimedSavings(tokens: number): void {
-  if (tokens > 0) claimedTokens += tokens;
+  if (tokens > 0) callScope().claimedTokens += tokens;
 }
 
-/** Forget what has been claimed, so a long-lived process (the MCP server, which
- * files each call itself) cannot re-file the same tokens on the next one. */
+/** Forget what has been claimed. A scoped call gets a fresh counter anyway; this
+ * stays for the process-level store the CLI and the hooks share. */
 export function resetClaimedSavings(): void {
-  claimedTokens = 0;
+  callScope().claimedTokens = 0;
 }
 
 /** How the agent should name the model in the tally: the host's display name
@@ -150,14 +152,26 @@ function modelLabel(rate: InputRate): string | null {
 }
 
 /**
- * The per-model table for the unpriced branch, as markdown rows.
+ * The per-model table for the unpriced branch, drawn with ASCII box borders.
  *
- * Returned as a single pre-rendered block rather than data because it has to
- * survive being relayed verbatim by an agent: anything requiring the agent to
- * lay out a table itself is something it will lay out differently every turn.
+ * Pre-rendered here rather than handed over as data, because it has to survive
+ * being relayed verbatim by an agent: anything that asks the agent to lay a
+ * table out itself is something it lays out differently every turn.
+ *
+ * ASCII rules and column padding rather than a markdown table, and wrapped in a
+ * fence by the caller, for one reason: a chat host only draws a markdown table
+ * when it sees a `|---|` delimiter row, and pipe-delimited lines WITHOUT one
+ * render as a wall of plain text — which is exactly how this first shipped. A
+ * fenced ASCII box needs no cooperation from the renderer and looks the same
+ * everywhere, including in terminals and diffs where markdown is never parsed.
+ *
+ * Labels are left-aligned and values right-aligned, so the dollar amounts line
+ * up on their last digit and the column can be compared by eye.
+ *
  * Empty string when no host table is available, which is every host but Kilo.
  */
 function modelTableBlock(savedTokens: number): string {
+  const modelTable = callScope().modelTable;
   if (!modelTable || savedTokens <= 0) return '';
   let rows: Array<{ label: string; value: string }>;
   try {
@@ -166,9 +180,13 @@ function modelTableBlock(savedTokens: number): string {
     return ''; // a price table is never worth failing a retrieval over
   }
   if (rows.length === 0) return '';
-  const width = Math.max(...rows.map((r) => r.label.length));
-  const body = rows.map((r) => `| ${r.label.padEnd(width)} | ${r.value} |`).join('\n');
-  return `\n${body}\n`;
+  const labelWidth = Math.max(...rows.map((r) => r.label.length));
+  const valueWidth = Math.max(...rows.map((r) => r.value.length));
+  const rule = `+-${'-'.repeat(labelWidth)}-+-${'-'.repeat(valueWidth)}-+`;
+  const body = rows
+    .map((r) => `| ${r.label.padEnd(labelWidth)} | ${r.value.padStart(valueWidth)} |`)
+    .join('\n');
+  return `\n${rule}\n${body}\n${rule}\n`;
 }
 
 /**
@@ -190,9 +208,11 @@ function modelTableBlock(savedTokens: number): string {
 function tallyExample(savedTokens: number, rate: InputRate | null): string {
   if (rate === null) {
     const table = modelTableBlock(savedTokens);
+    // Fenced, because the column padding IS the table: unfenced, a chat host
+    // collapses the runs of spaces and the box falls apart. The fence is part
+    // of the example so the agent relays it along with everything else.
     return table
-      ? '"\u{1F331} graft saved ~N tokens by this turn, which estimates in $ as ' +
-          `following:${table}"`
+      ? `"\u{1F331} graft saved ~N tokens by this turn, as estimated below:\n\`\`\`${table}\`\`\`"`
       : '"\u{1F331} graft saved ~N tokens by this turn"';
   }
   if (rate.measured) return '"\u{1F331} graft saved ~N tokens (~$X) this turn"';
@@ -220,20 +240,34 @@ function tallyExample(savedTokens: number, rate: InputRate | null): string {
  * inside what `hasSavingsTally` (claude/tally.ts) recognises in every branch, so
  * wording changes here never quietly zero the reported-turns metric. */
 export function savingsTurnNudge(savedTokens: number): string {
-  const sum = ' — sum each such line across your graft calls — e.g. ';
-  const rate = savedTokens > 0 ? pricing.rate : null;
+  // Leading space, not leading punctuation: each branch below ends its own
+  // sentence, so this only joins them.
+  const sum = ' Sum each such line across your graft calls — e.g. ';
+  const scope = callScope();
+  const rate = savedTokens > 0 ? scope.pricing.rate : null;
   const example = tallyExample(savedTokens, rate);
 
   if (rate === null) {
-    const priced = modelTableBlock(savedTokens)
+    // What to do about it, named per surface so the agent is never told to use
+    // something that does not exist where it is running:
+    //   - a per-model table (Kilo, no model sent) — relay it; that IS the
+    //     answer, so no other advice belongs in the same breath;
+    //   - over MCP, the `model` tool argument;
+    //   - on the CLI, the `--agent-model` flag.
+    // Both of the latter turn the next call into an exactly-priced one, and file
+    // the saving under a real model instead of `unknown`.
+    const instruction = modelTableBlock(savedTokens)
       ? 'Reproduce the table exactly, summed across your graft calls, in a ' +
-        'collapsed/expandable section. '
-      : '';
+        'collapsed/expandable section.'
+      : scope.overMcp
+        ? 'Send `model: "<your model id>"` with your graft tool calls to have ' +
+          'savings priced directly.'
+        : 'Pass `--agent-model <your model id>` on your graft calls to have ' +
+          'savings priced directly.';
     return (
       ' This call cannot be priced: nothing named the model you are running. ' +
       'At the end of your reply, tell the user the total graft tokens saved ' +
-      `this turn. ${priced}Pass \`--agent-model <your model id>\` on your graft ` +
-      `calls to have savings priced directly${sum}${example}.`
+      `this turn. ${instruction}${sum}${example}.`
     );
   }
 
@@ -245,7 +279,7 @@ export function savingsTurnNudge(savedTokens: number): string {
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     'reply, tell the user the total graft tokens saved this turn and what they ' +
-    `were worth${sum}${example}.`
+    `were worth.${sum}${example}.`
   );
 }
 
@@ -273,7 +307,7 @@ export function savingsLine(body: string, saved: Savings | undefined): string {
   if (base <= pack) return '';
   const delta = base - pack;
   const pct = Math.round((delta / base) * 100);
-  claimedTokens += delta;
+  noteClaimedSavings(delta);
   return (
     `[graft] tokens saved ≈ ${formatCount(delta)} (${pct}%) — this output ≈ ` +
     `${formatCount(pack)} tok vs reading the ${saved.files} file(s) it covers whole ≈ ` +
