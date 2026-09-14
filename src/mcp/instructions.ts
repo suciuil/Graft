@@ -41,8 +41,8 @@ export function toolSearchQuery(prefix = 'mcp__graft__'): string {
 export function mcpInstructions(): string {
   return [
     'This repo is indexed by graft: a prebuilt graph of every symbol, its file:line',
-    'span, and who calls what. Prefer these tools over grep/read — one call usually',
-    'replaces several file reads.',
+    'span, and who calls what. Prefer these over grep/read — one call usually',
+    'replaces several reads.',
     '',
     `**If these tools are deferred (names shown, schemas withheld), load them all in ONE lookup:** ToolSearch "${toolSearchQuery()}" — one round trip for the whole session. Never load them one at a time.`,
     '',
@@ -50,8 +50,9 @@ export function mcpInstructions(): string {
     '- graft_find_all — when you need EVERY occurrence; find_code is top-N and misses some.',
     '- graft_trace_calls — who calls it, what it calls, blast radius before a rename.',
     '- graft_file_api — a file\'s whole API in ~200 tokens.',
-    '- graft_repo_map — orientation in an unfamiliar repo.',
+    '- graft_repo_map — orientation in a new repo.',
     '',
-    'Results already reflect uncommitted edits — the graph refreshes before each query.',
+    'Results reflect uncommitted edits — the graph refreshes each query.',
+    'Pass `model: "<your model id>"` every call so graft can price what it saves.',
   ].join('\n');
 }

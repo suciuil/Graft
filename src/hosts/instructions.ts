@@ -106,21 +106,33 @@ export function kiloRule(): string {
 
 ### Reporting what graft saved (Kilo Code)
 
-Graft cannot know which model you are running: Kilo reaches it over MCP, which
-passes no model and stamps no transcript. So instead of a single dollar figure,
-graft's output carries a table pricing this turn's saving under every model your
-Kilo configuration offers.
+**Send \`model: "<your model id>"\` with every graft tool call.** Kilo reaches
+graft over MCP, which stamps no transcript, so this argument is the only way
+graft learns what you are running. With it you get one exact figure —
+\`🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this turn\` — and the
+saving is recorded against that model in \`graft savings\` instead of as
+"unknown".
+
+Without it, graft cannot know the model, so its output carries a table pricing
+this turn's saving under every model your Kilo configuration offers instead.
 
 Close any reply where you used graft with that tally, summed across your graft
 calls, and put the table in a **collapsed/expandable section** so it never
 crowds out the answer itself:
 
-\`\`\`
-🌱 graft saved ~5,548 tokens by this turn, which estimates in $ as following:
-| Claude Opus 5     | $0.03 |
-| Claude Sonnet 4.6 | $0.02 |
-| Gemini 3.8 Flash  | $0.01 |
-\`\`\`
+    🌱 graft saved ~5,548 tokens by this turn, as estimated below:
+    \`\`\`
+    +-------------------+-------+
+    | Claude Opus 5     | $3.12 |
+    | Claude Sonnet 4.6 | $1.87 |
+    | GPT 5.6 Sol       | $2.49 |
+    | Gemini 3.8 Flash  | $0.47 |
+    +-------------------+-------+
+    \`\`\`
+
+**Keep the fenced code block around the table.** The columns are held in line by
+space padding, and an unfenced table is re-flowed by the chat renderer into a
+wall of text — which defeats the point of showing a table at all.
 
 Reproduce the rows graft gives you — do not add models, drop models, or reorder
 them, and never price a token yourself. A model graft has no published rate for

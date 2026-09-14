@@ -191,15 +191,17 @@ export function latestSession(dir: string): SessionSummary | null {
  * behind that price, and how sure we are of the model.
  *
  * Prefers the session's own blended rate — what the user was actually billed,
- * cache discounts and all — and falls back to the declared path, which is the
- * only number available on a host that reports no billing (Copilot, Kilo, Codex,
- * Cursor). The result always carries the model knowledge, even when it carries
- * no rate: "we cannot price this" is only useful to a reader if it also says
- * WHICH model went unpriced.
+ * cache discounts and all, which only Claude Code's transcript exposes — and
+ * falls back to the list price for a model the agent NAMED, via `--agent-model`
+ * or a transcript stamp. There is no third source: a host that reports no
+ * billing and names no model is simply unpriced, and says so. (It used to fall
+ * back to a `model` field in `.graft/config.json` or a `$/Mtok` env override;
+ * both were removed, because a standing declaration keeps producing confident
+ * numbers long after the user has switched models.)
  *
- * The model goes through {@link agentModel}, not the config file alone, so a
- * host that names its model only on the call (`--agent-model`) is priced as
- * confidently as one that stamps it in a transcript.
+ * The result always carries the model knowledge, even when it carries no rate:
+ * "we cannot price this" is only useful to a reader if it also says WHICH model
+ * went unpriced — and, on Kilo, it is what selects the per-model table instead.
  *
  * `latestSession` rather than a session id because the callers are CLI and MCP
  * processes answering one query: they know the repo, never the host's session
@@ -239,8 +241,8 @@ export function formatSessionStats(s: SessionSummary | null, rate: InputRate | n
     `  tokens saved:  ~${formatCount(saved)}`,
   ];
   // Omitted, not zeroed, when there is no rate at all: a host whose hooks name
-  // no transcript can't know what a token costs here, and unless the user has
-  // declared a price, a made-up rate would be worse than the silence.
+  // no transcript can't know what a token costs here, and unless the agent
+  // named its model, a made-up rate would be worse than the silence.
   const value = valueSaved(saved, blendedRate(s.inputCostMicros, s.inputTokensBilled) ?? rate);
   if (value !== null) {
     const note = value.measured ? '' : '   (list rate — this host reports no billing)';

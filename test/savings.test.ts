@@ -11,6 +11,7 @@ import {
   toTokens,
   setPricing,
   setRepoRoot,
+  setMcpSurface,
   setModelTable,
 } from '../src/context/savings.js';
 import { NO_MODEL, pricingFor, type AgentModel } from '../src/context/price.js';
@@ -30,6 +31,7 @@ function footer(): string {
 function clearPricing(): void {
   setPricing(null);
   setModelTable(null);
+  setMcpSurface(false);
 }
 
 function fileNode(path: string, chars?: number): NodeV1 {
@@ -145,8 +147,35 @@ test('with no model and no host table, the tally is tokens alone', () => {
   const f = footer();
   assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
   assert.doesNotMatch(f, /~\$X|worth \$/, 'no model, so no dollar figure of any kind');
-  // The fix is named, since it is the only one that exists now.
+  // On the CLI the fix exists, so it is named.
   assert.match(f, /--agent-model/);
+  clearPricing();
+});
+
+test('over MCP the agent is pointed at the tool argument, not the CLI flag', () => {
+  // `--agent-model` is a CLI flag; MCP has no such thing, so advising it there
+  // would be an instruction the agent cannot follow. The `model` tool argument
+  // is the equivalent that does exist on this surface.
+  setPricing(pricingFor(NO_MODEL));
+  setModelTable(null);
+  setMcpSurface(true);
+  const f = footer();
+  assert.doesNotMatch(f, /--agent-model/);
+  assert.match(f, /Send `model: "<your model id>"`/);
+  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  clearPricing();
+});
+
+test('a host with a table is told to relay it, and nothing contradictory', () => {
+  // "Reproduce the table" and "report the tokens alone" must never appear in the
+  // same breath: the table IS the answer where one exists.
+  setPricing(pricingFor(NO_MODEL));
+  setMcpSurface(true);
+  setModelTable(() => [{ label: 'Claude Opus 5', value: '$3.12' }]);
+  const f = footer();
+  assert.match(f, /Reproduce the table exactly/);
+  assert.doesNotMatch(f, /Send `model:/, 'no competing instruction alongside the table');
+  assert.doesNotMatch(f, /--agent-model/);
   clearPricing();
 });
 
@@ -163,18 +192,35 @@ test('a model with no published price is not priced from anything else', () => {
 
 test('a host that lists its models gets a per-model table instead of nothing', () => {
   setPricing(pricingFor(NO_MODEL));
-  setModelTable((saved) => [
-    { label: 'Claude Opus 5', value: `$${(saved * 5) / 1_000_000}` },
-    { label: 'Gemini 3.8 Flash', value: `$${(saved * 0.75) / 1_000_000}` },
+  setModelTable(() => [
+    { label: 'Claude Opus 5', value: '$3.12' },
+    { label: 'Gemini 3.8 Flash', value: '$0.47' },
   ]);
   const f = footer();
-  assert.match(f, /graft saved ~N tokens by this turn, which estimates in \$ as following:/);
-  // Rows are pre-rendered and column-aligned, so the agent relays a table rather
-  // than laying one out differently every turn.
-  assert.match(f, /\| Claude Opus 5    \| \$0\.0095 \|/);
-  assert.match(f, /\| Gemini 3\.8 Flash \| \$0\.001425 \|/);
-  // And it is told where to put it.
+  assert.match(f, /graft saved ~N tokens by this turn, as estimated below:/);
+  // Drawn with ASCII rules rather than markdown pipes: a chat host only renders
+  // a markdown table when it sees a `|---|` delimiter row, and pipe rows without
+  // one arrive as a wall of plain text. A box needs no renderer cooperation.
+  assert.match(f, /\+------------------\+-------\+/);
+  assert.match(f, /\| Claude Opus 5    \| \$3\.12 \|/);
+  // Values are right-aligned so the amounts line up on their last digit.
+  assert.match(f, /\| Gemini 3\.8 Flash \| \$0\.47 \|/);
+  // Fenced, because the padding IS the table — unfenced, a chat host collapses
+  // the space runs and the box falls apart.
+  assert.match(f, /below:\n```\n\+/);
+  assert.match(f, /\+\n```"/);
+  // And the agent is told where to put it.
   assert.match(f, /collapsed\/expandable section/);
+  clearPricing();
+});
+
+test('the table opens and closes with a rule, so it reads as a box', () => {
+  setPricing(pricingFor(NO_MODEL));
+  setModelTable(() => [{ label: 'M', value: '$1.00' }]);
+  const lines = footer().slice(footer().indexOf('```')).split('\n');
+  assert.equal(lines[1], '+---+-------+', 'top rule');
+  assert.equal(lines[2], '| M | $1.00 |');
+  assert.equal(lines[3], '+---+-------+', 'bottom rule matches the top exactly');
   clearPricing();
 });
 

@@ -4,6 +4,7 @@
  */
 import { createInterface } from 'node:readline';
 import { TOOLS, callTool } from './tools.js';
+import { setMcpClient } from './client.js';
 import { mcpInstructions } from './instructions.js';
 import { hasGraftIndex } from '../graph/root.js';
 import { mainWorktreeRoot } from '../graph/seed.js';
@@ -101,6 +102,11 @@ export function startMcpServer(root: string, dirOverride?: string, version = '0'
     const isNotification = id === undefined;
     switch (method) {
       case 'initialize':
+        // The one moment the client names itself. Captured because the
+        // per-model savings table is only correct for a host whose config graft
+        // can actually read — without this, a Kilo config sitting on the machine
+        // would feed Kilo's model list into a Cursor or Codex session.
+        setMcpClient(params?.clientInfo?.name);
         reply(id, {
           protocolVersion: params?.protocolVersion ?? '2024-11-05',
           capabilities: { tools: {} },

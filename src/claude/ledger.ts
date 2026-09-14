@@ -24,11 +24,13 @@ import {
   blendedRate,
   formatDollars,
   listRate,
+  normalizeModelId,
   valueSaved,
   type AgentModel,
   type InputRate,
 } from '../context/price.js';
 import { formatCount } from '../context/savings.js';
+import { callScope } from '../context/call-scope.js';
 import type { ModelUsage } from './tally.js';
 
 /** One model's running totals within one day. */
@@ -55,37 +57,39 @@ export const UNKNOWN_MODEL = 'unknown';
 /**
  * Retired. `GRAFT_AGENT_MODEL` no longer takes part in pricing a saving.
  *
- * It was a standing declaration of the same kind as `model` in
- * `.graft/config.json`, but invisible in the repo and outranking it — so a
- * variable exported into a shell profile months ago silently out-voted the file
- * the user was looking at while they wondered why the number was wrong. Two
- * standing declarations is one too many, and the config file is the one that can
- * be read, reviewed and corrected. What names the model now is either the host
- * itself (a transcript stamp), the agent on the call (`--agent-model`), or that
- * config field — and nothing else.
+ * It was a standing declaration — a variable exported into a shell profile once,
+ * still naming a model months after the user switched away from it. So was the
+ * `model` field in `.graft/config.json`, and both are now ignored for the same
+ * reason: a stale price renders exactly like a correct one, so the user has no
+ * way to notice it has gone wrong.
+ *
+ * What names the model now is either the host itself (a transcript stamp) or the
+ * agent on the call (`--agent-model`) — both facts about the turn being priced,
+ * neither able to outlive it. Nothing else names one, and a saving nothing names
+ * is reported in tokens.
  *
  * The name is kept exported so an importer fails loudly at the type level rather
  * than reading an env var nothing writes; see `resolveModel`.
  *
- * @deprecated Ignored since 0.18.0. Use `model` in `.graft/config.json`.
+ * @deprecated Ignored since 0.18.0. Pass `--agent-model <id>` instead.
  */
 export const AGENT_MODEL_ENV = 'GRAFT_AGENT_MODEL';
 
 /**
- * The agent model named by the current invocation (`--agent-model`), if any.
+ * Record the model the agent says it is running for THIS call — `--agent-model`
+ * on the CLI, the `model` tool argument over MCP.
  *
- * Process-level for the same reason `context/savings.ts` holds the rate that
- * way: one CLI process answers one query for one session, and the alternative
- * is threading an identifier through every retrieval formatter. Unset means
- * "nobody named one on this call", which falls through to env and config.
+ * Held in the call scope, not a module-level slot. The distinction is invisible
+ * on the CLI (one process, one query) and load-bearing on the MCP server, which
+ * is long-lived and serves `async` calls that interleave at every `await`: a
+ * module slot let one tool call read the model another had just set, pricing and
+ * FILING a saving under a model that never ran it. See `context/call-scope.ts`.
+ *
+ * Blank and undefined both clear it, so a host that interpolates an empty
+ * variable names no model rather than naming the empty string.
  */
-let invocationModel: string | null = null;
-
-/** Record the model the agent says it is running for this invocation. Blank and
- * undefined both clear it, so a host that interpolates an empty variable into
- * `--agent-model ""` falls through to env/config instead of pricing nothing. */
 export function setAgentModel(model?: string | null): void {
-  invocationModel = model && model.trim() ? model.trim() : null;
+  callScope().agentModel = model && model.trim() ? model.trim() : null;
 }
 
 /** The local calendar day, which is the day the user means when they type one. */
@@ -111,7 +115,8 @@ export type ModelSource = 'stamped' | 'flag' | 'none';
  */
 export function resolveModel(dir: string, stamped?: string | null): { model: string; source: ModelSource } {
   if (stamped && stamped.trim()) return { model: stamped.trim(), source: 'stamped' };
-  if (invocationModel) return { model: invocationModel, source: 'flag' };
+  const named = callScope().agentModel;
+  if (named) return { model: named, source: 'flag' };
   return { model: UNKNOWN_MODEL, source: 'none' };
 }
 
@@ -140,15 +145,38 @@ export function readLedger(d: string): SavingsLedger {
   return l && typeof l.days === 'object' && l.days !== null ? l : { days: {} };
 }
 
+/**
+ * The key a saving is filed under: the model id with any provider routing
+ * prefix stripped, so `vertex_ai/claude-opus-5`, `anthropic/claude-opus-5` and a
+ * bare `claude-opus-5` are one row rather than three.
+ *
+ * The prefix names who SERVES the model, not which model it is. Keeping it
+ * split the lifetime totals by gateway — the same model, reached two ways,
+ * reported as two unrelated lines in `graft savings` — which answers a question
+ * nobody asked at the cost of the one they did: what has this model saved me.
+ *
+ * {@link UNKNOWN_MODEL} passes through unchanged (it has no prefix to strip),
+ * and a value that normalises to nothing falls back to it rather than creating
+ * an empty-string row.
+ */
+function ledgerKey(model: string): string {
+  return normalizeModelId(model).trim() || UNKNOWN_MODEL;
+}
+
 /** Read-modify-write of one day/model bucket. Best-effort and never throwing:
  * every caller is on a tool-call path, and a ledger entry is not worth failing a
  * turn over. Unlocked like `patchStats`, so a race loses a count, never the
- * file. */
+ * file.
+ *
+ * The single funnel every writer passes through, which is why the key is
+ * normalised HERE: a writer that forgot would silently start a second row for a
+ * model already in the file. */
 function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedger) => void): void {
   try {
     const ledger = readLedger(d);
     const day = (ledger.days[dayKey(when)] ??= {});
-    const bucket = (day[model] ??= { savedTokens: 0, costMicros: 0, tokensBilled: 0 });
+    const key = ledgerKey(model);
+    const bucket = (day[key] ??= { savedTokens: 0, costMicros: 0, tokensBilled: 0 });
     patch(bucket);
     writeJsonAtomic(ledgerPath(d), ledger);
   } catch {
@@ -210,7 +238,7 @@ export interface SavingsReport {
  * Roll the ledger up over a period, newest facts and oldest alike.
  *
  * A model's rate is its own measured one when the host billed it, and only then
- * the declared fallback — the same order every other surface uses, so a repo
+ * its published list price — the same order every other surface uses, so a repo
  * with one measured model and one unpriced one reports each honestly instead of
  * pricing both at whichever rate was handy.
  */

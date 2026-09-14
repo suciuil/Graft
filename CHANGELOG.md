@@ -1,5 +1,77 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Every MCP tool accepts a `model` argument** — the equivalent of the CLI's
+  `--agent-model`, for the surface that has no flags. Over MCP nothing else can
+  name the model: no flag can be passed and no transcript is stamped, so a Kilo
+  (or Cursor, or Codex) session's savings were priced at nothing and accumulated
+  in the lifetime ledger under `unknown`. The agent always knew what it was
+  running; it simply had no way to say so. Sending `model: "claude-opus-5"` now
+  yields one exact figure — `🌱 graft saved ~5,548 tokens (~$0.03 for Claude
+  Opus 5) this turn` — and files the saving against that model in
+  `graft savings`. The per-model table remains the fallback for a call that omits
+  it. Optional everywhere, and applied to every tool schema centrally so a tool
+  added later cannot silently miss it.
+
+### Changed
+
+- The per-model savings tally now reads **"as estimated below:"** rather than
+  "which estimates in $ as following:".
+- **The savings ledger files under the bare model id, not the gateway route.**
+  `vertex_ai/claude-opus-5`, `anthropic/claude-opus-5` and a plain
+  `claude-opus-5` are now one row instead of three. The prefix says who *serves*
+  the model, not which model it is, so keeping it split a model's lifetime total
+  across every route it was ever reached through — answering a question nobody
+  asked at the cost of the one they did. Normalisation happens in the single
+  read-modify-write every writer funnels through, so savings and billing for the
+  same model always land in the same row. Existing ledgers keep any prefixed rows
+  already written; new entries accumulate under the bare id.
+
+### Fixed
+
+- **Concurrent MCP tool calls no longer read each other's model.** The facts a
+  savings report needs — the model the agent named, the rate, the per-model
+  table, the claimed-token counter — were module-level slots, which is correct
+  for the CLI (one process answers one query and exits) and wrong for the MCP
+  server, which is long-lived and serves `async` calls. Two tool calls issued at
+  once, as JSON-RPC ids exist to allow, interleaved at every `await`: one call's
+  model landed before the other had read its own, so a saving could be priced at
+  the wrong rate, reported under the wrong name, and **filed in the lifetime
+  ledger against a model that never ran it**. Two overlapping calls could also
+  each file the sum of both their tokens. Per-call state now lives in an
+  `AsyncLocalStorage` scope entered once per tool call, so awaits inside a call
+  see it and siblings cannot; the CLI and hooks keep a process-level store and
+  are unaffected. Found by probing the real server — every sequential test passed
+  beforehand.
+
+- **The Kilo Code savings table renders as a table.** The per-model rows were
+  emitted as markdown pipes with no `|---|` delimiter row, and a chat host only
+  draws a table when it sees one — so what reached the user was a wall of plain
+  text with stray pipes in it. The table is now drawn with ASCII rules
+  (`+-----+-----+`) inside a fenced code block, which needs no cooperation from
+  the renderer and looks identical in chat, in a terminal, and in a diff. Values
+  are right-aligned so the amounts line up on their last digit.
+- **The per-model table no longer leaks into other hosts' sessions.** It was
+  wired unconditionally, so it appeared whenever a Kilo config existed *on the
+  machine* — meaning a developer with Kilo installed who drove graft from Cursor,
+  Codex or a plain terminal was shown Kilo's price list for a session Kilo had
+  nothing to do with. Graft now records the client that introduces itself at the
+  MCP `initialize` handshake (`params.clientInfo.name`, previously discarded) and
+  offers the table only to Kilo, the one host whose model configuration it can
+  actually read. Every other host gets the token count and a pointer to
+  `--agent-model`, which yields one exact figure — a better answer than a table
+  of alternatives, and the reason the table exists only where that is impossible.
+- **The unpriced nudge stops advising a flag the surface does not have.**
+  `--agent-model` is a CLI flag; over MCP there is no equivalent parameter, so
+  suggesting it there asked the agent for something it could not do — spending
+  tokens on advice that cannot be followed, and teaching the agent that graft's
+  instructions are approximate. The hint now appears only on the CLI. Hosts with
+  a per-model table are told to relay that instead, and are no longer told both
+  "reproduce the table" and "report the tokens alone" in the same breath.
+
 ## 0.18.0
 
 ### Added
