@@ -204,6 +204,15 @@ function modelTableBlock(savedTokens: number): string {
  *     lists the candidate models, that is followed by a table pricing this
  *     saving under each — the user reads their own row. Everywhere else the
  *     token count stands by itself.
+ *
+ * Returned WITHOUT surrounding quotes, and this matters more than it looks. The
+ * example used to be wrapped in `"…"` to show the agent where it began and
+ * ended — but the same prose tells the agent to reproduce it verbatim, so the
+ * quotes were reproduced too, and the line the user read came out as
+ * `"🌱 graft saved ~568,292 tokens by this turn"` with the quotes still on it.
+ * A delimiter the reader can see is a delimiter in the wrong place: the example
+ * now ends the sentence, which is boundary enough for the agent and leaves
+ * nothing for it to copy by mistake.
  */
 function tallyExample(savedTokens: number, rate: InputRate | null): string {
   if (rate === null) {
@@ -212,14 +221,25 @@ function tallyExample(savedTokens: number, rate: InputRate | null): string {
     // collapses the runs of spaces and the box falls apart. The fence is part
     // of the example so the agent relays it along with everything else.
     return table
-      ? `"\u{1F331} graft saved ~N tokens by this turn, as estimated below:\n\`\`\`${table}\`\`\`"`
-      : '"\u{1F331} graft saved ~N tokens by this turn"';
+      ? `\u{1F331} graft saved ~N tokens by this turn, as estimated below:\n\`\`\`${table}\`\`\``
+      : '\u{1F331} graft saved ~N tokens by this turn';
   }
-  if (rate.measured) return '"\u{1F331} graft saved ~N tokens (~$X) this turn"';
+  if (rate.measured) return '\u{1F331} graft saved ~N tokens (~$X) this turn';
   const name = modelLabel(rate);
   return name
-    ? `"\u{1F331} graft saved ~N tokens (~$X for ${name}) this turn"`
-    : '"\u{1F331} graft saved ~N tokens (~$X) this turn"';
+    ? `\u{1F331} graft saved ~N tokens (~$X for ${name}) this turn`
+    : '\u{1F331} graft saved ~N tokens (~$X) this turn';
+}
+
+/**
+ * The example as it ends the nudge sentence.
+ *
+ * A full stop closes the prose, except after the fenced table — a `.` hanging
+ * off the closing fence would be both ugly and, since the whole block is copied
+ * verbatim, reproduced in the user's reply.
+ */
+function tallyTail(example: string): string {
+  return example.endsWith('```') ? example : `${example}.`;
 }
 
 /** Appended to every retrieval footer so the agent reports the turn's running
@@ -267,7 +287,7 @@ export function savingsTurnNudge(savedTokens: number): string {
     return (
       ' This call cannot be priced: nothing named the model you are running. ' +
       'At the end of your reply, tell the user the total graft tokens saved ' +
-      `this turn. ${instruction}${sum}${example}.`
+      `this turn. ${instruction}${sum}${tallyTail(example)}`
     );
   }
 
@@ -279,7 +299,7 @@ export function savingsTurnNudge(savedTokens: number): string {
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     'reply, tell the user the total graft tokens saved this turn and what they ' +
-    `were worth.${sum}${example}.`
+    `were worth.${sum}${tallyTail(example)}`
   );
 }
 

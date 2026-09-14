@@ -115,7 +115,10 @@ test('a non-Kilo MCP client gets no table, even with Kilo installed on the box',
     const res = await callTool(d, 'graft_find_code', { query: 'add two numbers to a total' });
     assert.doesNotMatch(res.text, /as estimated below/, 'no table for a host graft cannot read');
     assert.doesNotMatch(res.text, /\+-+\+/, 'and no box drawn from somebody else’s models');
-    assert.match(res.text, /graft saved ~N tokens by this turn"/, 'a bare token count instead');
+    assert.match(res.text, /graft saved ~N tokens by this turn/, 'a bare token count instead');
+    // And the example is not wrapped in quotes: the agent is told to reproduce
+    // it verbatim, so anything around it lands in the user's reply too.
+    assert.doesNotMatch(res.text, /"🌱/, 'the tally example carries no quotes');
     // And not pointed at `--agent-model`: that is a CLI flag, and this surface
     // has no equivalent parameter to pass it through.
     assert.doesNotMatch(res.text, /--agent-model/);

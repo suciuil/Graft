@@ -15,9 +15,9 @@ import { withSavings, setPricing, setRepoRoot, setMcpSurface, setModelTable, sum
 import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
 import { kiloModelRows } from '../hosts/models.js';
-import { isKiloClient } from './client.js';
+import { isKiloClient, mcpClient } from './client.js';
 import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel, setHostModel } from '../claude/ledger.js';
-import { kiloSessionModel } from '../hosts/kilo-session.js';
+import { hostModelFor } from '../hosts/host-model.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
 import { buildRepoMap, formatRepoMap } from '../graph/map.js';
@@ -305,13 +305,11 @@ async function callToolScoped(
     // The backstop for when it doesn't, which measured against real usage is
     // most calls: a strong model sends `model` while the rule file is fresh in
     // context and stops as the conversation grows, and a fast model never sends
-    // it at all. Kilo records the running model in its own session database, so
-    // on that host the saving can be filed correctly regardless of whether the
-    // agent cooperated. Gated on the client actually BEING Kilo for the same
-    // reason the model table is: this reads Kilo's schema and nothing else's.
-    // Ranked below the agent's own word (see `resolveModel`), so a cooperating
-    // agent is unaffected by this line.
-    setHostModel(isKiloClient() ? kiloSessionModel(root) : null);
+    // it at all. Hosts that record the running model somewhere readable let the
+    // saving be filed correctly anyway — see `hosts/host-model.ts`, which owns
+    // the per-host gating. Ranked below the agent's own word (see
+    // `resolveModel`), so a cooperating agent is unaffected by this line.
+    setHostModel(hostModelFor(root, { mcpClient: mcpClient() }));
     // Freshness first: an answer that cites file:line has to be about the code as
     // it is right now, including edits nobody has committed (or even saved through
     // this agent). ~3ms when nothing moved; a structural, $0 rebuild when it did.

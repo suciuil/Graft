@@ -26,6 +26,25 @@ function footer(): string {
   return savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
 }
 
+/**
+ * The tally example must carry no quotation marks around it.
+ *
+ * It used to. The example was wrapped in `"…"` to show the agent where it began
+ * and ended, while the surrounding prose told the agent to reproduce it
+ * verbatim — so the quotes came out in the user's reply too, as
+ * `"🌱 graft saved ~568,292 tokens by this turn"`. A delimiter the reader can
+ * see is a delimiter in the wrong place, and this is the regression guard: the
+ * example ends the sentence now, and nothing may re-introduce a wrapper the
+ * agent will faithfully copy.
+ */
+function assertUnquotedTally(text: string): void {
+  const i = text.indexOf('\u{1F331}');
+  assert.ok(i > 0, 'the footer carries a tally example');
+  assert.notEqual(text[i - 1], '"', 'no opening quote before the tally');
+  const line = text.slice(i).split('\n')[0];
+  assert.doesNotMatch(line, /"/, `no quote anywhere on the tally line: ${line}`);
+}
+
 /** Reset both process-level slots between tests: a leaked model table would make
  * the next test assert the wrong branch entirely. */
 function clearPricing(): void {
@@ -117,7 +136,8 @@ test('a measured rate is priced bare — there is nothing to caveat', () => {
   const f = footer();
   assert.match(f, /worth <\$0\.01/);
   assert.match(f, /rate this session is actually paying/);
-  assert.match(f, /"🌱 graft saved ~N tokens \(~\$X\) this turn"/);
+  assert.match(f, /🌱 graft saved ~N tokens \(~\$X\) this turn/);
+  assertUnquotedTally(f);
   clearPricing();
 });
 
@@ -145,7 +165,8 @@ test('with no model and no host table, the tally is tokens alone', () => {
   setPricing(pricingFor(NO_MODEL));
   setModelTable(null);
   const f = footer();
-  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(f, /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(f);
   assert.doesNotMatch(f, /~\$X|worth \$/, 'no model, so no dollar figure of any kind');
   // On the CLI the fix exists, so it is named.
   assert.match(f, /--agent-model/);
@@ -162,7 +183,8 @@ test('over MCP the agent is pointed at the tool argument, not the CLI flag', () 
   const f = footer();
   assert.doesNotMatch(f, /--agent-model/);
   assert.match(f, /Send `model: "<your model id>"`/);
-  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(f, /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(f);
   clearPricing();
 });
 
@@ -185,7 +207,8 @@ test('a model with no published price is not priced from anything else', () => {
   setPricing(pricingFor(certain('claude-opus-6')));
   setModelTable(null);
   const f = footer();
-  assert.match(f, /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(f, /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(f);
   assert.doesNotMatch(f, /~\$X|worth \$/);
   clearPricing();
 });
@@ -208,7 +231,11 @@ test('a host that lists its models gets a per-model table instead of nothing', (
   // Fenced, because the padding IS the table — unfenced, a chat host collapses
   // the space runs and the box falls apart.
   assert.match(f, /below:\n```\n\+/);
-  assert.match(f, /\+\n```"/);
+  // The block ends on its closing fence and nothing else. It used to end
+  // ```" — a quote that closed graft's own example and was then copied
+  // verbatim into the user's reply. Nor is a full stop appended here: it would
+  // be reproduced just as faithfully, dangling off the fence.
+  assert.ok(f.endsWith('+\n```'), `the footer ends on the closing fence: ${JSON.stringify(f.slice(-12))}`);
   // And the agent is told where to put it.
   assert.match(f, /collapsed\/expandable section/);
   clearPricing();
@@ -239,10 +266,12 @@ test('the table is driven by the real saving, not a fixed number', () => {
 test('a host table that throws or comes back empty degrades to tokens alone', () => {
   setPricing(pricingFor(NO_MODEL));
   setModelTable(() => { throw new Error('unreadable config'); });
-  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(footer(), /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(footer());
 
   setModelTable(() => []);
-  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(footer(), /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(footer());
   clearPricing();
 });
 
@@ -298,7 +327,8 @@ test('setRepoRoot is still accepted and changes nothing about pricing', () => {
   // longer consulted by any pricing path.
   setRepoRoot(process.platform === 'win32' ? 'C:\\repo' : '/repo');
   setPricing(pricingFor(NO_MODEL));
-  assert.match(footer(), /"🌱 graft saved ~N tokens by this turn"/);
+  assert.match(footer(), /🌱 graft saved ~N tokens by this turn/);
+  assertUnquotedTally(footer());
   setRepoRoot(null);
   clearPricing();
 });

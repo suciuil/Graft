@@ -60,15 +60,23 @@ re-read whole files.
 This is a rule, not a preference: every one of those substitutions returns the
 same answer for a fraction of the tokens, and the graph edges behind
 \`callers\` are not reconstructible by reading at all.
-Pass \`--agent-model <your own model id>\` on your graft calls when you know it
-(e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices
-the tokens it saves at YOUR model's rate, and it cannot see which model you are;
-without this it reports the saving in tokens alone. Graft never guesses a model
-and never reads one from a config file, so this flag is the only way to get a
-dollar figure.
-Every graft output ends with an example tally in quotes. Close your reply with
-it, verbatim, substituting the summed tokens and dollars — it already says
-exactly what may and may not be claimed about the price.
+Pass \`--agent-model <your own model id>\` on EVERY graft call — treat it as part
+of the command, like the query itself (e.g. \`graft ask "..." --source
+--agent-model claude-opus-5\`). Graft prices the tokens it saves at YOUR model's
+rate and cannot see which model you are, so without it the saving is reported in
+tokens alone and filed as "unknown". It is the first call of a long session that
+tends to get this right and the twentieth that quietly drops it.
+
+Where the host itself records the running model (VS Code writes it into its chat
+session files), graft falls back to reading that — so a saving is not always
+lost. That backstop is keyed on the workspace, cannot tell two chats in one
+window apart, and is always outranked by what you pass. Graft still never
+guesses a model and never reads one from a config file.
+Every graft output ends with an example tally. Close your reply with that line,
+substituting the summed tokens and dollars — its wording already says exactly
+what may and may not be claimed about the price. Write it as a plain line: no
+surrounding quotation marks, and drop any trailing full stop that merely closed
+graft's own sentence.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }
@@ -145,6 +153,9 @@ crowds out the answer itself:
 **Keep the fenced code block around the table.** The columns are held in line by
 space padding, and an unfenced table is re-flowed by the chat renderer into a
 wall of text — which defeats the point of showing a table at all.
+
+Write the tally line itself as plain prose — never wrapped in quotation marks.
+It is something you are telling the user, not something you are quoting.
 
 Reproduce the rows graft gives you — do not add models, drop models, or reorder
 them, and never price a token yourself. A model graft has no published rate for
