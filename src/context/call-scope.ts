@@ -43,6 +43,17 @@ export interface CallScope {
   claimedTokens: number;
   /** The model the agent named for THIS call. */
   agentModel: string | null;
+  /**
+   * The model the HOST says this session is running, read from the host's own
+   * live session record (`hosts/kilo-session.ts`).
+   *
+   * Separate from {@link agentModel} because the two rank differently and the
+   * difference has to survive into `resolveModel`: the agent naming itself is
+   * about this exact call, while the host's record is about the session the call
+   * belongs to. Both are facts about the turn, so both price; the agent's own
+   * word wins when they disagree.
+   */
+  hostModel: string | null;
 }
 
 function freshScope(): CallScope {
@@ -53,6 +64,7 @@ function freshScope(): CallScope {
     overMcp: false,
     claimedTokens: 0,
     agentModel: null,
+    hostModel: null,
   };
 }
 

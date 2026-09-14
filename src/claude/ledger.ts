@@ -92,31 +92,71 @@ export function setAgentModel(model?: string | null): void {
   callScope().agentModel = model && model.trim() ? model.trim() : null;
 }
 
+/**
+ * Record the model the HOST says this session is running — read from the host's
+ * own live session record rather than reported by the agent.
+ *
+ * The distinction from {@link setAgentModel} is one of provenance, not of
+ * trust. Over MCP the agent is asked to name itself on every call, and measured
+ * against real usage it mostly does not: the ask is honoured on a fraction of
+ * calls by a strong model and on none at all by a fast one, so the majority of
+ * savings were filed under {@link UNKNOWN_MODEL} and reported in tokens. This is
+ * the channel that closes that gap where a host keeps the answer somewhere
+ * readable (today: Kilo Code — see `hosts/kilo-session.ts`).
+ *
+ * It is NOT the standing declaration this module removed in 0.18.0. That was a
+ * value written once into a config file, still pricing months later with no way
+ * for the user to see it had gone stale. A host's session record is written by
+ * the host, per session, for the conversation now making the call — the same
+ * class of evidence as a transcript stamp, and it goes stale by disappearing
+ * rather than by lying.
+ *
+ * Held in the call scope for exactly the reason the agent's model is: the MCP
+ * server is long-lived and serves interleaving async calls.
+ */
+export function setHostModel(model?: string | null): void {
+  callScope().hostModel = model && model.trim() ? model.trim() : null;
+}
+
 /** The local calendar day, which is the day the user means when they type one. */
 export function dayKey(when: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
 }
 
-/** Where {@link resolveModel} got its answer. Both real sources name the model
+/** Where {@link resolveModel} got its answer. Every real source names the model
  * the turn ACTUALLY ran — 'stamped' from the host's own transcript, 'flag' from
- * the agent naming itself on this call. There is deliberately no third: a model
- * standing in a config file is a guess that outlives its session, and pricing
- * from one is what this design removed. */
-export type ModelSource = 'stamped' | 'flag' | 'none';
+ * the agent naming itself on this call, 'host' from the host's live session
+ * record. What is deliberately absent is a model standing in a config file: that
+ * is a guess which outlives its session, and pricing from one is what this
+ * design removed. */
+export type ModelSource = 'stamped' | 'flag' | 'host' | 'none';
 
 /**
  * Which model a saving belongs to, and how sure we are of it.
  *
- * A stamped model is what the session demonstrably ran; `--agent-model` is the
- * agent naming itself on this very call. Both are facts about THIS turn, so both
- * rank `certain`. Anything else is `none`: the saving is filed under
- * {@link UNKNOWN_MODEL} and reported in tokens alone, never priced at a guess.
+ * Three sources, in falling order of directness:
+ *
+ *  1. `stamped` — the host's transcript says what the session ran.
+ *  2. `flag` — the agent named itself on this very call (`--agent-model`, or the
+ *     `model` tool argument over MCP).
+ *  3. `host` — the host's own live session record names the model of the session
+ *     this call belongs to (`hosts/kilo-session.ts`).
+ *
+ * All three are facts about the turn being priced, so all three rank `certain`.
+ * The agent's own word outranks the host record because it is scoped to the call
+ * rather than to the session: a host that lets the model change mid-session, or
+ * runs two sessions in one directory, is described more precisely by the agent
+ * than by a row matched on a path.
+ *
+ * Anything else is `none`: the saving is filed under {@link UNKNOWN_MODEL} and
+ * reported in tokens alone, never priced at a guess.
  */
 export function resolveModel(dir: string, stamped?: string | null): { model: string; source: ModelSource } {
   if (stamped && stamped.trim()) return { model: stamped.trim(), source: 'stamped' };
-  const named = callScope().agentModel;
-  if (named) return { model: named, source: 'flag' };
+  const scope = callScope();
+  if (scope.agentModel) return { model: scope.agentModel, source: 'flag' };
+  if (scope.hostModel) return { model: scope.hostModel, source: 'host' };
   return { model: UNKNOWN_MODEL, source: 'none' };
 }
 

@@ -53,6 +53,6 @@ export function mcpInstructions(): string {
     '- graft_repo_map — orientation in a new repo.',
     '',
     'Results reflect uncommitted edits — the graph refreshes each query.',
-    'Pass `model: "<your model id>"` every call so graft can price what it saves.',
+    'Send `model: "<your model id>"` on EVERY call; without it savings go unpriced.',
   ].join('\n');
 }

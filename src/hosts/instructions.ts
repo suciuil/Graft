@@ -106,15 +106,27 @@ export function kiloRule(): string {
 
 ### Reporting what graft saved (Kilo Code)
 
-**Send \`model: "<your model id>"\` with every graft tool call.** Kilo reaches
-graft over MCP, which stamps no transcript, so this argument is the only way
-graft learns what you are running. With it you get one exact figure —
-\`🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this turn\` — and the
-saving is recorded against that model in \`graft savings\` instead of as
-"unknown".
+**Send \`model: "<your model id>"\` with every graft tool call — every call, not
+just the first.** Kilo reaches graft over MCP, which stamps no transcript, so
+this argument is how graft learns what you are running. With it you get one
+exact figure — \`🌱 graft saved ~5,548 tokens (~$0.03 for Claude Opus 5) this
+turn\` — and the saving is recorded against that model in \`graft savings\`
+instead of as "unknown".
 
-Without it, graft cannot know the model, so its output carries a table pricing
-this turn's saving under every model your Kilo configuration offers instead.
+It is the *first* call of a long conversation that tends to get this right and
+the twentieth that quietly drops it. Treat the argument as part of the call, the
+same way \`query\` is: a graft tool call without \`model\` is an incomplete call.
+Send the id exactly as your configuration spells it (\`vertex_ai/claude-opus-5\`
+and \`claude-opus-5\` are both fine — graft strips the routing prefix itself).
+
+Graft falls back to reading Kilo's own session record when you omit it, so a
+saving is not always lost — but that is a backstop keyed on the working
+directory, not a substitute. It cannot tell two sessions in one directory apart,
+and what you send always wins over it.
+
+Where even the backstop cannot name the model, graft's output carries a table
+pricing this turn's saving under every model your Kilo configuration offers
+instead.
 
 Close any reply where you used graft with that tally, summed across your graft
 calls, and put the table in a **collapsed/expandable section** so it never

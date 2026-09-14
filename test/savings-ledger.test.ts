@@ -22,7 +22,9 @@ import {
   readLedger,
   recordSavedTokens,
   recordTurnBilling,
+  resolveModel,
   setAgentModel,
+  setHostModel,
 } from '../src/claude/ledger.js';
 import { writeBuildConfig } from '../src/util/state.js';
 import { recordToolUse } from '../src/claude/session-metrics.js';
@@ -259,6 +261,57 @@ test('--agent-model names the model, and a blank one clears it', () => {
     assert.equal(currentModel(d), UNKNOWN_MODEL, 'a blank flag names nothing rather than pricing a blank');
   } finally {
     setAgentModel(null);
+  }
+});
+
+test('the host\'s session record names the model when the agent did not', () => {
+  // The gap this closes: over MCP the agent is asked to name itself on every
+  // call and mostly does not, so the saving was filed as `unknown`. A host that
+  // records the running model per session can answer instead.
+  const d = fresh();
+  try {
+    setHostModel('gemini-3.8-flash');
+    assert.equal(currentModel(d), 'gemini-3.8-flash');
+    assert.deepEqual(agentModel(d), { id: 'gemini-3.8-flash', confidence: 'certain' },
+      'the host describing its own live session is a fact about this turn, not a guess');
+    setHostModel('  ');
+    assert.equal(currentModel(d), UNKNOWN_MODEL, 'a blank record names nothing');
+  } finally {
+    setHostModel(null);
+  }
+});
+
+test('what the agent says outranks what the host recorded', () => {
+  // Deliberate precedence: the agent's word is scoped to THIS call, while the
+  // host record is matched on a directory and cannot tell two sessions in one
+  // directory apart. A cooperating agent must be unaffected by the fallback.
+  const d = fresh();
+  try {
+    setHostModel('gemini-3.8-flash');
+    setAgentModel('claude-opus-5');
+    assert.equal(currentModel(d), 'claude-opus-5');
+    // ...and a transcript stamp still beats both.
+    assert.equal(currentModel(d, 'claude-haiku-4-5'), 'claude-haiku-4-5');
+  } finally {
+    setAgentModel(null);
+    setHostModel(null);
+  }
+});
+
+test('resolveModel reports which of the three sources answered', () => {
+  // The source travels with the model because the surfaces word themselves
+  // differently per source; a silent reshuffle of this order would be invisible.
+  const d = fresh();
+  try {
+    assert.equal(resolveModel(d).source, 'none');
+    setHostModel('gemini-3.8-flash');
+    assert.equal(resolveModel(d).source, 'host');
+    setAgentModel('claude-opus-5');
+    assert.equal(resolveModel(d).source, 'flag');
+    assert.equal(resolveModel(d, 'claude-haiku-4-5').source, 'stamped');
+  } finally {
+    setAgentModel(null);
+    setHostModel(null);
   }
 });
 
