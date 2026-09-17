@@ -57,6 +57,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { canonicalModelKey } from '../context/price.js';
 
 /**
  * How recently Kilo must have touched a session row for it to name the model of
@@ -70,6 +71,21 @@ import { join } from 'node:path';
  * bound exists to exclude.
  */
 export const MAX_SESSION_AGE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * How recently a session must have been written to count as the one mid-turn.
+ *
+ * Only consulted to break a tie between several live sessions on one directory
+ * (see {@link kiloSessionModel}). A tool call arrives while the host is
+ * streaming a turn, and the host rewrites that session's row on every message,
+ * so the calling session's row is seconds old. An idle chat in another tab is
+ * minutes old at best.
+ *
+ * Two minutes rather than seconds because a turn can stall on a slow tool call
+ * or a permission prompt between writes, and the cost of being too tight here is
+ * an unpriced saving rather than a wrong one.
+ */
+const ACTIVE_TURN_MS = 2 * 60 * 1000;
 
 /**
  * Kilo's data directory, in the order the releases have used.
@@ -207,16 +223,42 @@ export function kiloSessionModel(
       .prepare('select directory, model, time_updated from session order by time_updated desc limit 200')
       .all();
     const want = normalizeDir(dir);
+
+    // Every session on this directory that is recent enough to be live. Kilo
+    // serves one MCP server per workspace, not per chat, so a user with two
+    // chats open on one repo produces several — and nothing in the protocol says
+    // which of them is calling.
+    const live: Array<{ model: string; updated: number }> = [];
     for (const row of rows) {
       if (typeof row?.directory !== 'string' || normalizeDir(row.directory) !== want) continue;
       const updated = Number(row.time_updated);
-      // Rows are newest-first, so the first directory match is the live session.
-      // An out-of-window match ends the search rather than skipping: every later
-      // row is older still.
-      if (!Number.isFinite(updated) || now - updated > maxAge) return null;
-      return parseSessionModel(row.model);
+      // Rows are newest-first, so the first out-of-window match ends the scan:
+      // every later row is older still.
+      if (!Number.isFinite(updated) || now - updated > maxAge) break;
+      const model = parseSessionModel(row.model);
+      if (model) live.push({ model, updated });
     }
-    return null;
+    if (live.length === 0) return null;
+
+    const newest = live[0];
+    // One candidate, or several that agree: no ambiguity to resolve.
+    if (live.every((s) => canonicalModelKey(s.model) === canonicalModelKey(newest.model))) {
+      return newest.model;
+    }
+
+    // They disagree, so "newest wins" is a coin toss dressed as a fact — and the
+    // observed failure: a repo with a 1-minute-old Opus chat and a 74-minute-old
+    // Gemini chat filed EVERY Gemini saving under Opus, a 6x price difference,
+    // for as long as both stayed open.
+    //
+    // A tool call happens DURING a turn, and Kilo rewrites the session row on
+    // every message of it, so the caller's row is seconds old rather than
+    // minutes. When exactly one candidate is that fresh, it is the live one and
+    // the rest are idle tabs. When none is — or several are — nothing here can
+    // tell them apart, and an unpriced saving beats one filed against a model
+    // that never ran.
+    const active = live.filter((s) => now - s.updated <= ACTIVE_TURN_MS);
+    return active.length === 1 ? active[0].model : null;
   } catch {
     return null;
   } finally {

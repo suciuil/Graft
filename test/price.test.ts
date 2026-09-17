@@ -17,6 +17,8 @@ import {
   blendedRate,
   listRate,
   pricingFor,
+  canonicalModelKey,
+  refinesModelId,
   valueSaved,
   NO_MODEL,
 } from '../src/context/price.js';
@@ -40,6 +42,55 @@ test('inputUsdPerMtok: known families are priced, anything else is null', () => 
   assert.equal(inputUsdPerMtok('claude-fable-5-1'), 10);
   assert.equal(inputUsdPerMtok('some-future-model'), null);
   assert.equal(inputUsdPerMtok(undefined), null);
+});
+
+test('canonicalModelKey: the spellings of one model collapse to one key', () => {
+  // The field bug: a real ledger carried `gemini-3.7-flash` AND
+  // `gemini-3-7-flash` as separate rows, each with its own dollar figure, as
+  // though two different models had been used. The spellings come from
+  // different sources (a host config, an agent's self-report, a session file),
+  // so the key has to stop distinguishing them.
+  const key = canonicalModelKey;
+  assert.equal(key('gemini-3.7-flash'), key('gemini-3-7-flash'));
+  assert.equal(key('Gemini-3.7-Flash'), key('gemini-3-7-flash'), 'case folds too');
+  assert.equal(key('vertex_ai/claude-opus-5'), key('claude-opus-5'), 'routing prefix still dropped');
+  assert.equal(key('Google: Gemini 3.8 Flash'), key('gemini-3-8-flash'), 'vendor label and spaces');
+});
+
+test('canonicalModelKey: distinct models keep distinct keys', () => {
+  // The fold must not invent equivalences the price table would not make.
+  const key = canonicalModelKey;
+  assert.notEqual(key('gemini-3.7-flash'), key('gemini-3.8-flash'));
+  assert.notEqual(key('gpt-5.6-luna'), key('gpt-5.6-sol'));
+  assert.notEqual(key('claude-opus-5'), key('claude-sonnet-5'));
+  // A dot that is not between digits carries meaning and is left alone.
+  assert.notEqual(key('gpt-4.1-mini'), key('gpt-4.1mini'));
+});
+
+test('refinesModelId: a family name is refined by the model that actually ran', () => {
+  // Why this exists: an agent behind a router ("Auto") reports the family, not
+  // the model. `gpt-5` and `gpt-5.6-luna` differ by 6x in price, so treating the
+  // vaguer self-report as authoritative overstates every saving in the session.
+  assert.equal(refinesModelId('gpt-5.6-luna', 'gpt-5'), true);
+  assert.equal(refinesModelId('gpt-5-mini', 'gpt-5'), true);
+  assert.equal(refinesModelId('claude-opus-5-0', 'claude-opus-5'), true);
+  // Routing prefixes are normalised away on both sides first.
+  assert.equal(refinesModelId('copilot/gpt-5.6-luna', 'gpt-5'), true);
+  // ...and so is the separator, so a refinement is not missed over spelling.
+  assert.equal(refinesModelId('gpt-5-6-luna', 'gpt-5'), true);
+});
+
+test('refinesModelId: anything that is not the same model, more precisely, is false', () => {
+  // The guard rails. A different model is a real conflict, not a precision
+  // difference, and must be left to the caller's precedence rules.
+  assert.equal(refinesModelId('gemini-3.8-flash', 'gpt-5'), false, 'different vendor');
+  assert.equal(refinesModelId('gpt-5', 'gpt-5.6-luna'), false, 'vaguer, not more precise');
+  assert.equal(refinesModelId('gpt-5', 'gpt-5'), false, 'identical is not a refinement');
+  // The separator requirement: a longer name that merely starts with the same
+  // characters is a different model, not a more specific one.
+  assert.equal(refinesModelId('gpt-55', 'gpt-5'), false);
+  assert.equal(refinesModelId('', 'gpt-5'), false);
+  assert.equal(refinesModelId('gpt-5', ''), false);
 });
 
 test('inputUsdPerMtok: the non-Anthropic families are priced at short-context list', () => {

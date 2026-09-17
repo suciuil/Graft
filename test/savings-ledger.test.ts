@@ -83,9 +83,51 @@ test('the provider routing prefix is stripped before filing', () => {
   recordSavedTokens(d, 'azure/eastus/gpt-5.6-luna', 7, day('2026-09-08'));
 
   const bucket = readLedger(d).days['2026-09-08'];
-  assert.deepEqual(Object.keys(bucket).sort(), ['claude-opus-5', 'gpt-5.6-luna']);
+  // Keys are canonical: the routing prefix is gone and the version separator is
+  // folded to `-`, so one model is one row however it was spelled.
+  assert.deepEqual(Object.keys(bucket).sort(), ['claude-opus-5', 'gpt-5-6-luna']);
   assert.equal(bucket['claude-opus-5'].savedTokens, 600, 'three routes, one row');
-  assert.equal(bucket['gpt-5.6-luna'].savedTokens, 7, 'a multi-segment route is stripped whole');
+  assert.equal(bucket['gpt-5-6-luna'].savedTokens, 7, 'a multi-segment route is stripped whole');
+});
+
+test('one model spelled two ways is one row, not two', () => {
+  // The field bug, exactly as it appeared in a real `graft savings`:
+  //   gemini-3.7-flash   ~863,871 tokens   ~$0.65
+  //   gemini-3-7-flash   ~717,427 tokens   ~$0.54
+  // Same model, two rows, two dollar figures. The spellings arrive from
+  // different sources, so no single writer could be fixed — the key had to stop
+  // telling them apart.
+  const d = fresh();
+  recordSavedTokens(d, 'gemini-3.7-flash', 100, day('2026-09-08'));
+  recordSavedTokens(d, 'gemini-3-7-flash', 200, day('2026-09-08'));
+  recordSavedTokens(d, 'Gemini-3.7-Flash', 300, day('2026-09-08'));
+
+  const bucket = readLedger(d).days['2026-09-08'];
+  assert.deepEqual(Object.keys(bucket), ['gemini-3-7-flash'], 'one key for one model');
+  assert.equal(bucket['gemini-3-7-flash'].savedTokens, 600);
+  // ...and a genuinely different model still gets its own row.
+  recordSavedTokens(d, 'gemini-3.8-flash', 50, day('2026-09-08'));
+  assert.deepEqual(Object.keys(readLedger(d).days['2026-09-08']).sort(), ['gemini-3-7-flash', 'gemini-3-8-flash']);
+});
+
+test('a ledger already split across spellings is merged when it is read', () => {
+  // Fixing only the write path would leave every existing ledger permanently
+  // split: the rows are historical facts and nothing rewrites them. So the
+  // report canonicalises as it aggregates.
+  const report = aggregateSavings({
+    days: {
+      '2026-09-14': {
+        'gemini-3.7-flash': { savedTokens: 863_871, costMicros: 0, tokensBilled: 0 },
+        'gemini-3-7-flash': { savedTokens: 717_427, costMicros: 0, tokensBilled: 0 },
+        unknown: { savedTokens: 1_000, costMicros: 0, tokensBilled: 0 },
+      },
+    },
+  });
+  const gemini = report.models.filter((m) => m.model.startsWith('gemini'));
+  assert.equal(gemini.length, 1, 'one row for the one model that ran');
+  assert.equal(gemini[0].savedTokens, 863_871 + 717_427);
+  // The unknown sentinel is not a model id and must never be folded into one.
+  assert.ok(report.models.some((m) => m.model === UNKNOWN_MODEL));
 });
 
 test('billing is filed under the same stripped key as the savings', () => {
@@ -292,6 +334,46 @@ test('what the agent says outranks what the host recorded', () => {
     assert.equal(currentModel(d), 'claude-opus-5');
     // ...and a transcript stamp still beats both.
     assert.equal(currentModel(d, 'claude-haiku-4-5'), 'claude-haiku-4-5');
+  } finally {
+    setAgentModel(null);
+    setHostModel(null);
+  }
+});
+
+test('a router-mode agent reporting its family is refined by the host record', () => {
+  // The field case: Copilot on "Auto" does not know which model it is, so it
+  // answered `--agent-model gpt-5` for a turn VS Code recorded as
+  // `gpt-5.6-luna`. Taking the agent's word filed the saving under `gpt-5` and
+  // priced it at $1.25/Mtok against the real $0.20 — 6x over, and indexed under
+  // a model that never ran.
+  const d = fresh();
+  try {
+    setAgentModel('gpt-5');
+    setHostModel('gpt-5.6-luna');
+    assert.equal(currentModel(d), 'gpt-5.6-luna', 'the same claim, one decimal place better');
+    assert.equal(resolveModel(d).source, 'host');
+  } finally {
+    setAgentModel(null);
+    setHostModel(null);
+  }
+});
+
+test('a genuinely different host model never overrides the agent', () => {
+  // The line the refinement must not cross. Two DIFFERENT models is a real
+  // conflict, not a precision difference, and there the agent is the better
+  // authority on its own call — the host record is matched on a directory and
+  // cannot tell two sessions apart.
+  const d = fresh();
+  try {
+    setAgentModel('claude-opus-5');
+    setHostModel('gemini-3.8-flash');
+    assert.equal(currentModel(d), 'claude-opus-5');
+    assert.equal(resolveModel(d).source, 'flag');
+    // Nor does a SHORTER host record replace a more specific agent report: the
+    // agent knowing exactly what it is beats the host knowing only the family.
+    setAgentModel('gpt-5.6-luna');
+    setHostModel('gpt-5');
+    assert.equal(currentModel(d), 'gpt-5.6-luna');
   } finally {
     setAgentModel(null);
     setHostModel(null);

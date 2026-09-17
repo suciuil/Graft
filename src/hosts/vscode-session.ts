@@ -266,16 +266,31 @@ export function vscodeSessionModel(
   // the most recent file is routinely one with no request in it yet. Stopping
   // there reported "unknown" while the answer sat in the session just behind it.
   candidates.sort((a, b) => b.mtime - a.mtime);
-  for (const { file } of candidates.slice(0, MAX_SESSIONS_READ)) {
+  const named: Array<{ model: string; mtime: number }> = [];
+  for (const { file, mtime } of candidates.slice(0, MAX_SESSIONS_READ)) {
     try {
       const model = sessionModelFrom(readFileSync(file, 'utf8'));
-      if (model) return model;
+      if (model) named.push({ model, mtime });
     } catch {
       // Unreadable (being written, or locked) — try the next.
     }
   }
-  return null;
+  if (named.length === 0) return null;
+
+  // Several chats open on one workspace, running different models, is the case
+  // that makes "newest wins" a guess rather than an observation — see the same
+  // reasoning in `kilo-session.ts`. When the live candidates disagree, only a
+  // session written within the current turn can be the caller; if that does not
+  // single one out, no price is better than the wrong one.
+  const newest = named[0];
+  if (named.every((s) => s.model.toLowerCase() === newest.model.toLowerCase())) return newest.model;
+  const active = named.filter((s) => now - s.mtime <= ACTIVE_TURN_MS);
+  return active.length === 1 ? active[0].model : null;
 }
+
+/** Mirrors `kilo-session.ts`: how recently a chat log must have been written to
+ * be the one mid-turn, used only to break a tie between disagreeing sessions. */
+const ACTIVE_TURN_MS = 2 * 60 * 1000;
 
 /**
  * How many session logs to open before giving up.
