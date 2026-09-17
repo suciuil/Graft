@@ -90,6 +90,64 @@ export function normalizeModelId(model: string): string {
   return routed.replace(/^[A-Za-z]+\s*:\s*/, '').replace(/[\s_]+/g, '-');
 }
 
+/**
+ * The one key two spellings of the same model must agree on.
+ *
+ * {@link normalizeModelId} drops the routing prefix and folds spaces, which is
+ * enough to match the price table — its patterns are written `[.-]` precisely
+ * because vendors disagree about the version separator, and they are
+ * case-insensitive for the same reason. The LEDGER had neither concession, so it
+ * keyed on the raw spelling and the same model arrived under several:
+ *
+ *     gemini-3.7-flash    ~863,871 tokens
+ *     gemini-3-7-flash    ~717,427 tokens
+ *
+ * One model, two rows, two dollar figures, and a total that reads as though two
+ * different things had been used. The spellings come from genuinely different
+ * places — a host config, an agent's self-report, a session file — so no single
+ * writer can be blamed or fixed; the key itself has to stop distinguishing them.
+ *
+ * Folds the two things vendors vary and nothing else: case, and `.` versus `-`
+ * BETWEEN DIGITS (`3.7` ≡ `3-7`). A dot elsewhere is left alone, since it can
+ * carry meaning — `gpt-4.1-mini` and a hypothetical `gpt-4.1mini` are not the
+ * same claim, and this must not invent equivalences the price table would not
+ * make.
+ */
+export function canonicalModelKey(model: string): string {
+  return normalizeModelId(model)
+    .toLowerCase()
+    .replace(/(\d)\.(\d)/g, '$1-$2');
+}
+
+/**
+ * Is `candidate` the same model as `claim`, named more precisely?
+ *
+ * True for `gpt-5.6-luna` against `gpt-5`, false for `gemini-3.8-flash` against
+ * `gpt-5`, and false when the two are equal. The distinction matters because an
+ * agent in a router mode ("Auto") does not know which model it is and answers
+ * with the family — `gpt-5` — while the host records what actually ran. Those
+ * are not competing claims about different models; they are the same claim at
+ * two precisions, and the precise one is both more useful and more honest.
+ *
+ * Requiring a separator after the prefix is what keeps this from matching by
+ * accident: `gpt-5` refines to `gpt-5.6-luna` and `gpt-5-mini`, but not to a
+ * hypothetical `gpt-55`, which would be a different model entirely.
+ *
+ * Deliberately NOT a general "these look similar" test. It answers one question
+ * — may a more specific observation replace a vaguer self-report — and every
+ * other disagreement between two named models is left to the caller's
+ * precedence rules, where a genuine conflict must not be silently resolved.
+ */
+export function refinesModelId(candidate: string, claim: string): boolean {
+  // Compared in the canonical form, so `gpt-5.6-luna` refines `gpt-5` whichever
+  // separator either side happens to use.
+  const specific = canonicalModelKey(candidate);
+  const general = canonicalModelKey(claim);
+  if (!specific || !general || specific === general) return false;
+  if (!specific.startsWith(general)) return false;
+  return specific[general.length] === '-';
+}
+
 /** List input price for a model id, or null when we don't know it — a model
  * released after this table was written, or a host reporting something else
  * entirely. Null propagates all the way to "render tokens only".

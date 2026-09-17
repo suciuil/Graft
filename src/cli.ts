@@ -98,7 +98,10 @@ function noteQuery(dir: string): string {
   // the model through the call scope this writes to.
   //
   // Ranked below `--agent-model` (see `resolveModel`), so an agent that names
-  // itself is unaffected.
+  // itself is unaffected — with one exception, which is why this is read even
+  // when the flag WAS passed: an agent behind a router ("Auto") reports the
+  // family it belongs to rather than the model, and the host's record is the
+  // same claim one decimal place better. See `refinesModelId`.
   setHostModel(hostModelFor(dir));
   // Every retrieval command funnels through here, which makes it the one place
   // that can price this session's tokens before a formatter needs the number.

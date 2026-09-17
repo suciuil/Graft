@@ -22,9 +22,11 @@ import { cacheDir, readJson, writeJsonAtomic } from '../util/state.js';
 import {
   NO_MODEL,
   blendedRate,
+  canonicalModelKey,
   formatDollars,
   listRate,
   normalizeModelId,
+  refinesModelId,
   valueSaved,
   type AgentModel,
   type InputRate,
@@ -141,7 +143,7 @@ export type ModelSource = 'stamped' | 'flag' | 'host' | 'none';
  *  2. `flag` — the agent named itself on this very call (`--agent-model`, or the
  *     `model` tool argument over MCP).
  *  3. `host` — the host's own live session record names the model of the session
- *     this call belongs to (`hosts/kilo-session.ts`).
+ *     this call belongs to (`hosts/kilo-session.ts`, `hosts/vscode-session.ts`).
  *
  * All three are facts about the turn being priced, so all three rank `certain`.
  * The agent's own word outranks the host record because it is scoped to the call
@@ -149,13 +151,36 @@ export type ModelSource = 'stamped' | 'flag' | 'host' | 'none';
  * runs two sessions in one directory, is described more precisely by the agent
  * than by a row matched on a path.
  *
+ * ## The one exception: a vaguer self-report
+ *
+ * An agent running behind a router — Copilot's "Auto", where the picker holds
+ * `copilot/auto` — genuinely does not know which model it is. Asked to name
+ * itself it answers with the FAMILY: observed in the field, `--agent-model
+ * gpt-5` for a turn VS Code recorded as `gpt-5.6-luna`. Taking the agent's word
+ * there is not preferring a better source, it is discarding the only precise
+ * observation available: it filed the saving under `gpt-5` and priced it at
+ * $1.25/Mtok when the model actually running lists at $0.20 — a 6x overstatement
+ * presented with exactly the confidence of a correct figure.
+ *
+ * So when the host's record is the SAME model named more precisely
+ * ({@link refinesModelId}), the precise form wins. This is not the host
+ * overriding the agent: both are saying "a gpt-5", and only one of them says
+ * which. A host record naming a genuinely DIFFERENT model still loses, because
+ * that is a real conflict and the agent is the better authority on its own call.
+ *
  * Anything else is `none`: the saving is filed under {@link UNKNOWN_MODEL} and
  * reported in tokens alone, never priced at a guess.
  */
 export function resolveModel(dir: string, stamped?: string | null): { model: string; source: ModelSource } {
   if (stamped && stamped.trim()) return { model: stamped.trim(), source: 'stamped' };
   const scope = callScope();
-  if (scope.agentModel) return { model: scope.agentModel, source: 'flag' };
+  if (scope.agentModel) {
+    const host = scope.hostModel;
+    // The host saw `gpt-5.6-luna`; the agent could only say `gpt-5`. Same claim,
+    // one decimal place better — take the one that can actually be priced.
+    if (host && refinesModelId(host, scope.agentModel)) return { model: host, source: 'host' };
+    return { model: scope.agentModel, source: 'flag' };
+  }
   if (scope.hostModel) return { model: scope.hostModel, source: 'host' };
   return { model: UNKNOWN_MODEL, source: 'none' };
 }
@@ -186,21 +211,27 @@ export function readLedger(d: string): SavingsLedger {
 }
 
 /**
- * The key a saving is filed under: the model id with any provider routing
- * prefix stripped, so `vertex_ai/claude-opus-5`, `anthropic/claude-opus-5` and a
- * bare `claude-opus-5` are one row rather than three.
+ * The key a saving is filed under: the model id reduced to its canonical form,
+ * so `vertex_ai/claude-opus-5`, `anthropic/claude-opus-5` and a bare
+ * `claude-opus-5` are one row rather than three — and so are `gemini-3.7-flash`
+ * and `gemini-3-7-flash`.
  *
- * The prefix names who SERVES the model, not which model it is. Keeping it
- * split the lifetime totals by gateway — the same model, reached two ways,
- * reported as two unrelated lines in `graft savings` — which answers a question
- * nobody asked at the cost of the one they did: what has this model saved me.
+ * The routing prefix names who SERVES the model, not which model it is, and the
+ * version separator is pure spelling. Keeping either split the lifetime totals:
+ * the same model, named two ways, reported as two unrelated lines in
+ * `graft savings`, which answers a question nobody asked at the cost of the one
+ * they did — what has this model saved me.
  *
- * {@link UNKNOWN_MODEL} passes through unchanged (it has no prefix to strip),
- * and a value that normalises to nothing falls back to it rather than creating
- * an empty-string row.
+ * The separator case is not hypothetical. A real ledger accumulated both
+ * `gemini-3.7-flash` (from one source) and `gemini-3-7-flash` (from another)
+ * side by side, each with its own dollar figure. See {@link canonicalModelKey}.
+ *
+ * {@link UNKNOWN_MODEL} passes through unchanged (there is nothing to fold), and
+ * a value that reduces to nothing falls back to it rather than creating an
+ * empty-string row.
  */
 function ledgerKey(model: string): string {
-  return normalizeModelId(model).trim() || UNKNOWN_MODEL;
+  return canonicalModelKey(model).trim() || UNKNOWN_MODEL;
 }
 
 /** Read-modify-write of one day/model bucket. Best-effort and never throwing:
@@ -289,11 +320,17 @@ export function aggregateSavings(ledger: SavingsLedger, period?: string | null):
     if (period && !day.startsWith(period)) continue;
     days++;
     for (const [model, b] of Object.entries(models)) {
-      const acc = byModel.get(model) ?? { savedTokens: 0, costMicros: 0, tokensBilled: 0 };
+      // Canonicalised on READ as well as on write, so a file already carrying
+      // `gemini-3.7-flash` and `gemini-3-7-flash` as separate rows reports them
+      // as the one model they are. Fixing only the write path would leave every
+      // existing ledger permanently split — the rows are historical facts and
+      // nothing rewrites them — and this is where they are added up anyway.
+      const key = model === UNKNOWN_MODEL ? model : canonicalModelKey(model) || UNKNOWN_MODEL;
+      const acc = byModel.get(key) ?? { savedTokens: 0, costMicros: 0, tokensBilled: 0 };
       acc.savedTokens += b.savedTokens ?? 0;
       acc.costMicros += b.costMicros ?? 0;
       acc.tokensBilled += b.tokensBilled ?? 0;
-      byModel.set(model, acc);
+      byModel.set(key, acc);
     }
   }
 

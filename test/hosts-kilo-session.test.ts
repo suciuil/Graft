@@ -128,15 +128,65 @@ test('Windows separators and drive-letter case still match', { skip: noSqlite },
   }
 });
 
-test('the newest session wins when one directory has several', { skip: noSqlite }, () => {
-  // The documented limit of this approach: two sessions on one directory cannot
-  // be told apart by path, so the live one is taken to be the last written. This
-  // is why the agent's own `model` argument outranks this source.
-  const home = tmpRepo('kilo-db-dupe');
+test('sessions on one directory that AGREE name their shared model', { skip: noSqlite }, () => {
+  // Several chats on one repo is normal; only disagreement is a problem.
+  const home = tmpRepo('kilo-db-agree');
   const now = Date.now();
   kiloDb(home, [
-    { dir: 'D:/repo', model: { id: 'claude-opus-5' }, updated: now - 60_000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 60_000 },
     { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 1000 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'gemini-3.8-flash');
+});
+
+test('the session written mid-turn wins over an idle tab on the same repo', { skip: noSqlite }, () => {
+  // The observed bug: a repo with an Opus chat touched a minute ago and a Gemini
+  // chat touched 74 minutes ago filed EVERY Gemini saving under Opus — a 6x
+  // price difference — because "newest row wins" was treated as identification.
+  // Kilo rewrites a session's row on every message of a turn, so the caller's
+  // row is seconds old while an idle tab's is minutes old.
+  const home = tmpRepo('kilo-db-active');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 2000 },
+    { dir: 'D:/repo', model: { id: 'claude-opus-5' }, updated: now - 40 * 60_000 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'gemini-3.8-flash');
+});
+
+test('two sessions both mid-turn name nothing rather than guessing', { skip: noSqlite }, () => {
+  // Genuinely ambiguous: nothing on disk says which of them is calling. An
+  // unpriced saving is recoverable; one filed against a model that never ran is
+  // indistinguishable from a correct figure, which is the failure this whole
+  // module is written to avoid.
+  const home = tmpRepo('kilo-db-ambiguous');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'claude-opus-5' }, updated: now - 1000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 5000 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), null);
+});
+
+test('two idle sessions that disagree also name nothing', { skip: noSqlite }, () => {
+  // Neither is mid-turn, so neither can be the caller.
+  const home = tmpRepo('kilo-db-idle-disagree');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'claude-opus-5' }, updated: now - 30 * 60_000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 40 * 60_000 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), null);
+});
+
+test('one spelling of a model is not mistaken for a second model', { skip: noSqlite }, () => {
+  // `gemini-3.8-flash` and `gemini-3-8-flash` are one model; treating them as a
+  // disagreement would throw away a perfectly good answer.
+  const home = tmpRepo('kilo-db-spelling');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 1000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3-8-flash' }, updated: now - 30 * 60_000 },
   ]);
   assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'gemini-3.8-flash');
 });

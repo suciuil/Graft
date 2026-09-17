@@ -132,13 +132,23 @@ saving is not always lost — but that is a backstop keyed on the working
 directory, not a substitute. It cannot tell two sessions in one directory apart,
 and what you send always wins over it.
 
-Where even the backstop cannot name the model, graft's output carries a table
-pricing this turn's saving under every model your Kilo configuration offers
-instead.
-
 Close any reply where you used graft with that tally, summed across your graft
-calls, and put the table in a **collapsed/expandable section** so it never
-crowds out the answer itself:
+calls. Write it as plain prose — never wrapped in quotation marks. It is
+something you are telling the user, not something you are quoting.
+
+#### Only reproduce a table when graft printed one
+
+When the model IS named — the line above says \`for Gemini 3.8 Flash\` — that one
+figure is the whole answer. **Do not add a table.** A one-row table repeating the
+number you just gave is noise, and a table you assemble yourself is a price you
+invented: graft has already done the arithmetic, and the only honest figures are
+the ones in its output.
+
+A table appears **only** when graft could not identify the model at all. In that
+case, and only then, its output ends with \`as estimated below:\` followed by a
+fenced block listing *every* model your Kilo configuration offers — never one.
+Copy that block verbatim into a **collapsed/expandable section** so it never
+crowds out the answer:
 
     🌱 graft saved ~5,548 tokens by this turn, as estimated below:
     \`\`\`
@@ -153,9 +163,6 @@ crowds out the answer itself:
 **Keep the fenced code block around the table.** The columns are held in line by
 space padding, and an unfenced table is re-flowed by the chat renderer into a
 wall of text — which defeats the point of showing a table at all.
-
-Write the tally line itself as plain prose — never wrapped in quotation marks.
-It is something you are telling the user, not something you are quoting.
 
 Reproduce the rows graft gives you — do not add models, drop models, or reorder
 them, and never price a token yourself. A model graft has no published rate for

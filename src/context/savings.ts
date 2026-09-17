@@ -296,10 +296,17 @@ export function savingsTurnNudge(savedTokens: number): string {
   const basis = rate.measured
     ? 'the rate this session is actually paying for input tokens'
     : `${name} list rates (the model named on this call)`;
+  // "One line, no table" is stated explicitly because the alternative was
+  // observed: on a host whose rule file describes a per-model table for the
+  // UNPRICED case, an agent that had just been given an exact figure produced
+  // the table anyway — with a single row repeating the number it had already
+  // reported. A price graft did not print is a price the agent computed, which
+  // is the one thing this whole module exists to prevent.
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     'reply, tell the user the total graft tokens saved this turn and what they ' +
-    `were worth.${sum}${tallyTail(example)}`
+    'were worth, as ONE line — no table: this call is priced, and a table ' +
+    `belongs only to a call that is not.${sum}${tallyTail(example)}`
   );
 }
 
