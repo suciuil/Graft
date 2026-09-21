@@ -42,6 +42,28 @@ const REAL_SHAPE = {
   },
 };
 
+/**
+ * The paired shape, copied from a real config: a SECOND entry for a model
+ * already listed, keyed with a `#` discriminator and declaring the model it
+ * actually runs in `id`. It exists to give that model different subagent wiring,
+ * and it is what the user sees in their picker.
+ */
+const PAIR_SHAPE = {
+  model: 'a/gemini-3.8-flash',
+  provider: {
+    a: {
+      models: {
+        'vertex_ai/claude-opus-5': { name: 'Claude Opus 5' },
+        'vertex_ai/claude-opus-5#pair-gemini': {
+          id: 'vertex_ai/claude-opus-5',
+          name: 'Claude Opus 5 + Gemini 3.8 Flash',
+        },
+        'gemini-3.8-flash': { name: 'Gemini 3.8 Flash' },
+      },
+    },
+  },
+};
+
 /** A Kilo 5.x secrets file: the model list is a JSON-encoded STRING nested in
  * the outer JSON, one entry per configured API profile. */
 function kilo5Home(profiles: Record<string, unknown>, current = 'default'): string {
@@ -166,6 +188,23 @@ test('the host default is flagged, matched across its routing prefix', () => {
   assert.deepEqual(h.models.filter((m) => m.isDefault).map((m) => m.id), ['gemini-3.8-flash']);
 });
 
+test('the host default is matched across case and the version separator too', () => {
+  // The routing prefix is not the only thing the two sides disagree about. The
+  // `model` field and the `provider.<id>.models` keys are written by different
+  // parts of the host, and a `.`-vs-`-` or case difference between them left the
+  // default unflagged — so `graft models` printed a table in which NO row was
+  // the default, which reads as "none of these" rather than as a match failure.
+  for (const spelling of ['a/gemini-3-8-flash', 'a/Gemini-3.8-Flash', 'A/GEMINI-3.8-FLASH']) {
+    const home = kiloHome({ ...REAL_SHAPE, model: spelling });
+    const h = readHostModels({ home })!;
+    assert.deepEqual(
+      h.models.filter((m) => m.isDefault).map((m) => m.id),
+      ['gemini-3.8-flash'],
+      `default written as ${spelling}`,
+    );
+  }
+});
+
 test('a JSONC config with comments and trailing commas still reads', () => {
   const home = kiloHome(`{
   // the model a new session starts on
@@ -248,4 +287,76 @@ test('hostLabelFor resolves a wire id to the name the user picked from a menu', 
   // Matched across the routing prefix in either direction.
   assert.equal(hostLabelFor('claude-opus-5', { home }), 'Claude Opus 5');
   assert.equal(hostLabelFor('some-other-model', { home }), undefined);
+});
+
+// ── one model offered twice, with different subagent wiring ───────────────
+
+test('a paired config entry is one row with the plain one, not a second model', () => {
+  // `…#pair-gemini` runs the same model at the same rate — it only changes which
+  // model the SUBAGENTS use. Two rows would price one saving twice in a table
+  // the user reads on every turn, and split the ledger into two dollar figures
+  // for a model they switched between rather than used twice.
+  const h = readHostModels({ home: kiloHome(PAIR_SHAPE) })!;
+  assert.deepEqual(h.models.map((m) => m.id), ['vertex_ai/claude-opus-5', 'gemini-3.8-flash']);
+  assert.equal(h.models[0].usdPerMtok, 5);
+});
+
+test('the paired entry keeps the name the user picked it by', () => {
+  // It prices as plain Opus, but "Claude Opus 5" is not what the user selected:
+  // a tally naming it that sends them looking for a model absent from their
+  // picker. The exact entry wins over the row it was folded into.
+  const home = kiloHome(PAIR_SHAPE);
+  assert.equal(
+    hostLabelFor('a/vertex_ai/claude-opus-5#pair-gemini', { home }),
+    'Claude Opus 5 + Gemini 3.8 Flash',
+  );
+  assert.equal(hostLabelFor('a/vertex_ai/claude-opus-5', { home }), 'Claude Opus 5', 'plain entry unaffected');
+});
+
+test('the host default is found on a paired entry too', () => {
+  // The default may name the alias rather than the entry listed first; the flag
+  // belongs to the model either way.
+  const home = kiloHome({ ...PAIR_SHAPE, model: 'a/vertex_ai/claude-opus-5#pair-gemini' });
+  const h = readHostModels({ home })!;
+  assert.deepEqual(h.models.filter((m) => m.isDefault).map((m) => m.id), ['vertex_ai/claude-opus-5']);
+});
+
+test('hostLabelFor matches the id shapes an agent actually reports', () => {
+  // What the agent sends is its own configured id, and Kilo spells that with the
+  // PROVIDER route on the front: `a/gemini-3.8-flash`, not the bare key of the
+  // `provider.a.models` map. A stacked route (`a/vertex_ai/claude-opus-5`) is the
+  // same story one level deeper. Case and the version separator vary for the
+  // same reason — different writers, same model. A miss here is silent: the
+  // tally falls back to the wire id, and the user is shown a name that appears
+  // nowhere in their model picker.
+  const home = kiloHome(REAL_SHAPE);
+  assert.equal(hostLabelFor('a/gemini-3.8-flash', { home }), 'Gemini 3.8 Flash');
+  assert.equal(hostLabelFor('a/vertex_ai/claude-opus-5', { home }), 'Claude Opus 5');
+  assert.equal(hostLabelFor('a/gemini-3-8-flash', { home }), 'Gemini 3.8 Flash', 'separator folds');
+  assert.equal(hostLabelFor('A/Gemini-3.8-Flash', { home }), 'Gemini 3.8 Flash', 'case folds');
+  // The fold must not invent a match: a different model still has no label.
+  assert.equal(hostLabelFor('a/gemini-3.7-flash', { home }), undefined);
+});
+
+test('the two generations de-duplicate across the version separator as well', () => {
+  // Both files on disk mid-upgrade, the same model spelled `gemini-3.8-flash` in
+  // the 7.x provider map and `gemini-3-8-flash` in a 5.x profile. That is one
+  // model the user configured once; listing it twice prices the same saving
+  // under the same model on two rows of the same table.
+  const home = kiloHome({ provider: { a: { models: { 'gemini-3.8-flash': { name: 'Gemini 3.8 Flash' } } } } });
+  const dir = join(home, '.kilocode');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'secrets.json'),
+    JSON.stringify({
+      'kilo code.kilo-code': {
+        roo_cline_config_api_config: JSON.stringify({
+          currentApiConfigName: 'default',
+          apiConfigs: { default: { openAiModelId: 'gemini-3-8-flash' } },
+        }),
+      },
+    }),
+  );
+  const h = readHostModels({ home })!;
+  assert.deepEqual(h.models.map((m) => m.id), ['gemini-3.8-flash'], '7.x wins: it has the display name');
 });
