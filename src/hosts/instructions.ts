@@ -60,6 +60,36 @@ re-read whole files.
 This is a rule, not a preference: every one of those substitutions returns the
 same answer for a fraction of the tokens, and the graph edges behind
 \`callers\` are not reconstructible by reading at all.
+
+### Verify before you assert
+
+Every factual claim you make about this repo must come from something you have
+actually read this session — a graft result or an exact \`file:line\` range you
+opened — not from what the code is *likely* to do. Plausible is not the same as
+true, and the reader cannot tell your guesses from your findings.
+
+- Before stating that something exists, behaves a certain way, is called from
+  somewhere, or is unused, run the query that settles it: \`graft ask\` /
+  \`graft grep\` for behaviour and occurrences, \`graft callers\` for who calls what.
+  It costs a few hundred tokens and takes under a second — cheaper than being
+  wrong.
+- "I can't find it" is a finding; "it isn't there" is a claim. Only \`graft grep\`
+  (exhaustive) supports the second, never a top-N \`graft ask\`.
+- Say so plainly when you did not verify something, when a query came back empty,
+  or when you are reasoning from a general pattern rather than from this repo.
+  An explicit "I haven't checked X" is useful; a confident sentence that turns
+  out to be invented costs the reader more than the answer was worth.
+- Re-verify instead of trusting recall when the code may have moved under you —
+  after your own edits, or when your memory of a span is from earlier in a long
+  session. Graft's results already reflect uncommitted edits.
+- Never invent a symbol, path, file, flag, or option to fill a gap. If graft and
+  the source do not show it, it does not exist; report the gap instead.
+
+This is not a licence to re-read what you already have: a graft node's
+\`covers:\` spans are generated from source and authoritative, so cite them
+directly. The rule is that an assertion needs a source, not that a source needs
+re-reading.
+
 Pass \`--agent-model <your own model id>\` on EVERY graft call — treat it as part
 of the command, like the query itself (e.g. \`graft ask "..." --source
 --agent-model claude-opus-5\`). Graft prices the tokens it saves at YOUR model's

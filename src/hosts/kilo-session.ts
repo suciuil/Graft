@@ -49,6 +49,12 @@
  * that has not been touched recently ({@link MAX_SESSION_AGE_MS}), so a stale
  * database left behind by an uninstalled Kilo prices nothing.
  *
+ * One case of "two sessions, one directory" is NOT ambiguity, and is resolved
+ * rather than refused: a chat whose subagents run a different model from the
+ * chat itself. Those rows are one conversation, related by `parent_id`, and a
+ * call arriving while the subagent is mid-turn belongs to the subagent — see
+ * {@link kiloSessionModel}.
+ *
  * Everything here is best-effort and silent on failure. `node:sqlite` landed in
  * Node 22.5 and this package supports >=20, the file may be locked by the
  * running Kilo, and the schema belongs to somebody else's project and may
@@ -167,6 +173,28 @@ function normalizeDir(dir: string): string {
 const NOT_A_MODEL = new Set(['null', 'undefined']);
 
 /**
+ * The columns this reader wants, in the order it wants them, and the subset the
+ * database on disk actually has.
+ *
+ * `parent_id` is the one that matters and the one that may be missing: it is
+ * how a subagent session is told from a top-level chat (see
+ * {@link kiloSessionModel}), and it is somebody else's schema. Asking for a
+ * column SQLite does not have fails the whole statement, which would turn a
+ * Kilo version without it from "priced slightly less precisely" into "priced not
+ * at all" — so it is probed rather than assumed.
+ */
+function hasParentColumn(db: any): boolean {
+  try {
+    return db
+      .prepare('select name from pragma_table_info(?)')
+      .all('session')
+      .some((c: any) => c?.name === 'parent_id');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The model id out of Kilo's `session.model` column, which holds a JSON object
  * (`{"id":"…","providerID":"…","variant":"…"}`). A plain string is accepted too,
  * since the column's shape is Kilo's to change and a bare id is the obvious way
@@ -219,8 +247,13 @@ export function kiloSessionModel(
     // Read-only so graft can never write to another tool's database, and so an
     // open handle cannot create a -wal/-shm pair next to it.
     db = new sqlite.DatabaseSync(path, { readOnly: true });
+    // `parent_id` distinguishes a subagent session from a top-level chat, and is
+    // selected only when the schema has it (see `hasParentColumn`).
+    const parented = hasParentColumn(db);
     const rows = db
-      .prepare('select directory, model, time_updated from session order by time_updated desc limit 200')
+      .prepare(
+        `select directory, model, time_updated${parented ? ', parent_id' : ''} from session order by time_updated desc limit 200`,
+      )
       .all();
     const want = normalizeDir(dir);
 
@@ -228,7 +261,7 @@ export function kiloSessionModel(
     // serves one MCP server per workspace, not per chat, so a user with two
     // chats open on one repo produces several — and nothing in the protocol says
     // which of them is calling.
-    const live: Array<{ model: string; updated: number }> = [];
+    const live: Array<{ model: string; updated: number; child: boolean }> = [];
     for (const row of rows) {
       if (typeof row?.directory !== 'string' || normalizeDir(row.directory) !== want) continue;
       const updated = Number(row.time_updated);
@@ -236,7 +269,13 @@ export function kiloSessionModel(
       // every later row is older still.
       if (!Number.isFinite(updated) || now - updated > maxAge) break;
       const model = parseSessionModel(row.model);
-      if (model) live.push({ model, updated });
+      if (model) {
+        live.push({
+          model,
+          updated,
+          child: parented && typeof row.parent_id === 'string' && row.parent_id.trim() !== '',
+        });
+      }
     }
     if (live.length === 0) return null;
 
@@ -258,7 +297,31 @@ export function kiloSessionModel(
     // tell them apart, and an unpriced saving beats one filed against a model
     // that never ran.
     const active = live.filter((s) => now - s.updated <= ACTIVE_TURN_MS);
-    return active.length === 1 ? active[0].model : null;
+    if (active.length === 1) return active[0].model;
+
+    // ## Master and subagent, disagreeing by design
+    //
+    // Kilo lets a chat run its subagents on a DIFFERENT model from the one
+    // driving the conversation — configured as a second model entry whose
+    // subagents are another model ("Claude Opus 5 + Gemini 3.8 Flash"). Both
+    // sessions live on one directory, and the subagent's row is written seconds
+    // after its parent's, so both are inside the active window and the rule above
+    // gives up: two live sessions, two models, priced as nothing.
+    //
+    // But they are not two chats competing to be the caller. They are one
+    // conversation, and `parent_id` says which is which. A tool call arriving
+    // while a subagent is mid-turn is overwhelmingly that subagent's: the parent
+    // is blocked on it, and every call it makes is being billed to the subagent's
+    // model. Measured on a real database, the child's row was the newer of the
+    // two in every pair-mode session recorded.
+    //
+    // So a single live CHILD claims the call over its idle-by-definition parents.
+    // Several live children, or none, is the genuine ambiguity the rule above
+    // already refuses to guess at.
+    const activeChildren = active.filter((s) => s.child);
+    if (activeChildren.length === 1) return activeChildren[0].model;
+
+    return null;
   } catch {
     return null;
   } finally {

@@ -75,19 +75,37 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
 
 /**
  * A model id reduced to the form the table is written in: routing prefix
- * dropped, and the separators a human types (spaces, underscores) folded to the
- * hyphens a model id uses.
+ * dropped, config-entry discriminator dropped, and the separators a human types
+ * (spaces, underscores) folded to the hyphens a model id uses.
  *
  * The two prefix shapes are what hosts and marketplaces actually display:
  * `anthropic/claude-opus-5` names who SERVES the model, and `Google: Gemini 3.8
  * Flash` is a vendor label on a UI row. The `word:` rule is deliberately
  * letters-only so it can strip `Google:` without touching a real suffix like
  * `gemini-3.8-flash:free`, whose left side carries digits and dots.
+ *
+ * ## The `#` suffix
+ *
+ * A host whose model list is a MAP needs distinct keys to offer one model twice
+ * under different settings, so it appends a discriminator: Kilo Code writes
+ * `vertex_ai/claude-opus-5#pair-gemini` for a second entry that declares
+ * `"id": "vertex_ai/claude-opus-5"` and differs only in which model its
+ * subagents use. The part after `#` names the CONFIG ENTRY, exactly as the part
+ * before the last `/` names the server — neither says which model runs, and no
+ * vendor puts a `#` in a real model id.
+ *
+ * Left in, it split the ledger the same way the version separator once did: a
+ * user who switches between the plain entry and the paired one accumulates
+ * `claude-opus-5` and `claude-opus-5#pair-gemini` as two rows, two dollar
+ * figures, for one model. It also left the id one literal away from every
+ * anchored price pattern, so an entry named `#fast` on an otherwise priced model
+ * would go unpriced the moment a suffix landed anywhere but the end.
  */
 export function normalizeModelId(model: string): string {
   const trimmed = model.trim();
   const routed = trimmed.slice(trimmed.lastIndexOf('/') + 1).trim();
-  return routed.replace(/^[A-Za-z]+\s*:\s*/, '').replace(/[\s_]+/g, '-');
+  const entry = routed.split('#')[0].trim();
+  return entry.replace(/^[A-Za-z]+\s*:\s*/, '').replace(/[\s_]+/g, '-');
 }
 
 /**

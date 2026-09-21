@@ -132,6 +132,32 @@ you already know where you're working, narrow with \`graft ask "<task>" --in <sc
   (a branch switch or unpulled move). Don't read the missing file — \`graft grep\`
   the symbol to find where it lives now, or run \`graft build\` to refresh.
 
+## Verify before you assert
+Every factual claim you make about this repo must rest on something you actually
+read this session — a graft result, or an exact \`file:line\` range you opened —
+never on what the code is *likely* to do. Plausible is not true, and the reader
+cannot tell your guesses from your findings.
+
+- Before stating that something exists, behaves a certain way, is called from
+  somewhere, or is unused, run the call that settles it: \`ask\`/\`grep\` for
+  behaviour and occurrences, \`callers\` for the edges. One call, under a second,
+  \`$0\` — always cheaper than being wrong.
+- "I couldn't find it" is a finding; "it isn't there" is a claim. Only
+  \`graft grep\` is exhaustive enough to support the second — a top-N \`ask\` is not.
+- Say so plainly when you did not verify something, when a query came back empty,
+  or when you are reasoning from a general pattern rather than from this repo.
+  An explicit "I haven't checked X" is useful; a confident sentence that turns
+  out to be invented costs more than the answer was worth.
+- Re-verify rather than trust recall when the code may have moved under you —
+  after your own edits, or when your memory of a span is from earlier in a long
+  session. Graft's results already reflect uncommitted edits.
+- Never invent a symbol, path, file, flag, or option to fill a gap. If graft and
+  the source don't show it, it doesn't exist; report the gap instead.
+
+This does **not** mean re-reading what you already have — the \`covers:\` spans
+above are authoritative, so cite them directly. An assertion needs a source; a
+source does not need re-reading.
+
 ## Report what graft saved, every turn
 Each retrieval tool **opens** its output with a \`[graft] tokens saved ≈ N\` line:
 the estimated tokens that call saved versus reading the files it covers whole.

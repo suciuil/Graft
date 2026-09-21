@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   DEFAULT_WIRING_OPTS,
   UPDATE_TTL_MS,
@@ -22,6 +22,7 @@ import {
   type WiringOpts,
 } from '../src/upkeep.js';
 import { writeJsonAtomic } from '../src/util/state.js';
+import { HOSTS } from '../src/hosts/registry.js';
 import { tmpRepo } from './helpers.js';
 
 test('compareVersions orders releases numerically, not lexically', () => {
@@ -219,6 +220,79 @@ test('a stamp predating content tracking earns exactly one refresh', () => {
   assert.ok(reconcileWiring(repo, '2.0.0', deps), 'no fingerprint means the text is unknown, not current');
   assert.equal(calls, 1);
   assert.equal(reconcileWiring(repo, '2.0.0', deps), null, 'and never again');
+});
+
+test('an owned rule file replaced on disk is rewritten despite a current stamp', () => {
+  // The field failure, in full: a repo COMMITTED `.kilo/rules/graft.md` to git.
+  // graft refreshed it on upgrade, a later checkout restored the committed copy
+  // over it, and the stamp — written by that refresh — still said "current". So
+  // every later session short-circuited, and the repo ran for weeks on an older
+  // release's instructions. The visible symptom was that the agent stopped
+  // reporting savings: the section telling it to was in the text graft believed
+  // it had written and not in the file the agent was actually reading.
+  //
+  // A stamp records what graft WROTE. Only the file says what is there now.
+  const repo = tmpRepo('upkeep-clobbered');
+  const kilo = HOSTS.find((h) => h.id === 'kilo')!;
+  const path = join(repo, kilo.relPath);
+  mkdirSync(dirname(path), { recursive: true });
+
+  let calls = 0;
+  const deps = { wired: () => ['kilo'], rewrite: () => { calls++; } };
+
+  // Settled: the file on disk is exactly what this version renders.
+  writeFileSync(path, kilo.content());
+  writeStamp(repo, '2.0.0', ['kilo']);
+  assert.equal(reconcileWiring(repo, '2.0.0', deps), null, 'nothing to do');
+
+  // Something else replaces it — a checkout of a committed older copy.
+  writeFileSync(path, '## Graft — repo context graph\n\nan older release wrote this\n');
+  const r = reconcileWiring(repo, '2.0.0', deps);
+  assert.equal(calls, 1, 'the stale file is rewritten');
+  assert.equal(r?.restored, true, 'reported as a restore, not as an upgrade');
+  assert.match(
+    formatWiringRefresh(r) ?? '',
+    /did not match this version/,
+    'and worded so the user does not hunt for a release note',
+  );
+
+  // Once the rewrite has actually happened, it settles again.
+  writeFileSync(path, kilo.content());
+  assert.equal(reconcileWiring(repo, '2.0.0', deps), null);
+  assert.equal(calls, 1);
+});
+
+test('a rule file differing only in line endings is not treated as drift', () => {
+  // `core.autocrlf` rewrites line endings on checkout. A CRLF working copy of the
+  // right text is the right text, and rewriting it every session would fight git
+  // forever over a file neither side is wrong about.
+  const repo = tmpRepo('upkeep-crlf');
+  const kilo = HOSTS.find((h) => h.id === 'kilo')!;
+  const path = join(repo, kilo.relPath);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, kilo.content().replace(/\n/g, '\r\n'));
+  writeStamp(repo, '2.0.0', ['kilo']);
+  let calls = 0;
+  assert.equal(
+    reconcileWiring(repo, '2.0.0', { wired: () => ['kilo'], rewrite: () => { calls++; } }),
+    null,
+  );
+  assert.equal(calls, 0);
+});
+
+test('a deleted rule file is left to the existing restore path, not the drift check', () => {
+  // Absent is not drift: `wiredHostIds` already declines to claim a host whose
+  // file is gone, and re-creating rule files a user deleted is precisely the
+  // overreach that function exists to prevent.
+  const repo = tmpRepo('upkeep-absent');
+  writeStamp(repo, '2.0.0', ['kilo']);
+  let calls = 0;
+  assert.equal(
+    reconcileWiring(repo, '2.0.0', { wired: () => [], rewrite: () => { calls++; } }),
+    null,
+    'no file, no stamped host on disk — nothing to reconcile',
+  );
+  assert.equal(calls, 0);
 });
 
 test('reconcileWiring restores a host whose file went missing', () => {

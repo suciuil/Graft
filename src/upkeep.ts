@@ -314,6 +314,44 @@ export function wiredHostIds(repo: string): string[] {
   return ids;
 }
 
+/**
+ * Has an OWNED rule file drifted from the text this binary renders?
+ *
+ * The stamp records what graft last wrote; it cannot see what happened to the
+ * file afterwards. Observed in the field: a repo committed `.kilo/rules/graft.md`
+ * to git, a later checkout/merge restored the version from the commit, and the
+ * stamp still said "current" — so the refresh short-circuited and the repo ran
+ * for weeks on an older release's instructions. The agent consequently never
+ * learned to report its savings, because the section telling it to was in the
+ * file graft thought it had written and not in the one on disk.
+ *
+ * Only `owned` files are checked, and only for exact equality: graft overwrites
+ * those wholesale, so any difference is drift by definition. A `section` host
+ * shares its file with the user, whose own edits are none of graft's business —
+ * those are left to the fenced-block upsert.
+ *
+ * A file that is ABSENT is not drift here: `wiredHostIds` already treats it as
+ * un-wired, and re-creating rule files for hosts a user deleted is exactly the
+ * overreach that function exists to prevent.
+ */
+function ownedFilesDrifted(repo: string, hosts: string[]): boolean {
+  const wanted = new Set(hosts);
+  for (const host of HOSTS) {
+    if (host.kind !== 'owned' || !wanted.has(host.id)) continue;
+    const path = join(repo, host.relPath);
+    try {
+      if (!existsSync(path)) continue;
+      // Line endings are the checkout's to choose (git `core.autocrlf` rewrites
+      // them), and a CRLF working copy of the right text is not stale content.
+      const have = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+      if (have !== host.content().replace(/\r\n/g, '\n')) return true;
+    } catch {
+      // Unreadable is not evidence of drift; leave it to the next session.
+    }
+  }
+  return false;
+}
+
 export interface WiringRefresh {
   from: string;
   to: string;
@@ -321,6 +359,10 @@ export interface WiringRefresh {
   /** True when the refresh included writes outside the repo (`~/.codex/`), so the
    * caller can say so — a session changing machine-wide config should be visible. */
   global: boolean;
+  /** True when the trigger was a rule file on disk no longer matching what this
+   * version renders, rather than an upgrade. The two need different wording: the
+   * user did not upgrade anything, a file was overwritten underneath them. */
+  restored?: boolean;
 }
 
 /**
@@ -337,13 +379,14 @@ export function reconcileWiring(
   current: string,
   deps: {
     wired?: (repo: string) => string[];
+    drifted?: (repo: string, hosts: string[]) => boolean;
     rewrite: (repo: string, hosts: string[], opts: WiringOpts) => void;
   },
 ): WiringRefresh | null {
   try {
     const stamp = readStamp(repo);
     const content = wiringContentHash();
-    if (stamp && stamp.version === current && stamp.content === content) return null;
+    const stampCurrent = !!stamp && stamp.version === current && stamp.content === content;
     // The stamp is the record of *intent* (what the picker chose); disk is the
     // fallback for repos wired before stamps existed. Union, not just disk:
     // otherwise a host whose rule file went missing — deleted by hand, lost to a
@@ -352,10 +395,24 @@ export function reconcileWiring(
     const onDisk = (deps.wired ?? wiredHostIds)(repo);
     const hosts = [...new Set([...(stamp?.hosts ?? []), ...onDisk])].sort();
     if (hosts.length === 0) return null; // never wired here — not our business
+    // A current stamp says graft wrote the right text; it does not say the text
+    // is still there. Checking the files themselves is what makes this a
+    // reconciliation rather than a version check — see `ownedFilesDrifted`.
+    if (stampCurrent && !(deps.drifted ?? ownedFilesDrifted)(repo, hosts)) return null;
     const opts = wiringOpts(stamp);
     deps.rewrite(repo, hosts, opts);
     writeStamp(repo, current, hosts, opts);
-    return { from: stamp?.version ?? 'unwired', to: current, hosts, global: opts.global };
+    return {
+      from: stamp?.version ?? 'unwired',
+      to: current,
+      hosts,
+      global: opts.global,
+      // Present only when true: nothing about the binary changed, so the only
+      // thing that can have is the file — this refresh put back text something
+      // else had replaced. Absent otherwise, so the ordinary upgrade result keeps
+      // the exact shape its callers and tests already assert on.
+      ...(stampCurrent ? { restored: true as const } : {}),
+    };
   } catch {
     return null; // a refresh is an optimization; never fail the caller over it
   }
@@ -368,6 +425,14 @@ export function formatWiringRefresh(r: WiringRefresh | null): string | null {
   const scope = r.global && r.hosts.includes('agents') ? " (including this machine's ~/.codex config)" : '';
   // Same version on both sides means the instruction text moved under it, and
   // "written by 0.17.0, now 0.17.0" would read as a bug rather than a reason.
-  const why = r.from === r.to ? `instructions changed in ${r.to}` : `written by ${r.from}, now ${r.to}`;
+  // `restored` is the third case: same version, same text, but the file on disk
+  // had been replaced — typically by a checkout of a committed copy — and saying
+  // "instructions changed" there would send the user looking for a release note
+  // that does not exist.
+  const why = r.restored
+    ? 'rule files on disk did not match this version'
+    : r.from === r.to
+      ? `instructions changed in ${r.to}`
+      : `written by ${r.from}, now ${r.to}`;
   return `· graft refreshed this repo's agent wiring${scope} (${why}): ${r.hosts.join(', ')}.`;
 }

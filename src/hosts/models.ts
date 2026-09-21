@@ -24,7 +24,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { formatDollars, inputUsdPerMtok, normalizeModelId } from '../context/price.js';
+import { canonicalModelKey, formatDollars, inputUsdPerMtok, normalizeModelId } from '../context/price.js';
 import { formatCount, type ModelTable } from '../context/savings.js';
 import { stripJsonc } from './kilo.js';
 
@@ -38,6 +38,19 @@ export interface HostModel {
   usdPerMtok: number | null;
   /** The host's configured default — NOT necessarily the model now running. */
   isDefault: boolean;
+  /**
+   * Other config entries for this same model, folded into this row.
+   *
+   * A host whose model list is a map offers one model several times under
+   * different settings by appending a discriminator to the key: Kilo writes
+   * `vertex_ai/claude-opus-5#pair-gemini` alongside the plain entry, same model,
+   * different subagent wiring. They price identically, so the TABLE wants one
+   * row — but each entry carries its own display name ("Claude Opus 5 + Gemini
+   * 3.8 Flash"), and that name is what the user picked in their menu. Kept so a
+   * tally can name the entry the user recognises rather than the one that
+   * happened to be listed first.
+   */
+  aliases?: Array<{ id: string; name?: string }>;
 }
 
 export interface HostModels {
@@ -109,6 +122,12 @@ interface RawModel {
  * Kilo 7.x: providers keyed by id, each with a `models` map of model-id →
  * `{ name }`. Shape confirmed against a real config rather than assumed; an
  * unrecognised shape yields nothing rather than a guess.
+ *
+ * `model` (the host default) is a ROUTED id — `a/gemini-3.8-flash`, naming the
+ * provider entry that serves it — while the `provider.<id>.models` map keys the
+ * same model bare. The two are only comparable once both are reduced, so the
+ * default comes back as a canonical key rather than an id, and every comparison
+ * against it reduces the same way.
  */
 function readKilo7(cfg: Record<string, any>): { models: RawModel[]; defaultId: string | null } {
   const models: RawModel[] = [];
@@ -126,7 +145,7 @@ function readKilo7(cfg: Record<string, any>): { models: RawModel[]; defaultId: s
     }
   }
   const defaultId =
-    typeof cfg.model === 'string' && cfg.model.trim() ? normalizeModelId(cfg.model) : null;
+    typeof cfg.model === 'string' && cfg.model.trim() ? canonicalModelKey(cfg.model) : null;
   return { models, defaultId };
 }
 
@@ -166,9 +185,24 @@ function readKilo5(cfg: Record<string, any>): { models: RawModel[]; defaultId: s
       .find((v) => typeof v === 'string' && v.trim());
     if (!id) continue;
     models.push({ id: id.trim() });
-    if (profileName === current) defaultId = normalizeModelId(id.trim());
+    if (profileName === current) defaultId = canonicalModelKey(id.trim());
   }
   return { models, defaultId };
+}
+
+/**
+ * The canonical key PLUS the config-entry discriminator, for telling two entries
+ * of one model apart.
+ *
+ * {@link canonicalModelKey} deliberately folds `…#pair-gemini` into the model it
+ * runs, which is right for pricing and for the ledger: it is the same model at
+ * the same rate. It is wrong for naming, where the two entries are exactly what
+ * the user is choosing between. This is the finer grain, used only where the
+ * distinction is the point.
+ */
+function entryKey(id: string): string {
+  const suffix = id.trim().split('#').slice(1).join('#').trim().toLowerCase();
+  return suffix ? `${canonicalModelKey(id)}#${suffix}` : canonicalModelKey(id);
 }
 
 /** Vendor a model belongs to, for grouping. Derived from the model id, which is
@@ -252,27 +286,53 @@ export function readHostModels(opts: { home?: string } = {}): HostModels | null 
 
   if (raw.length === 0) return null;
 
-  // De-duplicate on the NORMALIZED id, so `vertex_ai/claude-opus-5` from the 7.x
+  // De-duplicate on the CANONICAL key, so `vertex_ai/claude-opus-5` from the 7.x
   // config and a bare `claude-opus-5` from a 5.x profile are one row, not two.
+  // The same key the ledger files under (`canonicalModelKey`), rather than a
+  // second, looser notion of sameness: it also folds case and the `.`-vs-`-`
+  // version separator, which the two generations genuinely disagree about —
+  // `gemini-3.8-flash` in a 7.x provider map against `gemini-3-8-flash` in a 5.x
+  // profile is one model the user has configured once, and listing it twice
+  // prices the same saving under the same model on two rows.
   // First writer wins, which is the 7.x config: it carries display names.
-  const seen = new Set<string>();
-  const models: HostModel[] = [];
+  //
+  // A duplicate is not discarded: it is recorded as an ALIAS of the row that
+  // won. Kilo's paired entry (`…#pair-gemini`, "Claude Opus 5 + Gemini 3.8
+  // Flash") is the same model at the same price, so it must not be its own row —
+  // but it is the name in the user's picker, and a tally naming the plain entry
+  // instead sends them looking for a model they did not select.
+  const byKey = new Map<string, HostModel>();
   for (const m of raw) {
-    const key = normalizeModelId(m.id).toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    const key = canonicalModelKey(m.id);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (existing) {
+      // Only a genuinely DIFFERENT config entry is an alias worth keeping. The
+      // same entry reached twice — the 7.x provider map and a 5.x profile naming
+      // one model — is the plain duplicate this map already folds, and recording
+      // it would attach a nameless alias to every such row.
+      const known = entryKey(m.id);
+      const seenEntry =
+        entryKey(existing.id) === known || existing.aliases?.some((a) => entryKey(a.id) === known);
+      if (!seenEntry) (existing.aliases ??= []).push({ id: m.id, name: m.name });
+      // The host default may be declared against the ALIAS rather than the entry
+      // that happened to be listed first, and the flag belongs to the model.
+      existing.isDefault ||= defaultId !== null && key === defaultId;
+      continue;
+    }
     const usdPerMtok = inputUsdPerMtok(m.id);
     // A model graft cannot price is dropped rather than shown with a dash: this
     // table's whole job is to answer "what was it worth", and a row that cannot
     // is noise in a reply the user reads on every turn.
     if (usdPerMtok === null) continue;
-    models.push({
+    byKey.set(key, {
       id: m.id,
       name: m.name,
       usdPerMtok,
-      isDefault: defaultId !== null && normalizeModelId(m.id) === defaultId,
+      isDefault: defaultId !== null && key === defaultId,
     });
   }
+  const models = [...byKey.values()];
   if (models.length === 0) return null;
 
   models.sort((a, b) => {
@@ -316,12 +376,28 @@ export function kiloModelRows(opts: { home?: string } = {}): ModelTable {
  * Used to label a model the AGENT named: `--agent-model` carries a wire id, but
  * the user picked that model from a menu showing the pretty name, and a tally
  * they cannot match to their own UI is a tally they have to decode.
+ *
+ * Matched on {@link canonicalModelKey} rather than on the id, because the wire
+ * id an agent reports and the id in the host's config are written by different
+ * parties and agree on neither the routing prefix (`a/gemini-3.8-flash` against
+ * a bare `gemini-3.8-flash`), the case, nor the version separator. A label that
+ * fails to match falls back to the wire id, so the cost of being strict here is
+ * paid silently, on every turn, by a user who then cannot find the row.
+ *
+ * When several config entries share one model, the EXACT entry wins over the row
+ * it was folded into. Kilo's `…#pair-gemini` is "Claude Opus 5 + Gemini 3.8
+ * Flash" in the picker even though it prices as plain Opus, and naming it
+ * "Claude Opus 5" would describe a model the user did not choose — the one thing
+ * a label is there to prevent.
  */
 export function hostLabelFor(id: string, opts: { home?: string } = {}): string | undefined {
   const host = readHostModels(opts);
   if (!host) return undefined;
-  const key = normalizeModelId(id).toLowerCase();
-  return host.models.find((m) => normalizeModelId(m.id).toLowerCase() === key)?.name;
+  const key = canonicalModelKey(id);
+  const row = host.models.find((m) => canonicalModelKey(m.id) === key);
+  if (!row) return undefined;
+  if (entryKey(row.id) === entryKey(id)) return row.name;
+  return row.aliases?.find((a) => entryKey(a.id) === entryKey(id))?.name ?? row.name;
 }
 
 /** `model` with the host's display name attached when one is known. */

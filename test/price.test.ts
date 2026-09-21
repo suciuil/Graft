@@ -156,6 +156,42 @@ test('inputUsdPerMtok: a provider routing prefix names the server, not the model
   assert.equal(inputUsdPerMtok('claude-opus-5/'), null, 'nothing after the slash is no model at all');
 });
 
+test('a `#` config-entry suffix names the entry, not the model', () => {
+  // A host whose model list is a MAP needs distinct keys to offer one model
+  // twice under different settings, so it appends a discriminator: Kilo writes
+  // `vertex_ai/claude-opus-5#pair-gemini` for an entry that declares
+  // `"id": "vertex_ai/claude-opus-5"` and differs only in which model its
+  // SUBAGENTS run. Same model, same rate, same row.
+  assert.equal(inputUsdPerMtok('vertex_ai/claude-opus-5#pair-gemini'), 5);
+  assert.equal(inputUsdPerMtok('a/vertex_ai/claude-opus-5#pair-gemini'), 5);
+  assert.equal(
+    canonicalModelKey('vertex_ai/claude-opus-5#pair-gemini'),
+    canonicalModelKey('vertex_ai/claude-opus-5'),
+    'one ledger row, not two — the suffix is not a different model',
+  );
+  // The suffix must not rescue a model the table cannot price, exactly as the
+  // routing prefix does not.
+  assert.equal(inputUsdPerMtok('some-future-model#pair'), null);
+  // A `:` suffix is NOT a config-entry discriminator — it is part of ids that
+  // marketplaces really publish, and it is left alone.
+  assert.notEqual(canonicalModelKey('gemini-3.8-flash:free'), canonicalModelKey('gemini-3.8-flash'));
+});
+
+test('inputUsdPerMtok: a one-letter route is a route like any other', () => {
+  // Kilo names the PROVIDER ENTRY, not the vendor, so a user whose gateway is
+  // configured as `a` reports `a/gemini-3.8-flash` — and with a gateway that
+  // routes onward, `a/vertex_ai/claude-opus-5`. Neither shape says anything
+  // about which model is running, and a short route must reduce exactly like a
+  // recognisable vendor name: nothing here may key on the prefix's spelling.
+  assert.equal(inputUsdPerMtok('a/gemini-3.8-flash'), 0.75);
+  assert.equal(inputUsdPerMtok('a/vertex_ai/claude-opus-5'), 5);
+  assert.equal(inputUsdPerMtok('a/gpt-5.6-sol'), 4);
+  // And the canonical key does not distinguish the routed spelling from the bare
+  // one, so a ledger cannot grow two rows for one model.
+  assert.equal(canonicalModelKey('a/gemini-3.8-flash'), canonicalModelKey('gemini-3.8-flash'));
+  assert.equal(canonicalModelKey('a/vertex_ai/claude-opus-5'), canonicalModelKey('claude-opus-5'));
+});
+
 test('inputUsdPerMtok: human-formatted and UI model names match via normalisation', () => {
   assert.equal(inputUsdPerMtok('Gemini 3.8 Flash'), 0.75);
   assert.equal(inputUsdPerMtok('gemini 3.8 flash'), 0.75);

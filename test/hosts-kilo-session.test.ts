@@ -37,16 +37,23 @@ const noSqlite = sqlite?.DatabaseSync === undefined
  * the whole of somebody else's schema into a fixture would make these tests fail
  * on Kilo changes that do not affect graft at all.
  */
-function kiloDb(home: string, rows: Array<{ dir: string; model: unknown; updated: number }>): void {
+function kiloDb(
+  home: string,
+  rows: Array<{ dir: string; model: unknown; updated: number; parent?: number }>,
+): void {
   const dir = join(home, '.local', 'share', 'kilo');
   mkdirSync(dir, { recursive: true });
   const path = join(dir, 'kilo.db');
   const db = new sqlite!.DatabaseSync(path);
-  db.exec('create table session (id text primary key, directory text, model text, time_updated integer)');
-  const insert = db.prepare('insert into session (id, directory, model, time_updated) values (?, ?, ?, ?)');
+  db.exec(
+    'create table session (id text primary key, parent_id text, directory text, model text, time_updated integer)',
+  );
+  const insert = db.prepare(
+    'insert into session (id, parent_id, directory, model, time_updated) values (?, ?, ?, ?, ?)',
+  );
   rows.forEach((r, i) => {
     const model = typeof r.model === 'string' || r.model === null ? r.model : JSON.stringify(r.model);
-    insert.run(`ses_${i}`, r.dir, model as any, r.updated);
+    insert.run(`ses_${i}`, r.parent === undefined ? null : `ses_${r.parent}`, r.dir, model as any, r.updated);
   });
   db.close();
   // The mtime is a pre-filter before the file is opened at all, so a fixture
@@ -232,4 +239,75 @@ test('a session row with no model names nothing', { skip: noSqlite }, () => {
   const now = Date.now();
   kiloDb(home, [{ dir: 'D:/repo', model: null, updated: now }]);
   assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), null);
+});
+
+// ── a chat whose subagents run a different model ──────────────────────────
+
+test('a live subagent names the model, not its blocked parent', { skip: noSqlite }, () => {
+  // Kilo can run subagents on a different model from the chat driving them
+  // ("Claude Opus 5 + Gemini 3.8 Flash"). Both sessions sit on ONE directory and
+  // the child's row is written seconds after the parent's, so both are inside
+  // the active window: the "exactly one live session" rule sees two, calls it
+  // ambiguous, and prices nothing — for the whole of every subagent turn.
+  //
+  // They are not two chats competing to be the caller, though. `parent_id` says
+  // they are one conversation, the parent is blocked on the child, and the calls
+  // arriving now are billed to the child's model.
+  const home = tmpRepo('kilo-db-subagent');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'vertex_ai/claude-opus-5#pair-gemini' }, updated: now - 6000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 1000, parent: 0 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'gemini-3.8-flash');
+});
+
+test('an idle subagent does not outrank the parent now mid-turn', { skip: noSqlite }, () => {
+  // The subagent finished half an hour ago and the parent is the one running, so
+  // the parent's model is the answer. A rule that simply preferred children
+  // would price every later turn of the conversation at the subagent's rate.
+  const home = tmpRepo('kilo-db-subagent-idle');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'vertex_ai/claude-opus-5' }, updated: now - 1000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 30 * 60_000, parent: 0 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'vertex_ai/claude-opus-5');
+});
+
+test('two live subagents on one directory still name nothing', { skip: noSqlite }, () => {
+  // Two conversations each mid-subagent is the genuine ambiguity this module
+  // refuses to guess at — `parent_id` says which parent each belongs to, not
+  // which one is calling graft.
+  const home = tmpRepo('kilo-db-subagent-ambiguous');
+  const now = Date.now();
+  kiloDb(home, [
+    { dir: 'D:/repo', model: { id: 'vertex_ai/claude-opus-5' }, updated: now - 8000 },
+    { dir: 'D:/repo', model: { id: 'vertex_ai/claude-opus-5' }, updated: now - 7000 },
+    { dir: 'D:/repo', model: { id: 'gemini-3.8-flash' }, updated: now - 2000, parent: 0 },
+    { dir: 'D:/repo', model: { id: 'gpt-5.6-sol' }, updated: now - 1000, parent: 1 },
+  ]);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), null);
+});
+
+test('a Kilo schema without parent_id still prices what it can', { skip: noSqlite }, () => {
+  // `parent_id` belongs to somebody else's schema. Selecting a column SQLite
+  // does not have fails the whole statement, which would turn an older Kilo from
+  // "priced slightly less precisely" into "priced not at all".
+  const home = tmpRepo('kilo-db-no-parent-col');
+  const now = Date.now();
+  const dir = join(home, '.local', 'share', 'kilo');
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'kilo.db');
+  const db = new sqlite!.DatabaseSync(path);
+  db.exec('create table session (id text primary key, directory text, model text, time_updated integer)');
+  db.prepare('insert into session values (?, ?, ?, ?)').run(
+    'ses_0',
+    'D:/repo',
+    JSON.stringify({ id: 'claude-opus-5' }),
+    now - 1000,
+  );
+  db.close();
+  utimesSync(path, now / 1000, now / 1000);
+  assert.equal(kiloSessionModel('D:/repo', { home, env: {}, now }), 'claude-opus-5');
 });
