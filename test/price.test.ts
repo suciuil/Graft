@@ -94,6 +94,12 @@ test('refinesModelId: anything that is not the same model, more precisely, is fa
 });
 
 test('inputUsdPerMtok: the non-Anthropic families are priced at short-context list', () => {
+  assert.equal(inputUsdPerMtok('gpt-6-astra'), 10);
+  assert.equal(inputUsdPerMtok('copilot/gpt-6-astra'), 10);
+  assert.equal(inputUsdPerMtok('GPT-6 Astra'), 10);
+  assert.equal(inputUsdPerMtok('gpt-6'), null);
+  assert.equal(inputUsdPerMtok('gpt-6-unknown'), null);
+  assert.equal(inputUsdPerMtok('gpt-6-astral'), null);
   assert.equal(inputUsdPerMtok('gpt-5.6-sol'), 4);
   assert.equal(inputUsdPerMtok('gpt-5.6-terra'), 2);
   assert.equal(inputUsdPerMtok('gpt-5.6-luna'), 0.2);

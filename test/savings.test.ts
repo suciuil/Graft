@@ -123,6 +123,15 @@ test('withSavings: puts the line on top so `head -N` and host truncation keep it
   assert.equal((out.match(/\[graft\] tokens saved ≈ [\d,]+/g) ?? []).length, 1);
 });
 
+test('withSavings: large output keeps savings in the retained terminal tail, exactly once', () => {
+  const body = 'source line\n'.repeat(10_000);
+  const out = withSavings(body, { files: 2, baselineChars: 1_000_000 });
+  assert.ok(out.startsWith(body.trimEnd()));
+  assert.match(out.slice(-20_000), /\[graft\] tokens saved/);
+  assert.match(out.slice(-20_000), /At the end of your reply/);
+  assert.equal([...out.matchAll(/\[graft\] tokens saved/g)].length, 1);
+});
+
 test('withSavings: returns the body untouched when there is nothing to claim', () => {
   assert.equal(withSavings('body', undefined), 'body');
 });

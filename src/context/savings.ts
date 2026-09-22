@@ -358,15 +358,13 @@ export function sumSavingsFooters(text: string): number {
   return total;
 }
 
-/** Render `body` with the savings line on TOP.
- *
- * Deliberately a header, not a footer: agents routinely pipe graft through
- * `head -N` (and hosts truncate long tool output from the end), which silently
- * ate the number and, with it, the PostToolUse accumulator that feeds the
- * statusline's `~N tok saved`. Every clipper keeps the head, so the number
- * survives. Emitted once — a second copy at the bottom would be double-counted
- * by that accumulator's `matchAll`. */
+export function placeSavingsLine(body: string, line: string): string {
+  if (!line) return body;
+  return body.length > 20_000
+    ? `${body.trimEnd()}\n\n${line}\n`
+    : `${line}\n\n${body}`;
+}
+
 export function withSavings(body: string, saved: Savings | undefined): string {
-  const line = savingsLine(body, saved);
-  return line ? `${line}\n\n${body}` : body;
+  return placeSavingsLine(body, savingsLine(body, saved));
 }

@@ -615,6 +615,23 @@ test("formatAsk: the structural fallthrough note prints prominently, before any 
   }
 });
 
+test("formatAsk: oversized source output retains a single savings tally at the end", async () => {
+  const dir = qualifiedFixture();
+  try {
+    await buildGraph(dir);
+    const result = ask(dir, "unusedHelper", { source: true });
+    assert.ok(result.hits.length > 0);
+    result.hits[0].code = "source line\n".repeat(10_000);
+    result.saved = { files: 1, baselineChars: 1_000_000 };
+    const output = formatAsk(result);
+    assert.match(output.slice(-20_000), /\[graft\] tokens saved/);
+    assert.match(output.slice(-20_000), /At the end of your reply/);
+    assert.equal([...output.matchAll(/\[graft\] tokens saved/g)].length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── Scope-aware ranking: per-scope rank + RRF fusion (multi-scope repos) ────
 
 /** Two sub-projects under one root: `frontend/` (ts, ~6 symbols) and

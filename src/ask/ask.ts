@@ -17,7 +17,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import matter from "gray-matter";
 import { contextDirFor } from "../context/node-file.js";
-import { withSavings, savingsFor, formatCount, savingsTurnNudge, noteClaimedSavings, type Savings } from "../context/savings.js";
+import { withSavings, placeSavingsLine, savingsFor, formatCount, savingsTurnNudge, noteClaimedSavings, type Savings } from "../context/savings.js";
 import { loadGraphCached, loadAskIndexCached } from "../graph/load.js";
 import {
   assertPrefixIndexed,
@@ -1531,7 +1531,7 @@ export function formatAsk(r: AskResult): string {
   if (r.rules?.length) lines.push(...formatRules(r.rules));
   const body = lines.join("\n").trimEnd();
   const savings = askSavingsLine(r, body);
-  return (savings ? `${savings}\n\n${body}` : body) + escalationNudge(r) + "\n";
+  return placeSavingsLine(body + escalationNudge(r) + "\n", savings);
 }
 
 /** When a lexical `ask` returns thin/no results, the productive next move is a
@@ -1548,11 +1548,9 @@ function escalationNudge(r: AskResult): string {
   );
 }
 
-/** The one-line token-saving estimate `ask` prepends in retriever mode, so the
+/** The one-line token-saving estimate `ask` emits in retriever mode, so the
  * agent gets the number for free in the tool output — no extra work on its end.
- * `packChars` is measured from the rendered body: exactly what the agent reads.
- * Header, not footer, for the reason documented on `withSavings`: a trailing
- * line dies to `head -N` and to host output truncation. */
+ * `packChars` is measured from the rendered body: exactly what the agent reads. */
 function askSavingsLine(r: AskResult, body: string): string {
   if (!r.saved || r.saved.baselineChars <= 0) return "";
   const pack = toTokens(body.length);

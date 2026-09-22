@@ -40,6 +40,7 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
   [/^claude-sonnet-4[.-][56]/i, 3],
   [/^claude-3[.-]7-sonnet/i, 3],
   [/^claude-haiku-4[.-]5/i, 1],
+  [/^gpt-6-astra(?:$|[-:])/i, 10],
   [/^gpt-5[.-]6-sol/i, 4],
   [/^gpt-5[.-]6-terra/i, 2],
   [/^gpt-5[.-]6-luna/i, 0.2],
