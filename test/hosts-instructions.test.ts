@@ -20,6 +20,22 @@ test('canonical body names the three essentials', () => {
   assert.ok(!/\bhook|statusline\b/i.test(b), 'no host-specific machinery in the shared body');
 });
 
+test('only Copilot receives the IntelliJ-specific model reporting override', () => {
+  const copilot = HOSTS.find((host) => host.id === 'copilot')!.content();
+  assert.ok(copilot.startsWith(instructionBody()));
+  assert.match(instructionBody(), /on EVERY graft call/);
+  assert.match(copilot, /Apply this section ONLY when running as GitHub Copilot in IntelliJ IDEA/);
+  assert.match(copilot, /Do not apply it in Visual Studio Code or any other host/);
+  assert.match(copilot, /explicit runtime metadata/);
+  assert.match(copilot, /Re-check after a model switch/);
+  assert.match(copilot, /OMIT `--agent-model`/);
+  assert.match(copilot, /overrides requests above or in Graft skills and tool\s+footers/);
+  for (const host of HOSTS.filter((host) => host.id !== 'copilot')) {
+    assert.doesNotMatch(host.content(), /Model reporting override|OMIT `--agent-model`/, host.id);
+  }
+  assert.doesNotMatch(skillTemplate(), /Model reporting override|OMIT `--agent-model`/);
+});
+
 test('cursor rule has alwaysApply frontmatter and the body', () => {
   const r = cursorRule();
   assert.match(r, /^---\ndescription: .+\nalwaysApply: true\n---\n/);

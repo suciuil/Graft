@@ -111,6 +111,32 @@ After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }
 
+export function copilotInstructions(): string {
+  return `${instructionBody()}
+
+### Model reporting override: GitHub Copilot in IntelliJ IDEA only
+
+Apply this section ONLY when running as GitHub Copilot in IntelliJ IDEA.
+Do not apply it in Visual Studio Code or any other host; retain the guidance
+above there. Do not infer the current IDE merely from finding this file.
+
+In IntelliJ, this section overrides requests above or in Graft skills and tool
+footers to always supply a model ID. Pass \`--agent-model <model id>\` only when
+explicit runtime metadata or a user-confirmed selection identifies the model
+for THIS turn. Re-check after a model switch; never persist one model as a
+standing instruction. A display name may be passed quoted.
+
+GitHub Copilot is a product name, not a model. Never infer an ID from your
+persona, training knowledge, an example, another chat, or a previous turn.
+In particular, do not guess \`gpt-4o\`. Auto is a router, not a model: use its
+resolved model only when the host exposes it for the current turn.
+
+If no reliable current identity is available, OMIT \`--agent-model\`; do not
+guess or send \`unknown\` as an ID. Report tokens only when Graft cannot price
+them. IntelliJ does not currently have Graft's VS Code session-model reader;
+instructions cannot expose metadata that the host has not supplied.`;
+}
+
 export function cursorRule(): string {
   return `---
 description: Use the Graft context graph in graft/ before exploring source

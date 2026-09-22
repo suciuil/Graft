@@ -7,7 +7,7 @@
  * kind: 'owned'   → graft owns the whole file; overwrite it each run.
  */
 import { join } from 'node:path';
-import { instructionBody, cursorRule, kiloRule, kiroSteering, windsurfRule } from './instructions.js';
+import { instructionBody, copilotInstructions, cursorRule, kiloRule, kiroSteering, windsurfRule } from './instructions.js';
 import { KILO_RULE_REL } from './kilo.js';
 import { skillTemplate } from '../claude/skill-template.js';
 
@@ -103,7 +103,7 @@ export const HOSTS: HostTarget[] = [
     name: 'GitHub Copilot',
     kind: 'section',
     relPath: join('.github', 'copilot-instructions.md'),
-    content: instructionBody,
+    content: copilotInstructions,
     detect: (p) => p.dirExists(join(p.repo, '.github')),
   },
   {
