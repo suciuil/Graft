@@ -35,6 +35,10 @@
  * count, and quoting the higher tier would overstate every figure. */
 const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
   [/^claude-(fable|mythos)-5/i, 10],
+  // Must precede the Opus 5 row, which is prefix-anchored only and would
+  // otherwise price `claude-opus-5-5` at Opus 5's $5. The lookahead keeps a
+  // hypothetical `claude-opus-5-50` or `5.5.1` from borrowing this rate.
+  [/^claude-opus-5[.-]5(?![.\d])/i, 4],
   [/^claude-opus-(5(-0)?|4[.-][5-8])/i, 5],
   [/^claude-sonnet-5(-0)?/i, 2],
   [/^claude-sonnet-4[.-][56]/i, 3],
@@ -203,10 +207,29 @@ export interface TurnUsage {
  * why a measured rate beats an assumed one: a session deep into a long
  * conversation pays nearer $0.50/Mtok than the $5.00 its model lists at.
  *
- * Shared across all three vendors in the table above rather than per-family
- * because, as of writing, all three publish exactly these ratios. */
+ * Shared across the vendors in the table above as the default, because most
+ * publish exactly these ratios; the models that discount cache reads further
+ * are listed in {@link CACHE_READ_MULTIPLIER_OVERRIDES}. */
 const CACHE_CREATE_MULTIPLIER = 1.25;
 const CACHE_READ_MULTIPLIER = 0.1;
+
+/** Models whose cache read is NOT a tenth of list, matched against the
+ * normalised id exactly as {@link INPUT_USD_PER_MTOK} is. First match wins.
+ *
+ * Claude Opus 5.5 bills a cache hit at 0.05x its $4 list ($0.20/Mtok). Leaving
+ * it on the 0.1x default would double the cost of the cache-read bulk of every
+ * long turn and so overstate the measured rate — and every saving priced at it —
+ * by close to 2x. */
+const CACHE_READ_MULTIPLIER_OVERRIDES: ReadonlyArray<readonly [RegExp, number]> = [
+  [/^claude-opus-5[.-]5(?![.\d])/i, 0.05],
+];
+
+/** The cache-read multiplier for a model: its override, else the 0.1x default. */
+function cacheReadMultiplier(model: string): number {
+  const id = normalizeModelId(model);
+  for (const [pattern, mult] of CACHE_READ_MULTIPLIER_OVERRIDES) if (pattern.test(id)) return mult;
+  return CACHE_READ_MULTIPLIER;
+}
 
 /** Micro-dollars, so a running total stays an integer and never drifts. */
 const MICROS_PER_USD = 1_000_000;
@@ -219,7 +242,7 @@ export function turnInputCostMicros(usage: TurnUsage): number | null {
   const weighted =
     usage.input +
     usage.cacheCreate * CACHE_CREATE_MULTIPLIER +
-    usage.cacheRead * CACHE_READ_MULTIPLIER;
+    usage.cacheRead * cacheReadMultiplier(usage.model);
   return Math.round((weighted * list * MICROS_PER_USD) / 1_000_000);
 }
 

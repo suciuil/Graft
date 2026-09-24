@@ -44,6 +44,23 @@ test('inputUsdPerMtok: known families are priced, anything else is null', () => 
   assert.equal(inputUsdPerMtok(undefined), null);
 });
 
+test('inputUsdPerMtok: Claude Opus 5.5 lists at $4, not Opus 5\'s $5', () => {
+  // `claude-opus-5-5` starts with `claude-opus-5`, so without its own row ahead
+  // of Opus 5's it would silently inherit the older model's higher price.
+  assert.equal(inputUsdPerMtok('claude-opus-5-5'), 4);
+  assert.equal(inputUsdPerMtok('claude-opus-5.5'), 4);
+  assert.equal(inputUsdPerMtok('Claude Opus 5.5'), 4);
+  assert.equal(inputUsdPerMtok('anthropic/claude-opus-5-5'), 4);
+  assert.equal(inputUsdPerMtok('a/vertex_ai/claude-opus-5-5#pair-gemini'), 4);
+  assert.equal(inputUsdPerMtok('claude-opus-5-5-20260901'), 4, 'a dated snapshot is the same model');
+  // Opus 5 itself is unchanged.
+  assert.equal(inputUsdPerMtok('claude-opus-5'), 5);
+  assert.equal(inputUsdPerMtok('claude-opus-5-0'), 5);
+  // The two are distinct ledger rows, and 5.5 is not a refinement of 5.
+  assert.notEqual(canonicalModelKey('claude-opus-5-5'), canonicalModelKey('claude-opus-5'));
+  assert.equal(canonicalModelKey('claude-opus-5.5'), canonicalModelKey('claude-opus-5-5'));
+});
+
 test('canonicalModelKey: the spellings of one model collapse to one key', () => {
   // The field bug: a real ledger carried `gemini-3.7-flash` AND
   // `gemini-3-7-flash` as separate rows, each with its own dollar figure, as
@@ -230,6 +247,19 @@ test('turnInputCostMicros: cache writes cost 1.25x and reads a tenth', () => {
   });
   assert.equal(write, 6_250_000);
   assert.equal(read, 500_000);
+});
+
+test('turnInputCostMicros: Claude Opus 5.5 reads cache at 0.05x, not a tenth', () => {
+  const opus55 = (input: number, cacheCreate: number, cacheRead: number) =>
+    turnInputCostMicros({ model: 'claude-opus-5-5', input, cacheCreate, cacheRead });
+  assert.equal(opus55(1_000_000, 0, 0), 4_000_000, '$4/Mtok list');
+  assert.equal(opus55(0, 1_000_000, 0), 5_000_000, 'cache write still 1.25x');
+  assert.equal(opus55(0, 0, 1_000_000), 200_000, 'cache read $0.20/Mtok');
+  // The override follows the model through routes and display spellings.
+  assert.equal(
+    turnInputCostMicros({ model: 'vertex_ai/Claude Opus 5.5', input: 0, cacheCreate: 0, cacheRead: 1_000_000 }),
+    200_000,
+  );
 });
 
 test('turnInputCostMicros: a cache-heavy turn is an order of magnitude cheaper than list', () => {

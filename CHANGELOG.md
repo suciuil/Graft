@@ -15,6 +15,11 @@
   `graft savings`. The per-model table remains the fallback for a call that omits
   it. Optional everywhere, and applied to every tool schema centrally so a tool
   added later cannot silently miss it.
+- **Claude Opus 5.5 is priced** at its $4/Mtok input list rate, with its 0.05x
+  cache-read multiplier ($0.20/Mtok) applied when measuring a session's billed
+  rate. Before this, `claude-opus-5-5` matched the prefix-anchored Opus 5 row and
+  was silently priced at $5/Mtok with a 0.1x cache read — overstating list-price
+  savings by 25% and measured ones by up to ~2x on cache-heavy turns.
 
 ### Changed
 
