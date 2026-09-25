@@ -8,8 +8,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";
 import type Anthropic from "@anthropic-ai/sdk";
-import { OpenAIChatModel } from "../src/ai/llm/openai.js";
-import { AnthropicChatModel } from "../src/ai/llm/anthropic.js";
+import AnthropicSDK from "@anthropic-ai/sdk";
+import { OpenAIChatModel, baseUrlCandidates } from "../src/ai/llm/openai.js";
+import { resolveConfig, DEFAULT_MODELS } from "../src/ai/providers.js";
+import { ProviderFallbackChatModel, createChatModel, LLM_INCUBATOR_BASE_URL } from "../src/ai/llm/factory.js";
+import type { ChatModel } from "../src/ai/llm/types.js";
+import { AnthropicChatModel, anthropicBaseUrl } from "../src/ai/llm/anthropic.js";
 import type { ChatRequest } from "../src/ai/llm/types.js";
 
 // --- OpenAI adapter ---------------------------------------------------------
@@ -179,6 +183,231 @@ test("openai: does NOT paper over a rejected object tool_choice when multiple to
   assert.equal(callCount, 1); // no ambiguous retry — the caller asked for "a" specifically
 });
 
+test("openai: baseUrlCandidates keeps the configured URL first, then toggles /v1", () => {
+  assert.deepEqual(baseUrlCandidates("https://gw.example/v1"), ["https://gw.example/v1", "https://gw.example"]);
+  assert.deepEqual(baseUrlCandidates("https://gw.example/v1/"), ["https://gw.example/v1/", "https://gw.example"]);
+  assert.deepEqual(baseUrlCandidates("https://gw.example"), ["https://gw.example", "https://gw.example/v1"]);
+  assert.deepEqual(baseUrlCandidates("https://gw.example/"), ["https://gw.example/", "https://gw.example/v1"]);
+  assert.deepEqual(baseUrlCandidates(undefined), [undefined]);
+});
+
+/** A stub whose behavior depends on the base URL it was cloned with via `withOptions`. */
+function routedClient(handler: (baseURL: string | undefined, params: any) => unknown, calls: any[]) {
+  const make = (baseURL: string | undefined): OpenAI =>
+    ({
+      withOptions: (o: { baseURL?: string }) => make(o.baseURL),
+      chat: {
+        completions: {
+          create: async (params: any) => {
+            calls.push({ baseURL, model: params.model });
+            return handler(baseURL, params);
+          },
+        },
+      },
+    }) as unknown as OpenAI;
+  return make;
+}
+
+test("openai: an unknown prefixed model falls back to the bare id, and sticks", async () => {
+  const calls: any[] = [];
+  const unknown = "Invalid model name passed in model=google/gemini-x";
+  const make = routedClient((_b, p) => {
+    if (p.model === "google/gemini-x") throw new OpenAI.APIError(400, { message: unknown }, unknown, new Headers());
+    return openAiResp();
+  }, calls);
+  const m = new OpenAIChatModel({ apiKey: "x", model: "google/gemini-x", modelFallbacks: ["gemini-x"], client: make("u/v1") });
+  const { err } = await captureStderr(async () => {
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+  });
+  assert.deepEqual(calls.map((c) => c.model), ["google/gemini-x", "gemini-x", "gemini-x"]);
+  assert.ok(err.some((l) => /not available; retrying as "gemini-x"/.test(l)));
+});
+
+test("openai: a route 404 on the configured base URL retries with /v1 added, and sticks", async () => {
+  const calls: any[] = [];
+  const make = routedClient((b) => {
+    if (b === "https://gw.example") throw new OpenAI.APIError(404, undefined, "Not Found", new Headers());
+    return openAiResp();
+  }, calls);
+  const m = new OpenAIChatModel({ apiKey: "x", model: "m", baseUrl: "https://gw.example", client: make("https://gw.example") });
+  await captureStderr(async () => {
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+  });
+  assert.deepEqual(calls.map((c) => c.baseURL), ["https://gw.example", "https://gw.example/v1", "https://gw.example/v1"]);
+});
+
+test("openai: an unknown model with no fallback left is rethrown", async () => {
+  const msg = "The model `m` does not exist";
+  const make = routedClient(() => {
+    throw new OpenAI.APIError(404, { message: msg }, msg, new Headers());
+  }, []);
+  const m = new OpenAIChatModel({ apiKey: "x", model: "m", client: make(undefined) });
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), OpenAI.APIError);
+});
+
+test("resolveConfig: any provider-prefixed model gets its bare id as a fallback", () => {
+  const keys = ["GRAFT_PROVIDER", "GRAFT_MODEL", "GRAFT_OPENROUTER_MODEL", "ORCAROUTER_MODEL", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] as const;
+  const saved = keys.map((k) => process.env[k]);
+  for (const k of keys) delete process.env[k];
+  try {
+    const def = resolveConfig({ provider: "openai" });
+    assert.equal(def.model, DEFAULT_MODELS.openai);
+    assert.deepEqual(def.modelFallbacks, [DEFAULT_MODELS.openai.slice(DEFAULT_MODELS.openai.lastIndexOf("/") + 1)]);
+    assert.deepEqual(resolveConfig({ provider: "openai", model: "vendor/custom" }).modelFallbacks, ["custom"]);
+    process.env.GRAFT_MODEL = "google/gemini-x";
+    assert.deepEqual(resolveConfig({ provider: "openai" }).modelFallbacks, ["gemini-x"]);
+    delete process.env.GRAFT_MODEL;
+    assert.equal(resolveConfig({ provider: "openai", model: "gemini-x" }).modelFallbacks, undefined);
+  } finally {
+    keys.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
+  }
+});
+
+const CONFIG_ENV = [
+  "GRAFT_PROVIDER", "GRAFT_MODEL", "GRAFT_OPENROUTER_MODEL", "ORCAROUTER_MODEL",
+  "GRAFT_BASE_URL", "ANTHROPIC_BASE_URL", "OPENROUTER_BASE_URL", "ORCAROUTER_BASE_URL",
+  "GRAFT_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENROUTER_API_KEY", "ORCAROUTER_API_KEY",
+] as const;
+
+/** Run `fn` with every config env var cleared, then `vars` applied; restores the real env after. */
+function withEnv(vars: Partial<Record<(typeof CONFIG_ENV)[number], string>>, fn: () => void): void {
+  const saved = CONFIG_ENV.map((k) => process.env[k]);
+  for (const k of CONFIG_ENV) delete process.env[k];
+  Object.assign(process.env, vars);
+  try {
+    fn();
+  } finally {
+    CONFIG_ENV.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
+  }
+}
+
+test("resolveConfig: an unset provider gets an anthropic fallback only when the key stays on a safe host", () => {
+  withEnv({}, () => {
+    const gw = resolveConfig({ apiKey: "k", baseUrl: "https://gw.example/v1" });
+    assert.deepEqual(gw.providerFallback, { provider: "anthropic", model: DEFAULT_MODELS.anthropic });
+    assert.deepEqual(resolveConfig({ apiKey: "k", baseUrl: "https://gw", model: "m" }).providerFallback, { provider: "anthropic", model: "m" });
+    assert.equal(resolveConfig({ provider: "openai", apiKey: "sk-openai" }).providerFallback, undefined, "explicit provider: no fallback");
+  });
+  withEnv({ ORCAROUTER_API_KEY: "orca" }, () => {
+    assert.equal(resolveConfig().baseUrl, undefined, "a legacy key keeps its old routing");
+    assert.equal(resolveConfig().providerFallback, undefined, "no base URL: never send a non-Anthropic key to api.anthropic.com");
+  });
+});
+
+test("resolveConfig: nothing configured → the LLM Incubator gateway, with the anthropic fallback on the same host", () => {
+  withEnv({ GRAFT_API_KEY: "k" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.provider, "llm-incubator");
+    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
+    assert.equal(c.model, "gemini-3.8-flash");
+    assert.deepEqual(c.providerFallback, { provider: "anthropic", model: DEFAULT_MODELS.anthropic });
+  });
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_PROVIDER: "openai" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.provider, "openai", "an explicit openai provider is not redirected");
+    assert.equal(c.baseUrl, undefined);
+  });
+});
+
+test("resolveConfig: GRAFT_BASE_URL → ANTHROPIC_BASE_URL → LLM Incubator", () => {
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://graft", ANTHROPIC_BASE_URL: "https://anthropic-gw" }, () => {
+    assert.equal(resolveConfig().baseUrl, "https://graft");
+  });
+  withEnv({ GRAFT_API_KEY: "k", ANTHROPIC_BASE_URL: "https://anthropic-gw" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.baseUrl, "https://anthropic-gw");
+    assert.equal(c.provider, "openai");
+  });
+  withEnv({ GRAFT_API_KEY: "k" }, () => assert.equal(resolveConfig().baseUrl, LLM_INCUBATOR_BASE_URL));
+});
+
+test("resolveConfig: GRAFT_API_KEY → ANTHROPIC_AUTH_TOKEN (sent as Bearer on the anthropic wire) → legacy keys", () => {
+  withEnv({ GRAFT_API_KEY: "graft", ANTHROPIC_AUTH_TOKEN: "tok" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.apiKey, "graft");
+    assert.equal(c.bearerAuth, undefined);
+  });
+  withEnv({ ANTHROPIC_AUTH_TOKEN: "tok", OPENROUTER_API_KEY: "or" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.apiKey, "tok");
+    assert.equal(c.bearerAuth, true);
+    assert.equal(c.usedLegacyEnv, false);
+  });
+  withEnv({ OPENROUTER_API_KEY: "or", ANTHROPIC_BASE_URL: "https://anthropic-gw" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.apiKey, "or");
+    assert.equal(c.baseUrl, "https://openrouter.ai/api/v1", "legacy OpenRouter setup unchanged");
+  });
+});
+
+test("factory: llm-incubator speaks the OpenAI wire with its own label", () => {
+  const m = createChatModel({ provider: "llm-incubator", apiKey: "x", model: "gemini-3.8-flash" });
+  assert.ok(m instanceof OpenAIChatModel);
+  assert.equal(m.label, "llm-incubator:gemini-3.8-flash");
+});
+
+test("factory: an ANTHROPIC_AUTH_TOKEN key goes out as a Bearer token, not x-api-key", () => {
+  const bearer = createChatModel({ provider: "anthropic", apiKey: "tok", model: "m", bearerAuth: true }) as any;
+  assert.equal(bearer.client.authToken, "tok");
+  assert.equal(bearer.client.apiKey, null);
+  const plain = createChatModel({ provider: "anthropic", apiKey: "key", model: "m" }) as any;
+  assert.equal(plain.client.apiKey, "key");
+});
+
+function scripted(label: string, fn: () => Promise<any>): ChatModel & { calls: number } {
+  const m = { label, calls: 0, create: async () => (m.calls++, fn()) };
+  return m;
+}
+const ok = { text: "ok", toolCalls: [], usage: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, stopReason: "stop", assistant: { role: "assistant", content: "ok" } };
+const rejected = (status: number) => Object.assign(new Error(`${status}`), { status });
+
+test("provider fallback: a wire rejection switches to the fallback, and sticks", async () => {
+  const primary = scripted("openai:m", async () => { throw rejected(404); });
+  const fallback = scripted("anthropic:m", async () => ok);
+  const m = new ProviderFallbackChatModel(primary, fallback);
+  await captureStderr(async () => {
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+  });
+  assert.equal(primary.calls, 1);
+  assert.equal(fallback.calls, 2);
+  assert.equal(m.label, "anthropic:m");
+});
+
+test("provider fallback: a failing fallback rethrows the primary error and is not retried", async () => {
+  const primaryErr = rejected(401);
+  const primary = scripted("openai:m", async () => { throw primaryErr; });
+  const fallback = scripted("anthropic:m", async () => { throw rejected(401); });
+  const m = new ProviderFallbackChatModel(primary, fallback);
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), (e) => e === primaryErr);
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), (e) => e === primaryErr);
+  assert.equal(fallback.calls, 1);
+});
+
+test("provider fallback: other errors (429, 500, 400) never trigger it", async () => {
+  for (const status of [400, 429, 500]) {
+    const primary = scripted("openai:m", async () => { throw rejected(status); });
+    const fallback = scripted("anthropic:m", async () => ok);
+    const m = new ProviderFallbackChatModel(primary, fallback);
+    await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }));
+    assert.equal(fallback.calls, 0, `status ${status}`);
+  }
+});
+
+async function captureStderr(fn: () => Promise<void>): Promise<{ err: string[] }> {
+  const err: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void err.push(a.join(" "));
+  try {
+    await fn();
+  } finally {
+    console.error = orig;
+  }
+  return { err };
+}
+
 // --- Anthropic adapter ------------------------------------------------------
 
 function fakeAnthropic(resp: unknown) {
@@ -249,6 +478,48 @@ test("anthropic: tool_use input is an object (no JSON.parse round-trip)", async 
     responseFormat: { kind: "tool", name: "record_graph" },
   });
   assert.deepEqual(res.toolCalls[0].args, { nodes: [1] });
+});
+
+test("anthropic: a trailing /v1 is stripped from the base URL (the SDK appends /v1/messages)", () => {
+  assert.equal(anthropicBaseUrl("https://gw.example/v1"), "https://gw.example");
+  assert.equal(anthropicBaseUrl("https://gw.example/v1/"), "https://gw.example");
+  assert.equal(anthropicBaseUrl("https://gw.example"), "https://gw.example");
+  assert.equal(anthropicBaseUrl(undefined), undefined);
+});
+
+function modelGatedAnthropic(accepts: string, models: string[]): Anthropic {
+  return {
+    messages: {
+      create: async (p: any) => {
+        models.push(p.model);
+        if (p.model !== accepts) throw new AnthropicSDK.APIError(404, undefined, `model: ${p.model}`, new Headers());
+        return anthropicResp();
+      },
+    },
+  } as unknown as Anthropic;
+}
+
+test("anthropic: an unknown prefixed model falls back to the bare id, and sticks", async () => {
+  const models: string[] = [];
+  const m = new AnthropicChatModel({
+    apiKey: "x",
+    model: "anthropic/claude-x",
+    modelFallbacks: ["claude-x"],
+    client: modelGatedAnthropic("claude-x", models),
+  });
+  const { err } = await captureStderr(async () => {
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+    await m.create({ messages: [{ role: "user", content: "hi" }] });
+  });
+  assert.deepEqual(models, ["anthropic/claude-x", "claude-x", "claude-x"]);
+  assert.ok(err.some((l) => /not available; retrying as "claude-x"/.test(l)));
+});
+
+test("anthropic: an unknown model with no fallback left is rethrown", async () => {
+  const models: string[] = [];
+  const m = new AnthropicChatModel({ apiKey: "x", model: "claude-nope", client: modelGatedAnthropic("other", models) });
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), AnthropicSDK.APIError);
+  assert.deepEqual(models, ["claude-nope"]);
 });
 
 test("anthropic: reconstructed assistant tool_use carries the object input", async () => {

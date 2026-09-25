@@ -24,9 +24,13 @@ const DEFAULT_MAX_TOKENS = 4096;
 
 export interface AnthropicChatModelOptions {
   apiKey: string;
+  /** When set, sent as `Authorization: Bearer` instead of `apiKey` as `x-api-key`. */
+  authToken?: string;
   model: string;
   baseUrl?: string;
   label?: string;
+  /** Model ids tried in order when the endpoint reports `model` as unknown. */
+  modelFallbacks?: string[];
   /** Inject a pre-built client (tests pass a stub; production omits it). */
   client?: Anthropic;
 }
@@ -34,17 +38,55 @@ export interface AnthropicChatModelOptions {
 type CacheControl = { cache_control: { type: "ephemeral" } } | Record<string, never>;
 const cc = (on: boolean | undefined): CacheControl => (on ? { cache_control: { type: "ephemeral" } } : {});
 
+/** The SDK appends `/v1/messages` itself, so a trailing `/v1` would always yield `/v1/v1/messages`. */
+export function anthropicBaseUrl(baseUrl: string | undefined): string | undefined {
+  if (!baseUrl?.trim()) return undefined;
+  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
+
+/** Anthropic answers an unknown model with a 404 `not_found_error` whose message names the model. */
+function isModelNotFound(err: unknown): boolean {
+  if (!(err instanceof Anthropic.APIError)) return false;
+  const message = String(err.message ?? "");
+  if (err.status === 404) return /model/i.test(message);
+  return err.status === 400 && /(invalid model|unknown model|not a valid model)/i.test(message);
+}
+
 export class AnthropicChatModel implements ChatModel {
   readonly label: string;
   private client: Anthropic;
-  private model: string;
+  private models: string[];
+  // Sticky across calls: once the bare id works, later calls skip the failing one.
+  private modelIdx = 0;
 
   constructor(opts: AnthropicChatModelOptions) {
-    this.model = opts.model;
+    this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
     this.client =
       opts.client ??
-      new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseUrl, maxRetries: transportRetries() });
+      new Anthropic({
+        ...(opts.authToken ? { apiKey: null, authToken: opts.authToken } : { apiKey: opts.apiKey }),
+        baseURL: anthropicBaseUrl(opts.baseUrl),
+        maxRetries: transportRetries(),
+      });
+  }
+
+  private async send(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Messages.Message> {
+    for (;;) {
+      const mi = this.modelIdx;
+      try {
+        return await this.client.messages.create({ ...params, model: this.models[mi]! });
+      } catch (err) {
+        if (isModelNotFound(err) && mi + 1 < this.models.length) {
+          if (this.modelIdx === mi) {
+            this.modelIdx = mi + 1;
+            console.error(`⚠ model "${this.models[mi]}" not available; retrying as "${this.models[mi + 1]}"`);
+          }
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   async create(req: ChatRequest): Promise<ChatResponse> {
@@ -77,7 +119,7 @@ export class AnthropicChatModel implements ChatModel {
 
     const tools = req.tools?.map(toAnthropicTool);
     const params: Anthropic.MessageCreateParamsNonStreaming = {
-      model: this.model,
+      model: this.models[0]!,
       max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       messages,
       ...(system.length ? { system } : {}),
@@ -98,7 +140,7 @@ export class AnthropicChatModel implements ChatModel {
       params.tools = tools;
     }
 
-    const resp = await this.client.messages.create(params);
+    const resp = await this.send(params);
     return this.fromResponse(resp, fmt.kind);
   }
 

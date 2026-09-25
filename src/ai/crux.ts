@@ -60,11 +60,18 @@ function isTruncatedStop(reason: string | null): boolean {
   return r === "length" || r === "max_tokens";
 }
 
+const MAX_OUTPUT_TOKENS = 8192;
+
+/** Some gateways report a cut-off reply as `stop`, so the spent output budget is the real signal. */
+function hitOutputCap(res: Pick<ChatResponse, "stopReason"> & { usage?: { output?: number } }): boolean {
+  return isTruncatedStop(res.stopReason) || (res.usage?.output ?? 0) >= MAX_OUTPUT_TOKENS * 0.97;
+}
+
 /** Classify an empty/unusable crux reply. `null` means at least one usable summary. */
 export function classifyCruxMiss(res: ChatResponse, parsed: NodeCrux[]): CruxMiss | null {
   const finishReason = res.stopReason;
   if (parsed.some((p) => p.summary.trim())) return null;
-  if (isTruncatedStop(finishReason)) return { kind: "truncated", finishReason };
+  if (hitOutputCap(res)) return { kind: "truncated", finishReason };
   if (parsed.length > 0) return { kind: "empty-parsed", finishReason };
   const emptyTools = res.toolCalls.length === 0;
   const emptyText = !res.text?.trim();
@@ -112,14 +119,40 @@ const SYMBOLS_SCHEMA = {
 
 /** Cap the file text sent per request so one huge file can't blow the context. */
 const MAX_CODE_CHARS = 18_000;
+/** In an oversized file, a single line (minified code) is clipped to this. */
+const MAX_LINE_CHARS = 400;
+/** A batch that hits the output cap is halved, down to this many targets. */
+const MIN_SPLIT_TARGETS = 5;
 
-function numberLines(source: string): string {
-  const clipped =
-    source.length > MAX_CODE_CHARS ? `${source.slice(0, MAX_CODE_CHARS)}\n… (truncated)` : source;
-  return clipped
-    .split("\n")
-    .map((line, i) => `${i + 1}\t${line}`)
-    .join("\n");
+/**
+ * Numbered source for the prompt. A file over {@link MAX_CODE_CHARS} is shown as
+ * windows over the targets' own lines, an equal share of the budget each, so a
+ * target deep in a huge file is still visible (not just the file's first 18k chars).
+ */
+function numberLines(source: string, nodes: readonly NodeRef[]): string {
+  const lines = source.split("\n");
+  if (source.length <= MAX_CODE_CHARS) return lines.map((line, i) => `${i + 1}\t${line}`).join("\n");
+
+  const clip = (l: string) => (l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)} …` : l);
+  const perTarget = Math.max(MAX_LINE_CHARS, Math.floor(MAX_CODE_CHARS / Math.max(1, nodes.length)));
+  const keep = new Set<number>();
+  for (const n of nodes) {
+    let used = 0;
+    const end = Math.min(lines.length, n.endLine);
+    for (let i = Math.max(0, n.startLine - 1); i < end && used < perTarget; i++) {
+      keep.add(i);
+      used += clip(lines[i]!).length + 1;
+    }
+  }
+  const out: string[] = [];
+  let prev = -1;
+  for (const i of [...keep].sort((a, b) => a - b)) {
+    if (i > prev + 1) out.push(`… (lines ${prev + 2}-${i} omitted)`);
+    out.push(`${i + 1}\t${clip(lines[i]!)}`);
+    prev = i;
+  }
+  if (prev < lines.length - 1) out.push(`… (lines ${prev + 2}-${lines.length} omitted)`);
+  return out.join("\n");
 }
 
 function userContent(input: FileCruxInput): string {
@@ -131,7 +164,7 @@ function userContent(input: FileCruxInput): string {
     )
     .join("\n");
   const n = input.nodes.length;
-  return `FILE: ${input.path}\n\n${numberLines(input.source)}\n\nTARGETS (${n} — return all ${n}, one entry per id):\n${targets}`;
+  return `FILE: ${input.path}\n\n${numberLines(input.source, input.nodes)}\n\nTARGETS (${n} — return all ${n}, one entry per id):\n${targets}`;
 }
 
 /** Normalize the tool's parsed argument object into a {@link NodeCrux} list. */
@@ -156,7 +189,14 @@ function parseResults(obj: { symbols?: unknown } | undefined): NodeCrux[] {
  * empty `toolCalls` list, leaves every node `pending`, and `graft check` loops
  * on "run --deep" forever (#172; same trigger as #129 for the crux path).
  */
-function argsFromResponse(res: { text: string; toolCalls: { name: string; args: unknown }[] }): {
+function argsFromResponse(
+  res: {
+    text: string;
+    toolCalls: { name: string; args: unknown }[];
+    stopReason?: string | null;
+  },
+  opts: { quiet?: boolean; capped?: boolean } = {},
+): {
   symbols?: unknown;
 } | undefined {
   const call = res.toolCalls.find((c) => c.name === RECORD_TOOL) ?? res.toolCalls[0];
@@ -167,7 +207,9 @@ function argsFromResponse(res: { text: string; toolCalls: { name: string; args: 
     toolNames: [RECORD_TOOL, "emit_json"],
     payloadKey: "symbols",
   });
-  if (!recovered) warnToolChoiceIgnored("crux", res.text?.trim() ? "unparsed" : "empty");
+  if (!recovered && !opts.quiet) {
+    warnToolChoiceIgnored("crux", res.text?.trim() ? "unparsed" : "empty", res.stopReason, opts.capped);
+  }
   return recovered as { symbols?: unknown } | undefined;
 }
 
@@ -236,7 +278,7 @@ export class ChatCruxSummarizer implements CruxSummarizer {
     if (input.nodes.length === 0) return [];
     const res = await this.model.create({
       temperature: 0,
-      maxTokens: 8192,
+      maxTokens: MAX_OUTPUT_TOKENS,
       tools: [
         {
           name: RECORD_TOOL,
@@ -257,8 +299,22 @@ export class ChatCruxSummarizer implements CruxSummarizer {
     // `unparseable`), while reconciliation grades the IDS. Reconciling first
     // would delete the blank entries that are the sole evidence for
     // `empty-parsed`, silently reclassifying it as `unparseable`.
-    const raw = parseResults(argsFromResponse(res));
+    const capped = hitOutputCap(res);
+    const splittable = capped && input.nodes.length > MIN_SPLIT_TARGETS;
+    const raw = parseResults(argsFromResponse(res, { quiet: splittable, capped }));
+    const got = reconcileTargets(raw, input.nodes);
+    if (splittable && got.length < input.nodes.length) {
+      // The reply ran out of output budget: ask again for the rest in two halves.
+      const have = new Set(got.map((g) => g.id));
+      const rest = input.nodes.filter((n) => !have.has(n.id));
+      const mid = Math.ceil(rest.length / 2);
+      const out = [...got];
+      for (const part of [rest.slice(0, mid), rest.slice(mid)]) {
+        if (part.length > 0) out.push(...(await this.describeFile({ ...input, nodes: part })));
+      }
+      return out;
+    }
     this.lastMiss = classifyCruxMiss(res, raw);
-    return reconcileTargets(raw, input.nodes);
+    return got;
   }
 }

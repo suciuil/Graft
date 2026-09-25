@@ -130,10 +130,10 @@ program
   .description("Build a repo's context graph as linked markdown, and keep it in sync with the code.")
   .version(currentVersion, "-v, --version")
   .option("--dir <path>", "context graph directory (default: <repo>/graft)")
-  .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter (env GRAFT_PROVIDER)")
+  .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter | llm-incubator (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
-  .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
-  .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)")
+  .option("--api-key <key>", "provider API key (env GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN)")
+  .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL)")
   .option(
     "--agent-model <id>",
     "model YOU are running, to price saved tokens (env GRAFT_AGENT_MODEL) — not --model",
