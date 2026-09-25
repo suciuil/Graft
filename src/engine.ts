@@ -132,8 +132,11 @@ export class Graft {
       provider: this.cfg.provider,
       apiKey: this.cfg.apiKey,
       model: this.cfg.model,
+      modelFallbacks: this.cfg.modelFallbacks,
       baseUrl: this.cfg.baseUrl,
       headers: this.cfg.headers,
+      providerFallback: this.cfg.providerFallback,
+      bearerAuth: this.cfg.bearerAuth,
     });
     return this._chatModel;
   }

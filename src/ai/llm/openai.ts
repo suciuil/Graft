@@ -25,6 +25,8 @@ export interface OpenAIChatModelOptions {
   label?: string;
   /** Extra default headers (e.g. OpenRouter's `X-Title`). */
   headers?: Record<string, string>;
+  /** Model ids tried in order when the endpoint reports `model` as unknown. */
+  modelFallbacks?: string[];
   /** Inject a pre-built client (tests pass a stub; production omits it). */
   client?: OpenAI;
 }
@@ -130,28 +132,76 @@ function isRejectedToolsWithReasoning(err: unknown): boolean {
   );
 }
 
+/**
+ * The endpoint does not serve the requested model id. Phrasings seen: OpenAI
+ * (404 "The model `x` does not exist"), LiteLLM (400 "Invalid model name"),
+ * OpenRouter (400 "x is not a valid model ID").
+ */
+export function isModelNotFound(err: unknown): boolean {
+  if (!(err instanceof OpenAI.APIError) || (err.status !== 400 && err.status !== 404)) return false;
+  if (err.code === "model_not_found") return true;
+  const message = String(err.message ?? "");
+  return (
+    /model/i.test(message) &&
+    /(does not exist|not found|invalid model|not a valid model|no such model|unknown model|not available)/i.test(message)
+  );
+}
+
+/** A 404/405 that is not about the model: the base URL points at the wrong path. */
+function isRouteNotFound(err: unknown): boolean {
+  return (
+    err instanceof OpenAI.APIError &&
+    (err.status === 404 || err.status === 405) &&
+    !isModelNotFound(err)
+  );
+}
+
+/** Base URLs to try in order: exactly as configured, then with the `/v1` suffix toggled. */
+export function baseUrlCandidates(baseUrl: string | undefined): (string | undefined)[] {
+  if (!baseUrl?.trim()) return [undefined];
+  const configured = baseUrl.trim();
+  const trimmed = configured.replace(/\/+$/, "");
+  const toggled = /\/v1$/i.test(trimmed) ? trimmed.slice(0, -3) : `${trimmed}/v1`;
+  return [configured, toggled];
+}
+
 export class OpenAIChatModel implements ChatModel {
   readonly label: string;
-  private client: OpenAI;
-  private model: string;
+  private clients: (OpenAI | undefined)[];
+  private baseUrls: (string | undefined)[];
+  private models: string[];
+  // Sticky across calls: once a fallback works, later calls skip the failing attempt.
+  private routeIdx = 0;
+  private modelIdx = 0;
 
   constructor(opts: OpenAIChatModelOptions) {
-    this.model = opts.model;
+    this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
-    this.client =
+    this.baseUrls = baseUrlCandidates(opts.baseUrl);
+    const first =
       opts.client ??
       new OpenAI({
         apiKey: opts.apiKey,
-        baseURL: opts.baseUrl,
+        baseURL: this.baseUrls[0],
         defaultHeaders: opts.headers,
         maxRetries: transportRetries(),
       });
+    this.clients = this.baseUrls.map((_, i) => (i === 0 ? first : undefined));
+  }
+
+  private clientAt(i: number): OpenAI {
+    let c = this.clients[i];
+    if (!c) {
+      c = this.clients[0]!.withOptions({ baseURL: this.baseUrls[i] });
+      this.clients[i] = c;
+    }
+    return c;
   }
 
   async create(req: ChatRequest): Promise<ChatResponse> {
     const messages = req.messages.map(toChatMessage);
     const tools = req.tools ? req.tools.map(toChatTool) : undefined;
-    const params: ChatParams = { model: this.model, messages };
+    const params: ChatParams = { model: this.models[0]!, messages };
     if (req.temperature !== undefined) params.temperature = req.temperature;
     if (req.maxTokens !== undefined) params.max_tokens = req.maxTokens;
 
@@ -176,6 +226,37 @@ export class OpenAIChatModel implements ChatModel {
   }
 
   /**
+   * Walks the base-URL and model fallbacks: a route-level 404/405 advances to
+   * the next base URL, an unknown-model error to the next model id. Each step
+   * only moves forward, so the loop is bounded by the two candidate lists.
+   */
+  private async createChatCompletion(params: ChatParams): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    for (;;) {
+      const ri = this.routeIdx;
+      const mi = this.modelIdx;
+      try {
+        return await this.sendWithCompat(this.clientAt(ri), { ...params, model: this.models[mi]! });
+      } catch (err) {
+        if (isModelNotFound(err) && mi + 1 < this.models.length) {
+          if (this.modelIdx === mi) {
+            this.modelIdx = mi + 1;
+            console.error(`⚠ model "${this.models[mi]}" not available; retrying as "${this.models[mi + 1]}"`);
+          }
+          continue;
+        }
+        if (isRouteNotFound(err) && ri + 1 < this.baseUrls.length) {
+          if (this.routeIdx === ri) {
+            this.routeIdx = ri + 1;
+            console.error(`⚠ ${this.baseUrls[ri]} returned ${(err as { status?: number }).status}; retrying at ${this.baseUrls[ri + 1]}`);
+          }
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
    * Wraps `chat.completions.create` with a narrow, safe fallback: if the
    * server rejects an object-form `tool_choice` and exactly one tool was
    * offered, "required" is behaviorally identical (the model has nothing
@@ -185,12 +266,15 @@ export class OpenAIChatModel implements ChatModel {
    * caller-specified tool — that ambiguity isn't safe to paper over
    * automatically.
    */
-  private async createChatCompletion(params: ChatParams): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  private async sendWithCompat(
+    client: OpenAI,
+    params: ChatParams,
+  ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     let attempt = params;
     // Bounded: one retry per known incompatibility below, never an open loop.
     for (let i = 0; i < 4; i++) {
       try {
-        return await this.client.chat.completions.create(attempt);
+        return await client.chat.completions.create(attempt);
       } catch (err) {
         // Checked before the tool_choice fallback below: a reasoning refusal
         // also names tool_choice, and turning reasoning off keeps the caller's
@@ -216,7 +300,7 @@ export class OpenAIChatModel implements ChatModel {
         throw err;
       }
     }
-    return this.client.chat.completions.create(attempt);
+    return client.chat.completions.create(attempt);
   }
 
   private fromResponse(

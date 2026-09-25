@@ -94,10 +94,22 @@ export function recoverToolArgsFromContent(
 }
 
 /** One stderr line when a structured op got neither a tool call nor recoverable JSON. */
-export function warnToolChoiceIgnored(op: string, reason: "empty" | "unparsed"): void {
+export function warnToolChoiceIgnored(
+  op: string,
+  reason: "empty" | "unparsed",
+  finishReason?: string | null,
+  outputCapped?: boolean,
+): void {
+  const fr = finishReason ? finishReason.toLowerCase() : "";
+  const hint =
+    outputCapped || fr === "length" || fr === "max_tokens"
+      ? "output token budget exhausted — a reasoning model may have spent it all thinking"
+      : fr === "content_filter"
+        ? "blocked by the provider's content filter"
+        : "provider may ignore forced tool_choice";
   const detail =
     reason === "empty"
-      ? "model returned no tool call and no content (provider may ignore forced tool_choice)"
+      ? `model returned no tool call and no content (${hint})`
       : "model did not honor tool_choice and content is not parseable tool-call JSON";
-  console.error(`⚠ ${op}: ${detail} — this batch is empty`);
+  console.error(`⚠ ${op}: ${detail} [finish_reason=${finishReason || "null"}] — this batch is empty`);
 }

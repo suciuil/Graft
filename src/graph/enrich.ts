@@ -29,6 +29,13 @@ const MAX_CRUX_LINES = 12;
 /** Files summarized at once. Each is an independent LLM call; order is preserved. */
 const DEFAULT_CONCURRENCY = 5;
 
+/**
+ * Targets per crux call. Each entry costs ~60 output tokens, so a 180-symbol file
+ * overruns the 8192-token cap; some gateways then drop the cut-off tool call and
+ * report `finish_reason=stop` with an empty reply.
+ */
+const MAX_TARGETS_PER_CALL = 40;
+
 export interface EnrichOptions {
   /** When present, (re)compute meaning for stale/pending nodes. Absent → cache only. */
   summarizer?: CruxSummarizer;
@@ -246,9 +253,10 @@ function cruxMissMessage(summarizer: CruxSummarizer, fallback: CruxMissKind): st
 }
 
 /**
- * Describe every requested definition in a file, re-asking for any the model
- * omits (it sometimes drops entries from a batch). Returns whatever it collected
- * plus the last error, if any — partial results are kept, not discarded.
+ * Describe every requested definition in a file, in batches of at most
+ * {@link MAX_TARGETS_PER_CALL}, re-asking once per batch for any the model omits
+ * (it sometimes drops entries). Returns whatever it collected plus the last
+ * error, if any — partial results are kept, not discarded.
  */
 async function collectFileCrux(
   summarizer: CruxSummarizer,
@@ -257,16 +265,19 @@ async function collectFileCrux(
   refs: NodeRef[],
 ): Promise<{ results: Map<string, NodeCrux>; error?: string; quality?: boolean }> {
   const results = new Map<string, NodeCrux>();
-  let missing = refs;
   let error: string | undefined;
-  for (let attempt = 0; attempt < 2 && missing.length > 0; attempt++) {
-    try {
-      const list = await summarizer.describeFile({ path, source, nodes: missing });
-      for (const r of list) if (!results.has(r.id)) results.set(r.id, r);
-      missing = refs.filter((r) => !results.has(r.id));
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-      break;
+  batches: for (let start = 0; start < refs.length; start += MAX_TARGETS_PER_CALL) {
+    const batch = refs.slice(start, start + MAX_TARGETS_PER_CALL);
+    let missing = batch;
+    for (let attempt = 0; attempt < 2 && missing.length > 0; attempt++) {
+      try {
+        const list = await summarizer.describeFile({ path, source, nodes: missing });
+        for (const r of list) if (!results.has(r.id)) results.set(r.id, r);
+        missing = batch.filter((r) => !results.has(r.id));
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+        break batches;
+      }
     }
   }
   // A total miss used to return `{ results: ∅ }` with no error — enrich left

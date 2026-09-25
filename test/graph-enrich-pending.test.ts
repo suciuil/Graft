@@ -77,6 +77,26 @@ test("#172: an empty meaning reply is a failed file, not a silent all-pending su
   for (const n of nodes) assert.equal(n.summary_state, "pending");
 });
 
+test("a file with many symbols is summarized in bounded batches, not one oversized call", async () => {
+  const path = "src/big.cs";
+  const nodes = Array.from({ length: 90 }, (_, i) => node(path, `m${i}`));
+  const sizes: number[] = [];
+  // Mimics a gateway that returns nothing once the reply would overrun the output cap.
+  const capped: CruxSummarizer = {
+    async describeFile(input) {
+      sizes.push(input.nodes.length);
+      if (input.nodes.length > 40) return [];
+      return input.nodes.map((n) => ({ id: n.id, summary: `does ${n.id}`, crux_start: 0, crux_end: 0 }));
+    },
+  };
+
+  const stats = await enrichGraph(nodes, new Map(), new Map([[path, "x\ny\nz\n"]]), { summarizer: capped, concurrency: 1 });
+
+  assert.deepEqual(sizes, [40, 40, 10]);
+  assert.equal(stats.computed, 90);
+  assert.equal(stats.failedFiles, 0);
+});
+
 test("#172: empty summaries must not be cached as ready — a re-run still retries them", async () => {
   const { nodes, sources } = calcFixture();
 
