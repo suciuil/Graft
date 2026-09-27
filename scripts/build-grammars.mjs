@@ -4,7 +4,9 @@
  *
  * Graft's depth tier covers 14 languages (C#, Groovy, PL/SQL, C, C++, CSS, HTML,
  * Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
- * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`. Those
+ * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`, plus a
+ * newer Kotlin grammar (`tree-sitter-kotlin-local`) that takes over from the registry
+ * one when built. Those
  * are working copies on this machine, not registry packages, and nothing used to
  * rebuild them: editing a grammar left graft parsing with the previously compiled
  * `.node` until someone remembered to run prebuildify by hand.

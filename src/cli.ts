@@ -587,9 +587,18 @@ program
         throw err;
       });
       process.stderr.write("\n");
-      console.log(
-        `✓ concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
-      );
+      if (c.failedBatches > 0 || c.skippedBatches > 0) {
+        // Not a ✓: the node set was not written (see buildContext), so "0 nodes"
+        // would read as if the concept map had been emptied.
+        console.log(
+          `✗ concepts: synthesis incomplete (${c.batches - c.failedBatches - c.skippedBatches}/${c.batches} batches) — ` +
+            `existing concept nodes kept; ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
+        );
+      } else {
+        console.log(
+          `✓ concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
+        );
+      }
       for (const e of c.errors) console.error(`✗ ${e}`);
       conceptErrors = c.errors;
       conceptFatal = c.fatal;

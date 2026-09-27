@@ -17,6 +17,8 @@
  * those files. Quota/auth stay immediately terminal (#127).
  */
 
+import { isRelayBalanceError } from "./llm/balance-retry.js";
+
 /** Consecutive failures that end a pass. One flaky file is normal; five in a row is
  * a provider that is not going to start working, and each further call is spend
  * with no chance of a result. */
@@ -30,6 +32,13 @@ export const MAX_CONSECUTIVE_FAILURES = 5;
  */
 export function terminalReason(message: string): string | null {
   const m = message.toLowerCase();
+  // Checked before the 403 rule: a relay says "403 Insufficient account balance",
+  // and "rejected the API key" would send the user after the wrong fix. By the time
+  // it reaches the gate the transport has already backed off and waited
+  // GRAFT_BALANCE_WAIT_MS for a refill.
+  if (isRelayBalanceError(message)) {
+    return "the relay still reports insufficient account balance after backing off and waiting for a refill (GRAFT_BALANCE_WAIT_MS)";
+  }
   if (/quota|insufficient[_ ]funds|insufficient[_ ]quota|billing|payment required|402/.test(m)) {
     return "the provider reports the quota/credit for this key is exhausted";
   }
@@ -55,6 +64,9 @@ export class LlmFailureGate {
   fatal?: string;
   private consecutive = 0;
 
+  /** @param unit What one recorded failure is, for the messages ("file", "batch"). */
+  constructor(private unit = "file") {}
+
   /** True once the pass should stop issuing calls. */
   get stopped(): boolean {
     return this.fatal !== undefined;
@@ -69,13 +81,13 @@ export class LlmFailureGate {
     this.failed++;
     const terminal = terminalReason(message);
     if (terminal) {
-      this.fatal = `${terminal} — stopped after ${this.failed} failed file(s). First error: ${message}`;
+      this.fatal = `${terminal} — stopped after ${this.failed} failed ${this.unit}(s). First error: ${message}`;
       return;
     }
     if (opts?.quality) return;
     this.consecutive++;
     if (this.consecutive >= MAX_CONSECUTIVE_FAILURES) {
-      this.fatal = `${this.consecutive} files in a row failed, so the pass stopped rather than keep calling. Last error: ${message}`;
+      this.fatal = `${this.consecutive} ${this.unit === "batch" ? "batches" : `${this.unit}s`} in a row failed, so the pass stopped rather than keep calling. Last error: ${message}`;
     }
   }
 

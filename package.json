@@ -91,6 +91,7 @@
     "tree-sitter-groovy": "file:../tree-sitter-groovy",
     "tree-sitter-html": "file:../tree-sitter-html",
     "tree-sitter-json": "file:../tree-sitter-json",
+    "tree-sitter-kotlin-local": "file:../tree-sitter-kotlin",
     "tree-sitter-plsql": "file:../tree-sitter-plsql",
     "tree-sitter-razor": "file:../tree-sitter-razor",
     "tree-sitter-scss": "file:../tree-sitter-scss"

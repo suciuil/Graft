@@ -203,7 +203,10 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
 - **Full-fidelity** — hand-written extractors with scope-aware, cross-file call
   and import resolution:
   **TypeScript / JavaScript** (incl. JSX & TSX), **Python**, **Go**, **Java**,
-  **Kotlin**, **PHP**, **Swift** (classes, structs, enums, actors, protocols;
+  **Kotlin** (`.kt`/`.kts` — classes, interfaces, enum/annotation classes,
+  objects and companions, secondary constructors, typealiases, top-level
+  `val`/`var`; parsed with a locally built `tree-sitter-kotlin` when present,
+  else the registry grammar), **PHP**, **Swift** (classes, structs, enums, actors, protocols;
   extension members attach to the extended type), **R** (`.R`/`.r` — plain
   functions, S3/S4/R6 classes and methods, roxygen `@export`,
   `library()`/`source()` imports).
@@ -212,6 +215,12 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
   call edges via a generic tree-sitter extractor, one grammar per language:
   **Rust, C, C++, C#, Ruby, Scala, Elixir, Solidity,
   OCaml, Zig, Dart, Clojure, Nix, Lua**.
+
+- **Structural only** — **XML** (`.xml`, `.config`, `.csproj`/`.vbproj`/`.fsproj`,
+  `.props`, `.targets`, `.nuspec`, `.resx`, `.xaml`): config entries, MSBuild
+  items and container sections become queryable element nodes. It has no meaning
+  tier: `graft build --deep` never sends XML to the LLM. Needs the optional
+  `tree-sitter-xml` grammar built (`npm run build:grammars`).
 
 - **Compiler-grade edges (opt-in)** — `graft build --lsp` adds precise
   `lsp_resolved` call edges (member calls the static pass can't type) when a

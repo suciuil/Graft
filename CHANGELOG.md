@@ -4,6 +4,34 @@
 
 ### Added
 
+- **`graft build --deep` pauses through an empty relay balance instead of
+  failing.** On a `403 Insufficient account balance` from any relay, once the
+  short balance backoff is spent, one rejected call is re-sent on a shared poll
+  (every 30s, `GRAFT_BALANCE_POLL_MS`) while every other LLM call waits on it;
+  all resume the moment the relay accepts a call again, for up to 30 min
+  (`GRAFT_BALANCE_WAIT_MS`, `0` disables). A pass that has already waited the
+  full limit does not wait again until a call goes through.
+- **Synthesis batches fail one at a time.** A failing concept-synthesis batch is
+  caught and reported instead of aborting the build; every successful batch is
+  checkpointed to the cache, so a re-run only pays for the missing ones, and an
+  incomplete synthesis leaves the concept nodes on disk untouched.
+- **Relay balance errors are retried with backoff** (2s doubling, capped at 60s,
+  `GRAFT_LLM_RETRIES` attempts) and, once exhausted, reported as an exhausted
+  relay balance rather than "the provider rejected the API key". They no longer
+  trigger (and disable) the provider wire-format fallback.
+- **Kotlin parses with the locally built `tree-sitter-kotlin` (0.4) when present.**
+  Declared as the optional `tree-sitter-kotlin-local` (`file:../tree-sitter-kotlin`),
+  built by `npm run build:grammars` and vendored like the other native grammars;
+  without it the registry grammar (0.3.8) is the fallback, so `.kt`/`.kts` are
+  indexed either way. The registry grammar collapsed common class headers — a
+  primary constructor plus a `: Base(…)` clause, a secondary constructor
+  delegating to `this(…)` — into ERROR nodes and lost every member inside them.
+- **`graft build --deep` covers `.kts`** in the concept map. Gradle build scripts
+  and Kotlin scripts already got per-symbol summaries, but were not in the
+  concept pass's extension list.
+- **XML is structural only.** Its element nodes carry `summary_state: "none"`:
+  `--deep` never spends an LLM call on a config entry or MSBuild item, and
+  `graft check` does not report them as pending.
 - **Every MCP tool accepts a `model` argument** — the equivalent of the CLI's
   `--agent-model`, for the surface that has no flags. Over MCP nothing else can
   name the model: no flag can be passed and no transcript is stamped, so a Kilo
@@ -37,6 +65,13 @@
 
 ### Fixed
 
+- **Kotlin heritage edges.** A superclass (`: Base(1)`), a delegated interface
+  (`: Runnable by impl`) and a qualified supertype (`: com.acme.Base()`) all
+  produced no `extends` edge — only a bare interface name did.
+- **One-line Kotlin objects.** `object Keys { const val A = "a" }` and `data object
+  Idle { … }` are misparsed by tree-sitter-kotlin 0.4 as an infix call; they are
+  recovered as the object they are, with their members owned by it rather than
+  leaking out as top-level functions.
 - **Concurrent MCP tool calls no longer read each other's model.** The facts a
   savings report needs — the model the agent named, the rate, the per-model
   table, the claimed-token counter — were module-level slots, which is correct

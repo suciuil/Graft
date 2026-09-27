@@ -10,6 +10,8 @@
  *     old text as a hint but mark it "stale". Recomputed only if an LLM is given.
  *   - pending    — new or never-summarized node → one LLM call when an LLM is
  *     given, otherwise left "pending".
+ *   - none       — a node extraction marked as having no meaning tier (XML) →
+ *     skipped outright: no call, not counted in any of the stats below.
  *
  * Passing no summarizer runs the cache/stale bookkeeping alone (no calls, no
  * cost) — which is what a plain `graph` build does, so it never wipes the
@@ -98,6 +100,10 @@ export async function enrichGraph(
   const dirty: NodeV1[] = [];
 
   for (const node of nodes) {
+    // No meaning tier by design (a structural-only language such as XML): never an
+    // LLM call, never counted as pending/stale — and a summary a pre-"none" graph
+    // carried for it is not revived.
+    if (node.summary_state === "none") continue;
     const was = prior.get(node.id);
     if (was?.summary_state === "ready" && was.body_hash === node.body_hash) {
       node.summary = was.summary;
