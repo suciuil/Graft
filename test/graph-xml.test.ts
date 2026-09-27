@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { buildGraph } from "../src/graph/build.js";
 import { readGraph, wiringPath } from "../src/graph/write.js";
 import { grammarAvailable } from "../src/graph/extract.js";
+import { checkGraph } from "../src/graph/check.js";
+import type { CruxSummarizer } from "../src/ai/crux.js";
 import type { GraphV1, NodeV1 } from "../src/graph/types.js";
 
 const skip = grammarAvailable("xml") ? false : "tree-sitter-xml grammar not built";
@@ -104,6 +106,38 @@ test("XAML: elements keyed by namespaced x:Name/x:Key, labelled xaml", { skip },
   assert.equal(nodeById(graph, "MainWindow.xaml#Window.Grid")?.kind, "element");
   assert.equal(nodeById(graph, "MainWindow.xaml#Window.Grid.okButton")?.kind, "element");
   assert.equal(nodeById(graph, "MainWindow.xaml#Window.Grid.title")?.kind, "element");
+});
+
+test("XML is structural only: --deep never summarizes it and check does not count it pending", { skip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-xml-deep-"));
+  try {
+    writeFileSync(join(dir, "Web.config"), WEB_CONFIG);
+    writeFileSync(join(dir, "app.py"), "def run():\n    return 1\n");
+    const asked: string[] = [];
+    const summarizer: CruxSummarizer = {
+      async describeFile(input) {
+        asked.push(input.path);
+        return input.nodes.map((n) => ({ id: n.id, summary: `does ${n.id}`, crux_start: 0, crux_end: 0 }));
+      },
+    };
+    const r = await buildGraph(dir, { summarizer, concurrency: 1 });
+    assert.deepEqual(asked, ["app.py"], "only the code file reaches the LLM");
+    assert.equal(r.meaning.pending, 0, "XML nodes are not pending");
+
+    const graph = readGraph(wiringPath(join(dir, "graft")))!;
+    const xml = graph.nodes.filter((n) => n.path === "Web.config");
+    assert.ok(xml.length > 1, "XML is still indexed structurally");
+    for (const n of xml) {
+      assert.equal(n.summary_state, "none", `${n.id} has no meaning tier`);
+      assert.equal(n.summary, null);
+    }
+    assert.equal(nodeById(graph, "app.py#run")?.summary_state, "ready");
+
+    const check = await checkGraph(dir);
+    assert.ok(!check.pendingIds.some((id) => id.startsWith("Web.config")), "check never asks to summarize XML");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("XML: Web.config / App.config / packages.config are all indexed as xml", { skip }, async () => {

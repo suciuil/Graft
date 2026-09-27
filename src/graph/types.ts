@@ -50,8 +50,11 @@ export type Kind =
  * values as stronger. */
 export type Confidence = "lsp_resolved" | "lsp_dispatch" | "extracted" | "inferred";
 
-/** Whether the LLM meaning-layer has been computed for a node. */
-export type SummaryState = "pending" | "ready" | "stale";
+/** Whether the LLM meaning-layer has been computed for a node. `"none"` marks a
+ * node that has no meaning tier BY DESIGN — its language is indexed structurally
+ * only (XML: config entries, MSBuild items), so `--deep` never sends it to the LLM
+ * and it is never reported as pending. */
+export type SummaryState = "pending" | "ready" | "stale" | "none";
 
 /** The LLM-chosen business-logic excerpt. `code` is the source of truth; `span`
  * is a best-effort pointer that may drift and is never used to re-slice. */

@@ -39,10 +39,13 @@ import {
   type SourceRef,
 } from "./node-file.js";
 
-/** Extensions treated as source code. */
+/** Extensions treated as source code — the files the `--deep` concept pass
+ * summarizes. Kotlin includes `.kts` (Gradle build scripts, Kotlin scripts): the
+ * depth tier already indexes them, so leaving them out here gave their symbols
+ * per-symbol summaries but no place in the concept map. */
 export const CODE_EXTENSIONS = [
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".kt", ".scala",
+  ".py", ".go", ".rs", ".java", ".kt", ".kts", ".scala",
   ".rb", ".php", ".c", ".h", ".cpp", ".hpp", ".cc",
   ".cs", ".swift", ".sql", ".sh", ".proto",
 ];
@@ -88,7 +91,12 @@ export interface BuildResult {
    * up — reported as data so the CLI can exit non-zero without reading messages (#127). */
   failedFiles: number;
   skippedFiles: number;
-  /** Why the summarize phase stopped early, when it did. */
+  /** Synthesis batches whose call failed, and batches never attempted once the
+   * synthesis pass gave up. Either one non-zero means the concept nodes on disk
+   * were left as they were (a partial set would delete the missing concepts). */
+  failedBatches: number;
+  skippedBatches: number;
+  /** Why the concept pass (summaries, then synthesis) stopped early, when it did. */
   fatal?: string;
 }
 
@@ -178,6 +186,8 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     errors: [],
     failedFiles: 0,
     skippedFiles: 0,
+    failedBatches: 0,
+    skippedBatches: 0,
   };
 
   // Phase 1: summarize each file, concurrent, content-hash cached.
@@ -246,24 +256,56 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
   result.batches = batches.length;
 
   const synthNodes: SynthNode[] = [];
+  // Each batch is its own unit of failure: one provider error (a relay's
+  // "403 Insufficient account balance" after its backoff ran out) used to throw
+  // out of this loop and abort the whole build. Now it is recorded, the batches
+  // already done stay cached, and a shared-style gate stops issuing calls once the
+  // provider has clearly stopped serving (quota/auth, or 5 failures in a row).
+  const synthGate = new LlmFailureGate("batch");
   for (let b = 0; b < batches.length; b++) {
+    const label = `synthesis batch ${b + 1}/${batches.length}`;
     opts.onProgress?.({ phase: "synthesize", index: b, total: batches.length, file: `batch ${b + 1}` });
     const key = batchKey(batches[b], hashByPath);
-    let nodes = cache.synth[key];
+    const hit = cache.synth[key];
     // An empty array is a miss, not a hit: caching [] made a silent empty
     // synthesis permanent, the same trap #177 closed for the meaning pass (#129).
-    const cached = Array.isArray(nodes) && nodes.length > 0;
-    if (!cached) {
-      nodes = await opts.synthesizer.synthesize(batches[b]);
-      if (nodes.length > 0) cache.synth[key] = nodes;
-      else delete cache.synth[key];
+    const cached = Array.isArray(hit) && hit.length > 0;
+    let nodes: SynthNode[];
+    if (cached) {
+      // Served even after the gate closes: a cache hit costs nothing.
+      nodes = hit;
+    } else if (synthGate.stopped) {
+      synthGate.skip();
+      console.error(`  ${label}: not attempted (the synthesis pass stopped)`);
+      continue;
+    } else {
+      try {
+        nodes = await opts.synthesizer.synthesize(batches[b]);
+      } catch (err) {
+        const message = errMsg(err);
+        result.errors.push(`${label}: ${message}`);
+        synthGate.record(message);
+        console.error(`  ${label}: failed — ${message}`);
+        continue;
+      }
+      synthGate.succeeded();
+      if (nodes.length > 0) {
+        cache.synth[key] = nodes;
+        // Checkpoint every successful batch, so a failure (or Ctrl-C) on a later
+        // one never costs the batches already paid for: the re-run serves them
+        // from cache. Stale keys are pruned after the loop, so an intermediate
+        // save carrying them is harmless.
+        saveCache(outDir, cache);
+      } else {
+        delete cache.synth[key];
+      }
     }
     const links = nodes.reduce((n, node) => n + node.links.length, 0);
-    console.error(
-      `  synthesis batch ${b + 1}/${batches.length}: ${nodes.length} nodes, ${links} links${cached ? " (cached)" : ""}`,
-    );
+    console.error(`  ${label}: ${nodes.length} nodes, ${links} links${cached ? " (cached)" : ""}`);
     synthNodes.push(...nodes);
   }
+  result.failedBatches = synthGate.failed;
+  result.skippedBatches = synthGate.skipped;
   // Drop cache entries for batches we no longer produce, so it can't grow forever.
   // Skip empty arrays so a failed batch is retried on the next --deep, not frozen.
   cache.synth = Object.fromEntries(
@@ -274,6 +316,22 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     }),
   );
   saveCache(outDir, cache);
+
+  // An incomplete synthesis must not reach the writer: phase 5 deletes every
+  // on-disk node that is not in this run's set, so writing a partial set would
+  // wipe the concepts of the batches that failed. Leave the previous nodes and
+  // manifest untouched instead; the next --deep serves every finished batch from
+  // cache and only calls for the ones that are missing.
+  if (synthGate.failed > 0 || synthGate.skipped > 0) {
+    const done = batches.length - synthGate.failed - synthGate.skipped;
+    const incomplete =
+      `synthesis incomplete — ${done}/${batches.length} batches done ` +
+      `(${synthGate.failed} failed, ${synthGate.skipped} not attempted; finished batches are cached), ` +
+      `so the concept nodes on disk were left unchanged` +
+      (synthGate.fatal ? `. ${synthGate.fatal}` : "");
+    result.fatal = result.fatal ? `${result.fatal}; ${incomplete}` : incomplete;
+    return result;
+  }
 
   // Phase 3: merge synth nodes by slug, building a name→slug resolution table.
   const drafts = new Map<string, NodeDraft>();

@@ -8,7 +8,7 @@
 
 <p>
   <a href="https://github.com/NanoNets/Graft"><img src="https://img.shields.io/github/stars/NanoNets/Graft?style=for-the-badge&logo=github&logoColor=white&label=Star%20on%20GitHub&color=FFC83D" /></a>
-  <a href="https://graft.nanonets.ai"><img src="https://img.shields.io/badge/website-graft.nanonets.ai-546FFF?style=for-the-badge" /></a>
+  <a href="https://trailhq.com/graft"><img src="https://img.shields.io/badge/website-trailhq.com/graft-E5484D?style=for-the-badge" /></a>
   <a href="https://discord.gg/zxmKweAA29"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/@nanonets/graft"><img src="https://img.shields.io/npm/v/%40nanonets%2Fgraft?style=for-the-badge&logo=npm&logoColor=white&label=npm" /></a>
   <a href="https://www.npmjs.com/package/@nanonets/graft"><img src="https://img.shields.io/npm/dm/%40nanonets%2Fgraft?style=for-the-badge&logo=npm&logoColor=white&label=downloads" /></a>
@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/License-MIT-20C997?style=for-the-badge" />
   <a href="TELEMETRY.md"><img src="https://img.shields.io/badge/telemetry-anonymous%2C%20opt--out-546FFF?style=for-the-badge" /></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/NanoNets/Graft"><img src="https://img.shields.io/ossf-scorecard/github.com/NanoNets/Graft?style=for-the-badge&label=openssf%20scorecard" /></a>
-  <a href="https://app.trailhq.com/get-started?step=pick"><img src="https://img.shields.io/badge/Trail%20Brain-try%20it-E5484D?style=for-the-badge&logoColor=white" /></a>
+  <a href="https://app.trailhq.com/get-started?step=repo"><img src="https://img.shields.io/badge/Trail-try%20it-E5484D?style=for-the-badge&logoColor=white" /></a>
 </p>
 
 ### Up to **4× cheaper** and **3× faster**, with better or no loss of correctness.
@@ -32,12 +32,17 @@
 </div>
 
 <p align="center">
-  <b>This works beyond code too.</b><br/>
-  A living skill file that learns from every task and gets sharper the more your team works.
+  <b>Stop repeating yourself to your coding agent.</b><br/>
+  You correct it, and by the next session it has forgotten. Trail manages your CLAUDE.md and AGENTS.md so it doesn't.
 </p>
 
 <p align="center">
-  <a href="https://app.trailhq.com/get-started?step=pick"><img src="https://img.shields.io/badge/Try%20Trail%20Brain%20%E2%86%92-E5484D?style=for-the-badge" alt="Try Trail Brain" height="34"/></a>
+  &bull;&nbsp; Every correction you make becomes a rule your agent keeps.<br/>
+  &bull;&nbsp; The ones that can't break get a hook that blocks it, not a note it ignores.
+</p>
+
+<p align="center">
+  <a href="https://app.trailhq.com/get-started?step=repo"><img src="https://img.shields.io/badge/Try%20it%20on%20your%20repo%20%E2%86%92-E5484D?style=for-the-badge" alt="Try it on your repo" height="34"/></a>
 </p>
 
 <p align="center">
@@ -203,7 +208,10 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
 - **Full-fidelity** — hand-written extractors with scope-aware, cross-file call
   and import resolution:
   **TypeScript / JavaScript** (incl. JSX & TSX), **Python**, **Go**, **Java**,
-  **Kotlin**, **PHP**, **Swift** (classes, structs, enums, actors, protocols;
+  **Kotlin** (`.kt`/`.kts` — classes, interfaces, enum/annotation classes,
+  objects and companions, secondary constructors, typealiases, top-level
+  `val`/`var`; parsed with a locally built `tree-sitter-kotlin` when present,
+  else the registry grammar), **PHP**, **Swift** (classes, structs, enums, actors, protocols;
   extension members attach to the extended type), **R** (`.R`/`.r` — plain
   functions, S3/S4/R6 classes and methods, roxygen `@export`,
   `library()`/`source()` imports).
@@ -212,6 +220,12 @@ compiler-grade layer — all `$0` and deterministic (no model, no key):
   call edges via a generic tree-sitter extractor, one grammar per language:
   **Rust, C, C++, C#, Ruby, Scala, Elixir, Solidity,
   OCaml, Zig, Dart, Clojure, Nix, Lua**.
+
+- **Structural only** — **XML** (`.xml`, `.config`, `.csproj`/`.vbproj`/`.fsproj`,
+  `.props`, `.targets`, `.nuspec`, `.resx`, `.xaml`): config entries, MSBuild
+  items and container sections become queryable element nodes. It has no meaning
+  tier: `graft build --deep` never sends XML to the LLM. Needs the optional
+  `tree-sitter-xml` grammar built (`npm run build:grammars`).
 
 - **Compiler-grade edges (opt-in)** — `graft build --lsp` adds precise
   `lsp_resolved` call edges (member calls the static pass can't type) when a

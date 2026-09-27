@@ -76,6 +76,13 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   scss: { pkg: "tree-sitter-scss" },
   // Monorepo grammar exporting { csv, psv, tsv } — pick CSV.
   csv: { pkg: "tree-sitter-csv", prop: "csv" },
+  // Kotlin is a CORE language (the registry `tree-sitter-kotlin` is always imported),
+  // but a locally-built grammar, when present, is newer and parses more real Kotlin
+  // (e.g. `receiver_type`, destructuring, guard conditions, multi-dollar strings), so
+  // {@link grammarFor} prefers it. The dependency key differs from the package's own
+  // name (`tree-sitter-kotlin`) so the two can be installed side by side; without the
+  // local build the registry grammar is the fallback and Kotlin stays fully indexed.
+  kotlin: { pkg: "tree-sitter-kotlin-local" },
 };
 
 const require = createRequire(import.meta.url);
@@ -159,8 +166,9 @@ function pickGrammar(mod: unknown, prop?: string): unknown | null {
 }
 
 /** Whether an optional depth-tier grammar (`c_sharp`, `groovy`, `plsql`, `css`,
- * `html`, `razor`) is installed and loads. Synchronous; drives the per-language
- * test skips and the extension-claiming below. */
+ * `html`, `razor`, …, and the locally-built `kotlin`) is installed and loads.
+ * Synchronous; drives the per-language test skips and the extension-claiming below.
+ * For Kotlin it only reports the local grammar — `.kt`/`.kts` are claimed either way. */
 export function grammarAvailable(key: string): boolean {
   return loadOptionalGrammar(key) !== null;
 }
@@ -682,11 +690,23 @@ const CORE_GRAMMARS: Partial<Record<Language, unknown>> = {
   php: PHP.php,
 };
 
-/** The tree-sitter grammar for a language: a statically-imported core grammar,
- * or an optional native grammar loaded on demand. Null when an optional
- * grammar's binding isn't built — the caller then degrades to a file-only node. */
+/** The tree-sitter grammar for a language: an optional native grammar loaded on
+ * demand when one is registered and built, else the statically-imported core
+ * grammar. The optional grammar wins when a language has both (Kotlin: a locally
+ * built grammar over the registry one), so building it upgrades the parser without
+ * removing the fallback. Null when an optional-only grammar's binding isn't built —
+ * the caller then degrades to a file-only node. */
 function grammarFor(lang: Language): unknown | null {
-  return CORE_GRAMMARS[lang] ?? loadOptionalGrammar(lang);
+  return loadOptionalGrammar(lang) ?? CORE_GRAMMARS[lang] ?? null;
+}
+
+/** Where a language's grammar comes from right now: `"optional"` for a locally
+ * built native grammar (see {@link OPTIONAL_GRAMMAR_PKG}), `"core"` for a
+ * statically-imported registry grammar, or null when neither is available. Lets
+ * tests and diagnostics tell which Kotlin grammar is really parsing. */
+export function grammarSourceOf(lang: Language): "optional" | "core" | null {
+  if (loadOptionalGrammar(lang)) return "optional";
+  return CORE_GRAMMARS[lang] ? "core" : null;
 }
 
 export interface WalkCtx {
@@ -766,7 +786,7 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   // for Razor (embedded C# is opaque here), a file node only.
   if (lang === "css") return extractCss(rel, source, root);
   if (lang === "html") return extractHtml(rel, source, root);
-  if (lang === "xml") return extractXml(rel, source, root);
+  if (lang === "xml") return structuralOnly(extractXml(rel, source, root));
   if (lang === "json") return extractJson(rel, source, root);
   if (lang === "yaml") return extractYaml(rel, source, root);
   if (lang === "markdown") return extractMarkdown(rel, source, root);
@@ -2281,6 +2301,15 @@ function describeKotlin(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | 
     return { name, kind: "class", headerEnd: headEnd("class_body"), hashNode: node };
   }
 
+  // A one-line `object Name { … }` that the grammar misparsed as an infix call (see
+  // kotlinMisparsedObjectName). It is still the singleton object: its lambda body
+  // holds the members, which the walk then promotes to methods owned by `Name`.
+  if (node.type === "infix_expression") {
+    const name = kotlinMisparsedObjectName(node);
+    if (!name) return null;
+    return { name, kind: "class", headerEnd: node.namedChildren[2]!.startIndex, hashNode: node };
+  }
+
   if (node.type === "function_declaration") {
     const name = funcName();
     if (!name) return null;
@@ -2317,6 +2346,28 @@ function describeKotlin(node: Parser.SyntaxNode, ctx: WalkCtx): DefDescriptor | 
   }
 
   return null;
+}
+
+/**
+ * tree-sitter-kotlin 0.4.x parses a statement-level object declaration whose body
+ * sits on the same line — `object Keys { const val A = "a" }`, `data object Idle {
+ * … }` — as `infix_expression(object_literal, simple_identifier, lambda_literal)`:
+ * an infix call of `Keys` on a bodiless object literal. The multi-line form, one
+ * with modifiers or supertypes, and nested/companion objects all parse as a real
+ * `object_declaration`. Left alone, the object vanishes from the graph and its
+ * members surface as top-level functions.
+ *
+ * Bound: an `object_literal` with NO named children (no supertypes, no body) is not
+ * valid Kotlin on its own — an object expression always has a `{…}` body — so this
+ * exact three-child shape can only be the misparse. Returns the object's name, or
+ * null for every genuine infix call (`a to b`, `x shl 2`, `foo bar { … }`).
+ */
+function kotlinMisparsedObjectName(node: Parser.SyntaxNode): string | null {
+  if (node.type !== "infix_expression" || node.namedChildren.length !== 3) return null;
+  const [lit, name, body] = node.namedChildren;
+  if (lit?.type !== "object_literal" || lit.namedChildren.length > 0) return null;
+  if (name?.type !== "simple_identifier" || body?.type !== "lambda_literal") return null;
+  return name.text;
 }
 
 /** Swift definition shapes. Like Kotlin's, tree-sitter-swift exposes no `name` or
@@ -2587,15 +2638,24 @@ function heritageEdges(node: Parser.SyntaxNode, classId: string, ctx: WalkCtx): 
     return edges;
   }
   if (ctx.lang === "kotlin") {
-    // The `:` clause is a list of `delegation_specifier`s — a superclass construction
-    // (`class A : B()`), an interface, or `by` delegation. The first `type_identifier`
-    // under each names the type; everything else (type args, delegation target) is not
-    // the heritage target, so only the head type counts.
+    // The `:` clause is a list of `delegation_specifier`s, each wrapping one of three
+    // shapes: a bare `user_type` (an interface: `: Greeter`), a `constructor_invocation`
+    // (the superclass: `: Base(1)`), or an `explicit_delegation` (`: Runnable by impl`).
+    // The supertype is that shape's `user_type`; reading only a DIRECT user_type (as
+    // this once did) dropped every superclass and every delegated interface. Within
+    // it, the LAST direct `type_identifier` is the bare name — a qualified
+    // `com.acme.Base` reduces to `Base` — and type arguments / the delegation target
+    // live in other nodes, so they never leak in.
     for (const child of node.namedChildren) {
       if (child.type !== "delegation_specifier") continue;
-      const t = child.namedChildren.find((c) => c.type === "user_type")?.namedChildren.find(
-        (c) => c.type === "type_identifier",
-      );
+      const head = child.namedChildren[0];
+      const userType =
+        head?.type === "user_type"
+          ? head
+          : head?.type === "constructor_invocation" || head?.type === "explicit_delegation"
+            ? head.namedChildren.find((c) => c.type === "user_type")
+            : undefined;
+      const t = userType?.namedChildren.filter((c) => c.type === "type_identifier").at(-1);
       if (t) edges.push({ source: classId, relation: "extends", name: t.text, file: ctx.rel });
     }
     return edges;
@@ -3373,6 +3433,14 @@ function extractXml(rel: string, source: string, root: Parser.SyntaxNode): Extra
   };
   visit(root, [], rel);
   return { nodes, rawEdges };
+}
+
+/** Mark every node of a structural-only language (XML) as having no meaning tier
+ * (`summary_state: "none"`): the `--deep` pass skips them instead of spending an
+ * LLM call per config entry, and `graft check` does not report them as pending. */
+function structuralOnly(result: ExtractResult): ExtractResult {
+  for (const n of result.nodes) n.summary_state = "none";
+  return result;
 }
 
 /** An XML element's symbol name: its `name`/`key`/`id`/`Include` attribute value

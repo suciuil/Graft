@@ -1,0 +1,3 @@
+# Treat pre-built native tree-sitter grammar binaries as opaque binary blobs.
+# This suppresses textual diffs, merge attempts, and line-ending conversions.
+vendor/**/*.node binary

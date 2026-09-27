@@ -15,6 +15,7 @@ import { ChatSynthesizer, type Synthesizer } from "./ai/synthesize.js";
 import { ChatSummarizer, type Summarizer } from "./ai/summarize.js";
 import { ChatCruxSummarizer, type CruxSummarizer } from "./ai/crux.js";
 import { createChatModel } from "./ai/llm/factory.js";
+import { BalanceRetryChatModel, BalanceWaiter, relayName } from "./ai/llm/balance-retry.js";
 import type { ChatModel } from "./ai/llm/types.js";
 import { buildContext, CODE_EXTENSIONS, type BuildProgress, type BuildResult } from "./context/build.js";
 import { checkContext, type CheckResult } from "./context/check.js";
@@ -128,16 +129,24 @@ export class Graft {
           "for your provider) to build or summarize the graph.",
       );
     }
-    this._chatModel = createChatModel({
-      provider: this.cfg.provider,
-      apiKey: this.cfg.apiKey,
-      model: this.cfg.model,
-      modelFallbacks: this.cfg.modelFallbacks,
-      baseUrl: this.cfg.baseUrl,
-      headers: this.cfg.headers,
-      providerFallback: this.cfg.providerFallback,
-      bearerAuth: this.cfg.bearerAuth,
-    });
+    // A relay's "insufficient balance" 403 is temporary (a top-up or grant refills
+    // it) and the SDKs never retry a 403, so every LLM pass of the build gets a
+    // short backoff here, then a shared wait that re-sends one rejected call per
+    // poll interval and resumes every call as soon as tokens are back.
+    const waiter = new BalanceWaiter({ name: relayName(this.cfg.baseUrl) });
+    this._chatModel = new BalanceRetryChatModel(
+      createChatModel({
+        provider: this.cfg.provider,
+        apiKey: this.cfg.apiKey,
+        model: this.cfg.model,
+        modelFallbacks: this.cfg.modelFallbacks,
+        baseUrl: this.cfg.baseUrl,
+        headers: this.cfg.headers,
+        providerFallback: this.cfg.providerFallback,
+        bearerAuth: this.cfg.bearerAuth,
+      }),
+      { waiter },
+    );
     return this._chatModel;
   }
 
