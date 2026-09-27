@@ -22,6 +22,7 @@ import { OpenAIChatModel, isModelNotFound } from "./openai.js";
 import { AnthropicChatModel } from "./anthropic.js";
 import { LiteLLMChatModel } from "./litellm.js";
 import { OrcaRouterChatModel } from "./orcarouter.js";
+import { isRelayBalanceError } from "./balance-retry.js";
 
 export type ProviderKind = "openai" | "anthropic" | "litellm" | "orcarouter" | "llm-incubator";
 
@@ -42,10 +43,16 @@ export interface ChatModelConfig {
   bearerAuth?: boolean;
 }
 
-/** Rejections that say "wrong wire format / endpoint", not "bad request" or "unknown model". */
+/** Rejections that say "wrong wire format / endpoint", not "bad request" or "unknown model".
+ * A relay's `403 Insufficient account balance` is neither: the endpoint understood
+ * the request, so it must not burn (and then permanently disable) the fallback. */
 function isWireRejection(err: unknown): boolean {
   const status = (err as { status?: unknown })?.status;
-  return (status === 401 || status === 403 || status === 404 || status === 405) && !isModelNotFound(err);
+  return (
+    (status === 401 || status === 403 || status === 404 || status === 405) &&
+    !isModelNotFound(err) &&
+    !isRelayBalanceError(err)
+  );
 }
 
 /**

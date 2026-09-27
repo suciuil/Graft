@@ -38,44 +38,66 @@ if (!existsSync(extractPath)) {
   process.exit(0);
 }
 
-const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-const { optionalGrammarPackages } = await import(pathToFileURL(extractPath).href);
+try {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const { optionalGrammarPackages } = await import(pathToFileURL(extractPath).href);
 
-const included = [];
-const missing = [];
-for (const [key, pkgName] of Object.entries(optionalGrammarPackages())) {
-  const spec = pkg.optionalDependencies?.[pkgName];
-  const destDir = join(vendorDir, key, "prebuilds", PLATFORM);
-  if (typeof spec !== "string" || !spec.startsWith("file:")) {
-    missing.push(`${key} (${pkgName}): not declared as a local optionalDependency`);
-    continue;
+  const included = [];
+  const kept = [];
+  const missing = [];
+  for (const [key, pkgName] of Object.entries(optionalGrammarPackages())) {
+    const spec = pkg.optionalDependencies?.[pkgName];
+    const destDir = join(vendorDir, key, "prebuilds", PLATFORM);
+    // A copy staged by an earlier build is left alone when the sibling repo is gone:
+    // it is still a working grammar, and deleting it would lose the language for nothing.
+    const hasStaged = () => {
+      try {
+        return readdirSync(destDir).some((f) => f.endsWith(".node"));
+      } catch {
+        return false;
+      }
+    };
+    if (typeof spec !== "string" || !spec.startsWith("file:")) {
+      missing.push(`${key} (${pkgName}): not declared as a local optionalDependency`);
+      continue;
+    }
+    const repoDir = resolve(repoRoot, spec.slice("file:".length));
+    const srcDir = join(repoDir, "prebuilds", PLATFORM);
+    let file;
+    try {
+      file = readdirSync(srcDir).find((f) => f.endsWith(".node") && !f.includes(".superseded-"));
+    } catch {
+      file = undefined;
+    }
+    if (!file) {
+      const why = existsSync(repoDir) ? `no prebuilds/${PLATFORM}/*.node in ${repoDir}` : `${repoDir} not present`;
+      if (hasStaged()) kept.push(`${key} (${pkgName}): ${why} — keeping the copy staged earlier`);
+      else missing.push(`${key} (${pkgName}): ${why}`);
+      continue;
+    }
+    // Replaced wholesale: a rename upstream would otherwise leave two .node files here,
+    // and the loader takes the first one it finds.
+    rmSync(join(vendorDir, key), { recursive: true, force: true });
+    mkdirSync(destDir, { recursive: true });
+    cpSync(join(srcDir, file), join(destDir, file));
+    included.push(key);
   }
-  const srcDir = join(resolve(repoRoot, spec.slice("file:".length)), "prebuilds", PLATFORM);
-  let file;
-  try {
-    file = readdirSync(srcDir).find((f) => f.endsWith(".node") && !f.includes(".superseded-"));
-  } catch {
-    file = undefined;
-  }
-  if (!file) {
-    missing.push(`${key} (${pkgName}): no prebuilds/${PLATFORM}/*.node`);
-    continue;
-  }
-  // Replaced wholesale: a rename upstream would otherwise leave two .node files here,
-  // and the loader takes the first one it finds.
-  rmSync(join(vendorDir, key), { recursive: true, force: true });
-  mkdirSync(destDir, { recursive: true });
-  cpSync(join(srcDir, file), join(destDir, file));
-  included.push(key);
-}
 
-const mb = included.length === 0 ? 0 : included.reduce((n, key) => {
-  const dir = join(vendorDir, key, "prebuilds", PLATFORM);
-  return n + readdirSync(dir).reduce((s, f) => s + statSync(join(dir, f)).size, 0);
-}, 0) / 1024 / 1024;
+  const mb = included.length === 0 ? 0 : included.reduce((n, key) => {
+    const dir = join(vendorDir, key, "prebuilds", PLATFORM);
+    return n + readdirSync(dir).reduce((s, f) => s + statSync(join(dir, f)).size, 0);
+  }, 0) / 1024 / 1024;
 
-console.log(`  vendor: ${included.length} grammars staged for ${PLATFORM} (${mb.toFixed(1)} MB)`);
-if (missing.length > 0) {
-  console.log(`  vendor: ${missing.length} unavailable (their languages stay unclaimed):`);
-  for (const m of missing) console.log(`    ${m}`);
+  console.log(`  vendor: ${included.length} grammars staged for ${PLATFORM} (${mb.toFixed(1)} MB)`);
+  if (kept.length > 0) {
+    console.log(`  vendor: ${kept.length} kept from an earlier build:`);
+    for (const k of kept) console.log(`    ${k}`);
+  }
+  if (missing.length > 0) {
+    console.warn(`⚠ vendor: ${missing.length} grammar(s) unavailable — their languages stay unclaimed (warning only):`);
+    for (const m of missing) console.warn(`    ${m}`);
+  }
+} catch (err) {
+  // Staging is a convenience for the published package; it must never fail a build.
+  console.warn(`⚠ vendor: grammar staging skipped (${err.message})`);
 }
