@@ -111,6 +111,7 @@
   instructions are approximate. The hint now appears only on the CLI. Hosts with
   a per-model table are told to relay that instead, and are no longer told both
   "reproduce the table" and "report the tokens alone" in the same breath.
+
 ## 0.19.0
 
 ### Added
@@ -129,6 +130,7 @@
   works, and the digest finishes sending before the child disconnects.
 - **Public reads borrow an installation token** instead of falling back to the
   anonymous rate limit.
+
 ## 0.18.0
 
 ### Added
