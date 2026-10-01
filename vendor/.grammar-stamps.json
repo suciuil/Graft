@@ -1,4 +1,159 @@
 {
-  "@tree-sitter-grammars/tree-sitter-xml": "d4d125647771cc34959ec36cc98c26d25df0498623f5febf5394900abcc3448b",
-  "tree-sitter-kotlin": "35ed41725cbd93f8c52016d44d2221fd5bd4219e9f1e2a3c9994023439e6a616"
+  "@tree-sitter-grammars/tree-sitter-xml": {
+    "build": "87722f686b5d88ae595b32ffdc8e6575bb8455fb76a066c5d0a707aa5988e568",
+    "gen": {
+      "dtd": {
+        "in": "f5bb27c6bb7b4ea4512175c60206474bd1ada5021773aa3535070e581d3bcaa1",
+        "parser": "d28717c4c74af4a3a095dfc9e4c697d2393f8f8e4dec77a87d59696a18e9efa4"
+      },
+      "xml": {
+        "in": "e48cb7bbfc7dcc018407395d0ee6e036c4fa69db53d55346fbfbff0ab574daf7",
+        "parser": "e00f74ae7edcfc5e0cf9dc551a41a02e88a86dad9d6d13820e292bde794cdd94"
+      }
+    },
+    "pack": "97bfa7cd9813924acaea9b9f24a73cd2821982547a8ff86b6aee4f71233cb5e4"
+  },
+  "tree-sitter-kotlin": "35ed41725cbd93f8c52016d44d2221fd5bd4219e9f1e2a3c9994023439e6a616",
+  "@tree-sitter-grammars/tree-sitter-markdown": {
+    "gen": {
+      "tree-sitter-markdown": {
+        "in": "495d39450f133faaa4ca20116233b30768647cf54ac0aabdceb5fabde7752629",
+        "parser": "efa1306e954881e7e3cf18ff37f55f7379d0c67b21bcc28e1b0ab50f32e30414"
+      },
+      "tree-sitter-markdown-inline": {
+        "in": "5470ff9240db87f3f001adb5bb592def28e4d84e6d2893bd78d432afa77ee5fb",
+        "parser": "fe627b898f143981a0249776957cc4b01ba94ae5d43857a2ac854db06006e499"
+      }
+    },
+    "build": "4935acbe519ca872a28ce1916f50bbad97dc48cfc25332a51f4f5abf5b755fb1",
+    "pack": "f549f471231b4b590aeb10fc05d135ee93769e80e767dc0b534460a165a60afa"
+  },
+  "@tree-sitter-grammars/tree-sitter-yaml": {
+    "gen": {
+      ".": {
+        "in": "84aa140dfac83da727d76b5b11aabd5189aa3881b89f191863fb72769f81e3c1",
+        "parser": "8a3baaab33fb63cf9a89f97ec61dbb3ab0d4ef69be9f0f229092c79d129617c9"
+      }
+    },
+    "build": "52c97adcd80183d2a590cac584a1d1a3c85cdb52fd48b937f2187f6cd1cd51b5",
+    "pack": "0c75876b799ef2973169a59a7fa7d39f695bb49f8529e4846bb1d94125d50285"
+  },
+  "tree-sitter-c": {
+    "gen": {
+      ".": {
+        "in": "3f314a6412cf3b3e48662e8757e7d78cc4fc80c6c71e0fa25bf846f802cf89af",
+        "parser": "eb8323f5a89e71667334dee734520f54a3f48148dd02205be01d50bd3e4c745f"
+      }
+    },
+    "build": "7f5d2b875355333728e70258b1bd9a54da08cbd5a29df84efc80efa72dcc5d26",
+    "pack": "add2d6f79846306e00b5830625add17075989b4d68ab423af01d61edbe40f475"
+  },
+  "tree-sitter-c-sharp": {
+    "gen": {
+      ".": {
+        "in": "4bc3b2d87a25bcde9d11adf822eb48891528e610d64bba76bf28e94cf5b41c0c",
+        "parser": "b2f80cba115a0964e9dd6d368ac0c9a12736173f22c961431b008ade3b0efc3b"
+      }
+    },
+    "build": "a3bc790d59182b49124446f5760be42e4901cc46521c6d2eef52aa2cdc3778b6",
+    "pack": "6f96a7be1abf47c54df297036cfde82f3f89a0422598c00708f8b8c913879fa7"
+  },
+  "tree-sitter-cpp": {
+    "gen": {
+      ".": {
+        "in": "d37f13c8f02bcf37f981cc358f0df73a8fe1c1f192e60a2f87f6f49101a9033f",
+        "parser": "1bb6b473193cd383be1ad307f64f80a700587e46522ff4f62fb357840a38da44"
+      }
+    },
+    "build": "2632dc22b3bc329e929394661fa73f819453940ebf0727aec4c6abb034ef2fa8",
+    "pack": "765bd253a99158b95237985a92749e54c549d746707f7700faf0e478c6385a16"
+  },
+  "tree-sitter-css-in-js": {
+    "gen": {
+      ".": {
+        "in": "2514fa8bf292bdd02c117f5f197a3725d7b6ac7f699ef13d56d8a4bdea68042a",
+        "parser": "4fc19fe50cd0e52c45e0c7bcb1adc57a016941115824a8dee970bdf192b6c2f9"
+      }
+    },
+    "build": "dd70e529e821aa088978f58e87895d5433b87cb6779e5098636918ab224e09b3",
+    "pack": "151097e478e55e67dc66dd391e17e2d8d6b93f4bf8cfd81d50caef4fb1fe2a24"
+  },
+  "tree-sitter-csv": {
+    "gen": {
+      "csv": {
+        "in": "21548bc3dc4f842e080007c91c75ab0b6b6f3152040decaa06812141e1b56848",
+        "parser": "97775245103443ee6ad4a82cb8df8e26a626f548112a26d4be9f5de18227028b"
+      },
+      "psv": {
+        "in": "0dbb73c2f6e7321d195516193231bc5eeeca0087ebb756472612531aa1d9c5e4",
+        "parser": "f677d4bc0b462c4112ea46221975bae2b960a024a943bba65e974ee97d1f83f1"
+      },
+      "tsv": {
+        "in": "c0459f03405f5bf9e73c4f260bd111286c97ed0f9d1c9f76501a64a4aac7705c",
+        "parser": "ea8cee9b1e5de67c9ecf66f339123da71bec8ca97abd1bac924ee49492bb6cca"
+      }
+    },
+    "build": "cb1e614825541eb058199fa8831189419f0585ed62be053b5e601485534a617e",
+    "pack": "70909145e82cd12065aee705a22e525154834e4459a90effd0698914f2b1b0e9"
+  },
+  "@bootswithdefer/tree-sitter-groovy": {
+    "gen": {
+      ".": {
+        "in": "28e6a762758b71a3a9f1ededf983502f3cad2a2a5dee30b4356316dcb23d5040",
+        "parser": "bace487ec996c136382c3fb47ca3e74061ff4ba5d30ece0a319af96461d3b8a2"
+      }
+    },
+    "build": "58c46a8390dd9c1dac705387e07957d2356b6a5cb5a6812494238436b4159072",
+    "pack": "726dac5e1adb06eb7f82dd8750186bf3fe4e02f4bb683002b736f8121c3c136f"
+  },
+  "tree-sitter-html": {
+    "gen": {
+      ".": {
+        "in": "305c5de733f39d1db9b6faa4a985b845acd349049ba4cfacbd341770855ef659",
+        "parser": "65768172733b3bbe461cbdc14ea928f00fbfcc51d8ac68f0a5c72071c6a0bbf1"
+      }
+    },
+    "build": "1aaf79e991aaf602955afecf6bbd481943c1a4f4e53f50a80150dcbc92cc0909",
+    "pack": "4a867a6d679302f6deda5ec6b7236c8810eb332bf5ffaede169d239205c7327e"
+  },
+  "tree-sitter-json": {
+    "gen": {
+      ".": {
+        "in": "28fdeceb7eff8d888dad32644fe0d9a60a645327a095792391e85c65105db65e",
+        "parser": "9a266ae4a0305b8a2769bee90a14ac06914bdc83a509f16428311eac2845637e"
+      }
+    },
+    "build": "6f82afa1b16e18b6b70829ee455fd5e6357d22ebc633c1ccb98507ff9bd0afd8",
+    "pack": "564f147654497a81b77d09fec9c6247fa2dfdc86dfb38dfd3beac4411533adcc"
+  },
+  "tree-sitter-plsql": {
+    "gen": {
+      ".": {
+        "in": "2cffdb90cbd6ae186080aa10f180742e85c1aa4c3206d7d75c672b60aed8d462",
+        "parser": "e2beb971059ddb7e43d15db28fd5ecd41578bbbfeb279db4f34d64bc71ad8b51"
+      }
+    },
+    "build": "8b0aa1e702099f2ac87db51eb3de1c4b0327bca34666324af21b4b0f1e7faa15",
+    "pack": "55b9885af9195dd7d10f078cc8cb4d1d5a47eb0d4b946025790fdf064abaf953"
+  },
+  "tree-sitter-razor": {
+    "gen": {
+      ".": {
+        "in": "101239c3d941eba894eabf56330b1f5c426f4a4defe5675f04be94016cc980df",
+        "parser": "516d92a6dc3402feef2f4eb277abb5f75d321f6f3ca8b9b781f8b9af132a9836"
+      }
+    },
+    "build": "a6e26cbf20372981ee8c94955f1633231f73140d8b8ff5c924bafdfa82fbf983",
+    "pack": "bce30e3cdc9a8dcb83d5249c9c6af4809cc013c71f19abff8ea5c4eaacf6dd5c"
+  },
+  "tree-sitter-scss": {
+    "gen": {
+      ".": {
+        "in": "9986b536803b5062af93ec3e25d863db6241f353e531d5b2f4bd82cf05fc16d6",
+        "parser": "12b4480b82219537b11decf05e97fa8bb31c3923017521b8218bd137c6ce6cbc"
+      }
+    },
+    "build": "d1151d10a146a8eac88cceef2603eba577508556ba3f2e5043186ab6862e7e51",
+    "pack": "dbd0dba05ed5eda9a6dbfb947c26cf2efde641a92be3dc328487f255483a59fe"
+  }
 }
