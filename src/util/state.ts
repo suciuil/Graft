@@ -113,6 +113,14 @@ export interface BuildConfig {
    * `~/.graft/`, because a brain belongs to one repository and two checkouts on
    * one machine must not share one. `undefined` clears it. */
   brain?: { brainId: string; token: string; baseUrl?: string };
+  /** A sign-up an agent-run `graft trail push` opened and has not collected
+   * yet: the state in its link, and which repository it was for. Cleared once
+   * collected. `undefined` clears it. */
+  pendingSignup?: { state: string; repo: string; createdAt: number };
+  /** `false` turns off the once-a-day background `graft trail push` the
+   * session-start hook starts for a repo with a trail (see brain/autopush.ts).
+   * Absent means on. GRAFT_TRAIL_AUTOPUSH=0 does the same for every repo. */
+  trailAutoPush?: boolean;
 }
 
 /** Local, Git-ignored repository configuration. Kept outside generated
@@ -151,13 +159,15 @@ function ensureBuildConfigIgnored(d: string): void {
  * by `graft brain connect`, holding a secret and belonging to no default. Listing
  * it would have `init` stamp an empty credential into a file it advertises as the
  * option reference, and would make {@link pendingBuildConfig} judge every
- * brain-less repo's config perpetually incomplete.
+ * brain-less repo's config perpetually incomplete. `pendingSignup` is excluded
+ * for the same reason: it is transient sign-up state, not an option.
  */
-const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain'>> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain' | 'pendingSignup'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,
   followNestedRepos: false,
+  trailAutoPush: true,
 };
 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as
