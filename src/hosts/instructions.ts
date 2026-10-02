@@ -132,9 +132,9 @@ In particular, do not guess \`gpt-4o\`. Auto is a router, not a model: use its
 resolved model only when the host exposes it for the current turn.
 
 If no reliable current identity is available, OMIT \`--agent-model\`; do not
-guess or send \`unknown\` as an ID. Report tokens only when Graft cannot price
-them. IntelliJ does not currently have Graft's VS Code session-model reader;
-instructions cannot expose metadata that the host has not supplied.`;
+guess or send \`unknown\` as an ID. Graft then reads the model from Copilot's
+own JetBrains session store when it can, and reports tokens only when it
+cannot.`;
 }
 
 export function cursorRule(): string {
