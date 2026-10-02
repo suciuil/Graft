@@ -15,6 +15,8 @@
  *                   agent running the CLI in the integrated terminal, which is
  *                   how GitHub Copilot uses graft since graft registers no MCP
  *                   server for it.
+ *   - JetBrains   — Copilot's agent-session store (`jetbrains-session.ts`),
+ *                   reached the same way from an IDE terminal.
  *
  * A registry rather than two call sites because the two surfaces that need it
  * are different (MCP dispatch, CLI `noteQuery`) while the question is identical,
@@ -37,6 +39,7 @@
  */
 import { kiloSessionModel } from './kilo-session.js';
 import { inVsCodeTerminal, vscodeSessionModel } from './vscode-session.js';
+import { inJetBrainsTerminal, jetbrainsSessionModel } from './jetbrains-session.js';
 
 export interface HostModelSource {
   /** Which host this reads. Diagnostic only — never shown in a price. */
@@ -92,6 +95,11 @@ export const HOST_MODEL_SOURCES: HostModelSource[] = [
     id: 'vscode',
     applies: (env) => inVsCodeTerminal(env),
     read: (repo, opts) => vscodeSessionModel(repo, opts),
+  },
+  {
+    id: 'jetbrains',
+    applies: (env) => inJetBrainsTerminal(env),
+    read: (repo, opts) => jetbrainsSessionModel(repo, opts),
   },
 ];
 

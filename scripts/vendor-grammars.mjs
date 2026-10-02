@@ -24,13 +24,52 @@
  * Runs after build:ts (it needs dist/) and is never fatal — a clone without the sibling
  * repos is a normal state.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const vendorDir = join(repoRoot, "vendor");
 const PLATFORM = `${process.platform}-${process.arch}`;
+
+/**
+ * Clear `vendor/<key>`, renaming aside any `.node` a running process (typically graft's
+ * own MCP server) still has loaded: Windows lets a loaded DLL be renamed but not deleted.
+ * Same holding pen as build-grammars.mjs; leftovers are swept once nothing holds them.
+ */
+function clearVendored(key) {
+  const dir = join(vendorDir, key);
+  const quarantine = join(repoRoot, "node_modules", ".cache", "graft-superseded", `vendor-${key}`);
+  try {
+    for (const f of readdirSync(quarantine)) rmSync(join(quarantine, f), { force: true });
+  } catch {
+    /* nothing parked, or still loaded */
+  }
+  const nodes = [];
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".node")) nodes.push(p);
+    }
+  };
+  walk(dir);
+  for (const file of nodes) {
+    try {
+      rmSync(file, { force: true });
+    } catch {
+      mkdirSync(quarantine, { recursive: true });
+      renameSync(file, join(quarantine, `${basename(file)}.${process.pid}.${Date.now()}`));
+    }
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
 
 const extractPath = join(repoRoot, "dist", "graph", "extract.js");
 if (!existsSync(extractPath)) {
@@ -45,6 +84,7 @@ try {
   const included = [];
   const kept = [];
   const missing = [];
+  const optedOut = [];
   for (const [key, pkgName] of Object.entries(optionalGrammarPackages())) {
     const spec = pkg.optionalDependencies?.[pkgName];
     const destDir = join(vendorDir, key, "prebuilds", PLATFORM);
@@ -57,6 +97,12 @@ try {
         return false;
       }
     };
+    // Absent from optionalDependencies is a deliberate opt-out (e.g. kotlin, whose
+    // registry grammar stays the fallback), not a broken setup.
+    if (spec === undefined) {
+      optedOut.push(key);
+      continue;
+    }
     if (typeof spec !== "string" || !spec.startsWith("file:")) {
       missing.push(`${key} (${pkgName}): not declared as a local optionalDependency`);
       continue;
@@ -77,10 +123,15 @@ try {
     }
     // Replaced wholesale: a rename upstream would otherwise leave two .node files here,
     // and the loader takes the first one it finds.
-    rmSync(join(vendorDir, key), { recursive: true, force: true });
-    mkdirSync(destDir, { recursive: true });
-    cpSync(join(srcDir, file), join(destDir, file));
-    included.push(key);
+    try {
+      clearVendored(key);
+      mkdirSync(destDir, { recursive: true });
+      cpSync(join(srcDir, file), join(destDir, file));
+      included.push(key);
+    } catch (err) {
+      if (hasStaged()) kept.push(`${key} (${pkgName}): could not replace (${err.code ?? err.message}) — keeping the copy staged earlier`);
+      else missing.push(`${key} (${pkgName}): could not stage (${err.code ?? err.message})`);
+    }
   }
 
   const mb = included.length === 0 ? 0 : included.reduce((n, key) => {
@@ -89,6 +140,9 @@ try {
   }, 0) / 1024 / 1024;
 
   console.log(`  vendor: ${included.length} grammars staged for ${PLATFORM} (${mb.toFixed(1)} MB)`);
+  if (optedOut.length > 0) {
+    console.log(`  vendor: not vendored (absent from optionalDependencies): ${optedOut.join(", ")}`);
+  }
   if (kept.length > 0) {
     console.log(`  vendor: ${kept.length} kept from an earlier build:`);
     for (const k of kept) console.log(`    ${k}`);

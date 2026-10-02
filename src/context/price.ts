@@ -39,12 +39,17 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
   // otherwise price `claude-opus-5-5` at Opus 5's $5. The lookahead keeps a
   // hypothetical `claude-opus-5-50` or `5.5.1` from borrowing this rate.
   [/^claude-opus-5[.-]5(?![.\d])/i, 4],
+  // Fast mode bills at twice Opus 4.8's rate; must precede the Opus row.
+  [/^claude-opus-4[.-]8-\(?fast/i, 10],
   [/^claude-opus-(5(-0)?|4[.-][5-8])/i, 5],
   [/^claude-sonnet-5(-0)?/i, 2],
   [/^claude-sonnet-4[.-][56]/i, 3],
   [/^claude-3[.-]7-sonnet/i, 3],
   [/^claude-haiku-4[.-]5/i, 1],
   [/^gpt-6-astra(?:$|[-:])/i, 10],
+  [/^gpt-6-sol(?:$|[-:])/i, 2],
+  [/^gpt-6-luna(?:$|[-:])/i, 0.1],
+  [/^gpt-6[.-]1-sol(?:$|[-:])/i, 2],
   [/^gpt-5[.-]6-sol/i, 4],
   [/^gpt-5[.-]6-terra/i, 2],
   [/^gpt-5[.-]6-luna/i, 0.2],
@@ -68,14 +73,18 @@ const INPUT_USD_PER_MTOK: ReadonlyArray<readonly [RegExp, number]> = [
   [/^gemini-2[.-]5-pro/i, 1.25],
   [/^gemini-2[.-]5-flash-lite/i, 0.1],
   [/^gemini-2[.-]5-flash/i, 0.3],
+  [/^grok-4[.-][567](?![.\d])/i, 2],
   [/^grok-4[.-]3/i, 1.25],
   [/^grok-4-fast/i, 0.2],
   [/^grok-3/i, 2],
   [/^deepseek-v4[.-]pro/i, 1.32],
   [/^deepseek-v4[.-]flash/i, 0.44],
   [/^deepseek-v3[.-]2/i, 0.27],
+  [/^kimi-k3(?![.\d])/i, 3],
+  [/^kimi-k2[.-]7/i, 0.95],
   [/^kimi-k2[.-]6/i, 0.8],
   [/^kimi-k2-thinking/i, 0.6],
+  [/^mai-code-1[.-]1-flash/i, 0.2],
 ];
 
 /**
