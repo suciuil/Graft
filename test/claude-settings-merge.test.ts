@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeGraftSettings } from '../src/claude/settings-merge.js';
+import { mergeGraftSettings, repoShimCmd } from '../src/claude/settings-merge.js';
 
-const SL = 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-statusline.cjs"';
+const SL = repoShimCmd('graft-statusline.cjs');
 
 test('empty settings gets the full Graft blocks', () => {
   const { merged, warnings } = mergeGraftSettings({});
@@ -27,6 +27,18 @@ test('empty settings gets the full Graft blocks', () => {
   assert.ok(savings.hooks[0].command.includes('tool-savings'), 'savings hook wired');
   assert.ok(merged.footerLinksRegexes.includes('graft/[\\w./-]+\\.md'));
   assert.deepEqual(warnings, []);
+});
+
+test('a pre-fix Bash-only command (${CLAUDE_PROJECT_DIR:-.}) is replaced on re-init, not stacked', () => {
+  const OLD = 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-hooks.cjs" pre-tool';
+  const { merged } = mergeGraftSettings({
+    statusLine: { type: 'command', command: 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-statusline.cjs"' },
+    hooks: { PreToolUse: [{ matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: OLD, timeout: 5000 }] }] },
+  });
+  assert.equal(merged.statusLine.command, SL);
+  assert.equal(merged.hooks.PreToolUse.length, 1);
+  assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, repoShimCmd('graft-hooks.cjs', 'pre-tool'));
+  assert.ok(!JSON.stringify(merged).includes(':-.}'), 'no Bash-only expansion survives');
 });
 
 test('foreign statusLine is preserved with a warning; Graft not forced in', () => {
