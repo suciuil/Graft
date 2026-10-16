@@ -10,6 +10,7 @@
  * outside had to change when it moved.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, dirname, isAbsolute } from 'node:path';
 
 export interface Stats {
@@ -121,6 +122,13 @@ export interface BuildConfig {
    * session-start hook starts for a repo with a trail (see brain/autopush.ts).
    * Absent means on. GRAFT_TRAIL_AUTOPUSH=0 does the same for every repo. */
   trailAutoPush?: boolean;
+  /** Percent (0–100) of node summaries that must be out of date — the code
+   * changed, or is new, since the last `graft build --deep` — before queries
+   * carry the `--deep` nudge. 0 = anything out of date; 100 = never. Set by
+   * `graft deep-threshold`; absent or out of range falls through to the global
+   * {@link GlobalSettings.deepStaleThreshold}, then to
+   * {@link DEFAULT_DEEP_STALE_THRESHOLD}. */
+  deepStaleThreshold?: number;
 }
 
 /** Local, Git-ignored repository configuration. Kept outside generated
@@ -161,8 +169,11 @@ function ensureBuildConfigIgnored(d: string): void {
  * option reference, and would make {@link pendingBuildConfig} judge every
  * brain-less repo's config perpetually incomplete. `pendingSignup` is excluded
  * for the same reason: it is transient sign-up state, not an option.
+ * `deepStaleThreshold` is excluded because a repo value overrides the global one
+ * (`~/.graft/settings.json`): scaffolding the default into every repo would make
+ * `graft deep-threshold --global` a no-op everywhere `init` ran.
  */
-const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain' | 'pendingSignup'>> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain' | 'pendingSignup' | 'deepStaleThreshold'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,
@@ -260,6 +271,54 @@ export function readFollowSubmodules(d: string): boolean {
 /** Missing and explicit false both retain the backwards-compatible default. */
 export function readFollowNestedRepos(d: string): boolean {
   return readBuildConfig(d)?.followNestedRepos === true;
+}
+
+/** See {@link BuildConfig.deepStaleThreshold}. */
+export const DEFAULT_DEEP_STALE_THRESHOLD = 10;
+
+export function isValidDeepStaleThreshold(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
+}
+
+/** Machine-wide defaults for settings a repo's `.graft/config.json` can
+ * override. Its own file, not `~/.graft/config.json`: with `~` itself used as
+ * a repo, that path would be the repo config too. */
+export interface GlobalSettings {
+  deepStaleThreshold?: number;
+}
+
+export function globalSettingsPath(home: string = homedir()): string {
+  return join(home, '.graft', 'settings.json');
+}
+
+export function readGlobalSettings(home?: string): GlobalSettings | null {
+  return readJson<GlobalSettings>(globalSettingsPath(home));
+}
+
+/** Merge into the global settings; an `undefined` value clears that key. */
+export function patchGlobalSettings(patch: GlobalSettings, home?: string): void {
+  writeJsonAtomic(globalSettingsPath(home), { ...(readGlobalSettings(home) ?? {}), ...patch });
+}
+
+export type DeepStaleThresholdSource = 'repo' | 'global' | 'default';
+
+/** The effective `--deep` nudge threshold for repo `d`, in percent, and where it
+ * came from: this repo's config, else the global settings, else the default. A
+ * hand-edited value that is not a number in 0–100 is skipped rather than
+ * silencing (or spamming) the nudge. */
+export function resolveDeepStaleThreshold(
+  d: string,
+  home?: string,
+): { value: number; source: DeepStaleThresholdSource } {
+  const repo = readBuildConfig(d)?.deepStaleThreshold;
+  if (isValidDeepStaleThreshold(repo)) return { value: repo, source: 'repo' };
+  const global = readGlobalSettings(home)?.deepStaleThreshold;
+  if (isValidDeepStaleThreshold(global)) return { value: global, source: 'global' };
+  return { value: DEFAULT_DEEP_STALE_THRESHOLD, source: 'default' };
+}
+
+export function readDeepStaleThreshold(d: string, home?: string): number {
+  return resolveDeepStaleThreshold(d, home).value;
 }
 
 // Best-effort read-modify-write; not atomic across concurrent processes, but acceptable
