@@ -2,7 +2,43 @@ import { isGraftEntry } from '../hosts/config-write.js';
 
 type Json = Record<string, any>;
 
-const SL_CMD = 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/graft-statusline.cjs"';
+/**
+ * The command that runs one of the repo-level shims in `.claude/helpers/`.
+ *
+ * It has to be shell-neutral, which rules out the obvious form. The command
+ * string is handed to whatever shell the *host* uses, and that is not always a
+ * POSIX one: Claude Code runs it under bash (Git Bash on Windows), but GitHub
+ * Copilot in VS Code also reads `.claude/settings.json` (`chat.useClaudeHooks`)
+ * and runs the very same string under cmd.exe / PowerShell on Windows — where
+ * `"${CLAUDE_PROJECT_DIR:-.}/…"` is not expanded (cmd) or is mangled into
+ * `D:\.claude\…` (PowerShell). Node then exits non-zero, and Copilot turns an
+ * errored PreToolUse hook into a denial of EVERY tool call, since it ignores
+ * Claude-format matchers.
+ *
+ * So the project-dir lookup moves out of the shell and into node: an inline
+ * script that resolves `<CLAUDE_PROJECT_DIR or cwd>/.claude/helpers/<file>` —
+ * the same two places the old `${CLAUDE_PROJECT_DIR:-.}` meant — and requires
+ * it. Deliberately no walk up to parent dirs: that could land on the user-level
+ * shim in `~/.claude/helpers/` and run every hook twice. The script contains no
+ * spaces, no double quotes, and none of `$ % ! \` & < >` (its only `|` is the
+ * `||` inside the quotes), so bash, sh, cmd.exe and both PowerShells pass it to
+ * node byte-for-byte as one argument.
+ *
+ * `process.argv` is spliced to `[node, <shim>, …args]` before the require, so a
+ * shim sees exactly the argv it would get from `node <shim> <arg>` — which keeps
+ * this compatible with shims written by an older graft (they read `argv[2]`).
+ *
+ * A missing shim is a silent no-op rather than a thrown MODULE_NOT_FOUND, for the
+ * same fail-open reason every path inside the hooks takes: a hook that errors is,
+ * on some hosts, a hook that denies.
+ */
+export function repoShimCmd(file: string, arg?: string): string {
+  const js = '(function(s){if(require(\'fs\').existsSync(s)){process.argv.splice(1,0,s);require(s)}})'
+    + '(require(\'path\').join(process.env.CLAUDE_PROJECT_DIR||process.cwd(),\'.claude\',\'helpers\',\'' + file + '\'))';
+  return `node -e "${js}"${arg ? ` ${arg}` : ''}`;
+}
+
+const SL_CMD = repoShimCmd('graft-statusline.cjs');
 /** Stable marker for "this statusLine is Graft's", not the full command string —
  * an older shim path or a GRAFT_DIR wrapper still names this file. */
 const GRAFT_STATUSLINE_HELPER = 'graft-statusline.cjs';
@@ -18,18 +54,16 @@ const ALLOW_ENTRIES = [
   'Bash(node dist/cli.js:*)',
 ];
 
-/** Where the repo-level install's shims sit, relative to whatever project is open. */
-const REPO_HELPERS = '${CLAUDE_PROJECT_DIR:-.}/.claude/helpers';
-
 /**
  * `helpers` is the directory holding `graft-hooks.cjs`, and it is a parameter for
  * one reason: the user-level install (see hosts/claude-global.ts) has to name an
- * absolute path. A `${CLAUDE_PROJECT_DIR}` command works only where a previous
- * `graft init` wrote a shim into that project — which is exactly the case the
- * global copy exists to cover, so it cannot reuse the repo form.
+ * absolute path. The repo form (no `helpers`) finds the shim inside whichever
+ * project is open, so it works only where a previous `graft init` wrote a shim
+ * into that project — which is exactly the case the global copy exists to cover,
+ * so it cannot reuse the repo form.
  */
-function hookCmd(arg: string, helpers: string = REPO_HELPERS): string {
-  return `node "${helpers}/graft-hooks.cjs" ${arg}`;
+function hookCmd(arg: string, helpers?: string): string {
+  return helpers === undefined ? repoShimCmd('graft-hooks.cjs', arg) : `node "${helpers}/graft-hooks.cjs" ${arg}`;
 }
 function graftBlocks(helpers?: string): Record<string, Json[]> {
   return {
