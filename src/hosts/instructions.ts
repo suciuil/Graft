@@ -1,9 +1,23 @@
 /**
  * The one canonical Graft instruction block, rendered into each host's
  * native format. Content changes happen HERE only; renderers just wrap it.
+ *
+ * `name` is the repo's name for the tool (see `hostWiringName`): a repo wired
+ * by trail gets the same text in trail's spelling, so an agent on a machine
+ * with only `trail` installed is never told to run `graft`.
  */
+import type { Brand } from '../brand.js';
+import { trailSpelling } from '../claude/skill-template.js';
 
-export function instructionBody(): string {
+function inName(text: string, name: Brand): string {
+  return name === 'trail' ? trailSpelling(text) : text;
+}
+
+export function instructionBody(name: Brand = 'graft'): string {
+  return inName(graftBody(), name);
+}
+
+function graftBody(): string {
   return `## Graft — repo context graph
 
 This repo is indexed in \`graft/\`: small linked markdown nodes that explain each
@@ -111,8 +125,8 @@ After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }
 
-export function copilotInstructions(): string {
-  return `${instructionBody()}
+export function copilotInstructions(name: Brand = 'graft'): string {
+  return inName(`${graftBody()}
 
 ### Model reporting override: GitHub Copilot in IntelliJ IDEA only
 
@@ -134,24 +148,24 @@ resolved model only when the host exposes it for the current turn.
 If no reliable current identity is available, OMIT \`--agent-model\`; do not
 guess or send \`unknown\` as an ID. Graft then reads the model from Copilot's
 own JetBrains session store when it can, and reports tokens only when it
-cannot.`;
+cannot.`, name);
 }
 
-export function cursorRule(): string {
-  return `---
+export function cursorRule(name: Brand = 'graft'): string {
+  return inName(`---
 description: Use the Graft context graph in graft/ before exploring source
 alwaysApply: true
 ---
-${instructionBody()}
-`;
+${graftBody()}
+`, name);
 }
 
-export function kiroSteering(): string {
-  return `---
+export function kiroSteering(name: Brand = 'graft'): string {
+  return inName(`---
 inclusion: always
 ---
-${instructionBody()}
-`;
+${graftBody()}
+`, name);
 }
 
 /**
@@ -165,8 +179,8 @@ ${instructionBody()}
  * per-model table instead of a bare token count. The rule has to explain what to
  * do with that table, because the shape of the reply is otherwise unguessable.
  */
-export function kiloRule(): string {
-  return `${instructionBody()}
+export function kiloRule(name: Brand = 'graft'): string {
+  return inName(`${graftBody()}
 
 ### Reporting what graft saved (Kilo Code)
 
@@ -223,10 +237,10 @@ wall of text — which defeats the point of showing a table at all.
 Reproduce the rows graft gives you — do not add models, drop models, or reorder
 them, and never price a token yourself. A model graft has no published rate for
 is already absent from the table by design.
-`;
+`, name);
 }
 
-export function windsurfRule(): string {
-  return `${instructionBody()}
-`;
+export function windsurfRule(name: Brand = 'graft'): string {
+  return inName(`${graftBody()}
+`, name);
 }

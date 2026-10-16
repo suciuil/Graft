@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, isAbsolute } from 'node:path';
+import { mapDirFor } from '../context/map-dir.js';
 
 export interface Stats {
   nodeCount: number; edgeCount: number; languages: string[];
@@ -43,7 +44,7 @@ const LOCK_FILE = '.sync.lock';
  */
 export function resolveContextDir(projectDir: string): string {
   const override = process.env.GRAFT_DIR;
-  if (!override) return join(projectDir, 'graft');
+  if (!override) return mapDirFor(projectDir);
   return isAbsolute(override) ? override : join(projectDir, override);
 }
 
@@ -67,11 +68,13 @@ export function readJson<T>(p: string): T | null {
  * open) accumulates one full-size file per attempt, and nothing in graft ever lists
  * `.cache/` to clean them up.
  */
-export function writeJsonAtomic(p: string, value: unknown, compact = false): void {
+export function writeJsonAtomic(p: string, value: unknown, compact = false, mode?: number): void {
   mkdirSync(dirname(p), { recursive: true });
   const tmp = `${p}.${process.pid}.tmp`;
   try {
-    writeFileSync(tmp, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2));
+    // `mode` applies to the new file before it's renamed into place, so a
+    // secret is never readable by others even for a moment.
+    writeFileSync(tmp, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), mode === undefined ? undefined : { mode });
     renameSync(tmp, p);
   } catch (e) {
     try { rmSync(tmp, { force: true }); } catch { /* nothing more we can do */ }
@@ -109,19 +112,6 @@ export interface BuildConfig {
    * checkout someone parked in the tree. Absent/false keeps the historical
    * boundary. */
   followNestedRepos?: boolean;
-  /** The Trail brain this repo's rules come from: the brain id and the token to
-   * read it with. Persisted here — in the git-ignored `.graft/` — rather than in
-   * `~/.graft/`, because a brain belongs to one repository and two checkouts on
-   * one machine must not share one. `undefined` clears it. */
-  brain?: { brainId: string; token: string; baseUrl?: string };
-  /** A sign-up an agent-run `graft trail push` opened and has not collected
-   * yet: the state in its link, and which repository it was for. Cleared once
-   * collected. `undefined` clears it. */
-  pendingSignup?: { state: string; repo: string; createdAt: number };
-  /** `false` turns off the once-a-day background `graft trail push` the
-   * session-start hook starts for a repo with a trail (see brain/autopush.ts).
-   * Absent means on. GRAFT_TRAIL_AUTOPUSH=0 does the same for every repo. */
-  trailAutoPush?: boolean;
   /** Percent (0–100) of node summaries that must be out of date — the code
    * changed, or is new, since the last `graft build --deep` — before queries
    * carry the `--deep` nudge. 0 = anything out of date; 100 = never. Set by
@@ -163,22 +153,15 @@ function ensureBuildConfigIgnored(d: string): void {
  * without adding it here is a compile error, so the scaffold cannot silently fall
  * behind the options it claims to list.
  *
- * `brain` is the one exclusion, and it is not an option: it is the link written
- * by `graft brain connect`, holding a secret and belonging to no default. Listing
- * it would have `init` stamp an empty credential into a file it advertises as the
- * option reference, and would make {@link pendingBuildConfig} judge every
- * brain-less repo's config perpetually incomplete. `pendingSignup` is excluded
- * for the same reason: it is transient sign-up state, not an option.
- * `deepStaleThreshold` is excluded because a repo value overrides the global one
- * (`~/.graft/settings.json`): scaffolding the default into every repo would make
- * `graft deep-threshold --global` a no-op everywhere `init` ran.
+ * `deepStaleThreshold` is the one exclusion: a repo value overrides the global
+ * one (`~/.graft/settings.json`), so scaffolding the default into every repo
+ * would make `graft deep-threshold --global` a no-op everywhere `init` ran.
  */
-const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'brain' | 'pendingSignup' | 'deepStaleThreshold'>> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,
   followNestedRepos: false,
-  trailAutoPush: true,
 };
 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as

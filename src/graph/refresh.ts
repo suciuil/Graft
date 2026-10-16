@@ -42,6 +42,7 @@ import { invalidateGraphCaches, loadGraphCached } from "./load.js";
 import { seedGraph, type SeedResult } from "./seed.js";
 import type { GraphV1 } from "./types.js";
 import { wiringPath } from "./write.js";
+import { cmd, tag } from "../brand.js";
 
 /** How long to wait for another process's in-flight rebuild before giving up and
  * answering from the current graph. Long enough to ride out a small repo's build,
@@ -264,13 +265,13 @@ export async function ensureFreshChildren(
 /** The one-line note a CLI/MCP surface prints when a refresh actually happened.
  * Null when there's nothing to say (the overwhelmingly common case). */
 export function refreshNote(r: RefreshResult): string | null {
-  if (!r.refreshed) return r.note ? `[graft] ${r.note}` : null;
+  if (!r.refreshed) return r.note ? `${tag()} ${r.note}` : null;
   const n = r.drift ? driftCount(r.drift) : 0;
   const built = `refreshed the graph (${n || "?"} file${n === 1 ? "" : "s"} changed) before answering`;
   // Both facts, when a worktree was seeded *and* the copy needed repairing: the
   // count is the interesting half (it's the branch diff), the provenance explains
   // where a graph came from in a directory the user knows they never built.
-  return r.note ? `[graft] ${built} — ${r.note}` : `[graft] ${built}`;
+  return r.note ? `${tag()} ${built} — ${r.note}` : `${tag()} ${built}`;
 }
 
 /*
@@ -319,13 +320,13 @@ export function deepRebuildNote(
   const pct = Math.round((outdated / s.total) * 100);
   const what =
     s.summarized === 0
-      ? `no \`graft build --deep\` has run yet: none of the ${s.total} nodes has a prose summary`
-      : `${outdated} of ${s.total} node summaries (${pct}%) are out of date since the last \`graft build --deep\` ` +
+      ? `no \`${cmd("graft build --deep")}\` has run yet: none of the ${s.total} nodes has a prose summary`
+      : `${outdated} of ${s.total} node summaries (${pct}%) are out of date since the last \`${cmd("graft build --deep")}\` ` +
         `(${s.stale} changed, ${s.unsummarized} new)`;
   return (
-    `[graft] ${what} — file:line answers are current, the prose summaries are not. ` +
-    "Tell the user a `graft build --deep` is recommended (an LLM pass: it needs an API key and costs tokens). " +
-    `Shown above ${thresholdPct}% out of date; change with \`graft deep-threshold <percent>\` (100 = never).`
+    `${tag()} ${what} — file:line answers are current, the prose summaries are not. ` +
+    `Tell the user a \`${cmd("graft build --deep")}\` is recommended (an LLM pass: it needs an API key and costs tokens). ` +
+    `Shown above ${thresholdPct}% out of date; change with \`${cmd("graft deep-threshold")} <percent>\` (100 = never).`
   );
 }
 

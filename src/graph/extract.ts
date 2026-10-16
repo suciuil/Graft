@@ -6,22 +6,16 @@
  * arrow-function consts) plus unresolved edge intents. Edge *targets* are
  * resolved against the whole-repo node index later, in build.ts.
  */
-import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
-import Python from "tree-sitter-python";
-import Go from "tree-sitter-go";
-import R from "tree-sitter-r";
-import Java from "tree-sitter-java";
-import Kotlin from "tree-sitter-kotlin";
-import Swift from "tree-sitter-swift";
-import PHP from "tree-sitter-php";
-import { basename, dirname, join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import { readdirSync } from "node:fs";
+// Types only: the native grammars themselves load on first use, in native.ts, so
+// a missing binary costs its own language instead of every command.
+import type Parser from "tree-sitter";
+import { basename } from "node:path";
 import { contentHash } from "../util/id.js";
 import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } from "./bindings.js";
+import { grammarAvailable, nativeParser, nativeReady } from "./native.js";
 import type { Kind, NodeV1, Relation } from "./types.js";
+
+export { grammarAvailable, grammarSourceOf, optionalGrammarPackages } from "./native.js";
 
 /** Depth-tier languages with a hand-written extractor. The first ones ship as
  * core dependencies; the rest (`c_sharp`…`razor`) are OPTIONAL, locally-built
@@ -50,128 +44,6 @@ export type Language =
   | "markdown"
   | "scss"
   | "csv";
-
-/** Optional grammar key → the package that ships its native binding (and, when the
- * package exports several grammars, the property to pick). Loaded best-effort and
- * cached: a missing/unbuildable binding leaves the language unclaimed, so its files
- * fall through to the breadth tier (or file-only) instead of crashing the build. */
-const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
-  c_sharp: { pkg: "tree-sitter-c-sharp" },
-  groovy: { pkg: "tree-sitter-groovy" },
-  plsql: { pkg: "tree-sitter-plsql" },
-  css: { pkg: "tree-sitter-css-in-js" },
-  html: { pkg: "tree-sitter-html" },
-  razor: { pkg: "tree-sitter-razor" },
-  // Monorepo grammar: its node binding exports { xml, dtd } — pick the XML one.
-  xml: { pkg: "@tree-sitter-grammars/tree-sitter-xml", prop: "xml" },
-  // C and C++ get a hand-written depth extractor (they already have a breadth row
-  // too; buildGraph prefers depth for .c/.cpp/.h once the native grammar loads).
-  c: { pkg: "tree-sitter-c" },
-  cpp: { pkg: "tree-sitter-cpp" },
-  // Data/markup: symbol-only custom extractors. markdown's binding default export
-  // is the block grammar (its `inline` grammar is a separate property we don't use).
-  json: { pkg: "tree-sitter-json" },
-  yaml: { pkg: "@tree-sitter-grammars/tree-sitter-yaml" },
-  markdown: { pkg: "@tree-sitter-grammars/tree-sitter-markdown" },
-  scss: { pkg: "tree-sitter-scss" },
-  // Monorepo grammar exporting { csv, psv, tsv } — pick CSV.
-  csv: { pkg: "tree-sitter-csv", prop: "csv" },
-  // Kotlin is a CORE language (the registry `tree-sitter-kotlin` is always imported),
-  // but a locally-built grammar, when present, is newer and parses more real Kotlin
-  // (e.g. `receiver_type`, destructuring, guard conditions, multi-dollar strings), so
-  // {@link grammarFor} prefers it. The dependency key differs from the package's own
-  // name (`tree-sitter-kotlin`) so the two can be installed side by side; without the
-  // local build the registry grammar is the fallback and Kotlin stays fully indexed.
-  kotlin: { pkg: "tree-sitter-kotlin-local" },
-};
-
-const require = createRequire(import.meta.url);
-const optionalGrammarCache = new Map<string, unknown | null>();
-
-/** Graft's own package root. `src/graph/` while developing and `dist/graph/` once
- * compiled both sit two levels below it, so one expression serves both layouts. */
-const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-/** Grammar key → the npm package that ships its binding. For tooling that has to
- * bridge the two namings — the bundle packer keys its vendored directories by grammar
- * key, because the package name is not a stable handle (the groovy grammar's package
- * calls itself `@bootswithdefer/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`). */
-export function optionalGrammarPackages(): Record<string, string> {
-  return Object.fromEntries(Object.entries(OPTIONAL_GRAMMAR_PKG).map(([k, v]) => [k, v.pkg]));
-}
-
-/** The package root for an optional grammar, or null when it isn't installed. */
-function installedRoot(pkg: string): string | null {
-  try {
-    // Resolve `package.json` rather than the package main: it works even when the main
-    // is an ESM/top-level-await wrapper, which C#'s binding uses.
-    return dirname(require.resolve(`${pkg}/package.json`));
-  } catch {
-    return null;
-  }
-}
-
-/** Pull a grammar out of one candidate root: node-gyp-build first, since it knows the
- * package's own layout, then a direct scan of the two places a built `.node` can sit.
- * The scan is what makes a bundle work — it ships bare `.node` files with no
- * package.json and no node-gyp-build to consult. */
-function grammarFromRoot(root: string, prop?: string): unknown | null {
-  try {
-    const ngb = createRequire(join(root, "package.json"))("node-gyp-build") as (r: string) => unknown;
-    const g = pickGrammar(ngb(root), prop);
-    if (g) return g;
-  } catch {
-    /* not an installed package (or no node-gyp-build) — fall through to the scan */
-  }
-  for (const dir of [join(root, "build", "Release"), join(root, "prebuilds", `${process.platform}-${process.arch}`)]) {
-    try {
-      const file = readdirSync(dir).find((f) => f.endsWith(".node"));
-      if (file) {
-        const g = pickGrammar(require(join(dir, file)), prop);
-        if (g) return g;
-      }
-    } catch {
-      /* try next candidate */
-    }
-  }
-  return null;
-}
-
-/** Load an optional native grammar synchronously, bypassing any ESM/top-level-await
- * index wrapper by loading the built `.node` directly. Two roots are tried in turn:
- * the installed package, then `vendor/<key>/` inside graft itself — which is all a
- * machine that installed the self-contained bundle has, the sibling grammar repos
- * being local to the machine that built it. Cached, including the null (unavailable)
- * result, so it probes the filesystem once. */
-function loadOptionalGrammar(key: string): unknown | null {
-  if (optionalGrammarCache.has(key)) return optionalGrammarCache.get(key) ?? null;
-  const spec = OPTIONAL_GRAMMAR_PKG[key];
-  let grammar: unknown | null = null;
-  if (spec) {
-    for (const root of [installedRoot(spec.pkg), join(PKG_ROOT, "vendor", key)]) {
-      if (!root) continue;
-      grammar = grammarFromRoot(root, spec.prop);
-      if (grammar) break;
-    }
-  }
-  optionalGrammarCache.set(key, grammar);
-  return grammar;
-}
-
-function pickGrammar(mod: unknown, prop?: string): unknown | null {
-  if (!mod) return null;
-  const m = mod as Record<string, unknown> & { default?: unknown };
-  if (prop) return m[prop] ?? null;
-  return m.default ?? mod;
-}
-
-/** Whether an optional depth-tier grammar (`c_sharp`, `groovy`, `plsql`, `css`,
- * `html`, `razor`, …, and the locally-built `kotlin`) is installed and loads.
- * Synchronous; drives the per-language test skips and the extension-claiming below.
- * For Kotlin it only reports the local grammar — `.kt`/`.kts` are claimed either way. */
-export function grammarAvailable(key: string): boolean {
-  return loadOptionalGrammar(key) !== null;
-}
 
 /** The active SQL dialect, or null when no SQL grammar is built. Only Oracle
  * PL/SQL is wired today, so this is "plsql" exactly when that grammar loads. */
@@ -677,38 +549,6 @@ const FUNCTION_VALUE_TYPES = new Set([
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
-const parser = new Parser();
-const CORE_GRAMMARS: Partial<Record<Language, unknown>> = {
-  typescript: TypeScript.typescript,
-  tsx: TypeScript.tsx,
-  python: Python,
-  go: Go,
-  r: R,
-  java: Java,
-  kotlin: Kotlin,
-  swift: Swift,
-  php: PHP.php,
-};
-
-/** The tree-sitter grammar for a language: an optional native grammar loaded on
- * demand when one is registered and built, else the statically-imported core
- * grammar. The optional grammar wins when a language has both (Kotlin: a locally
- * built grammar over the registry one), so building it upgrades the parser without
- * removing the fallback. Null when an optional-only grammar's binding isn't built —
- * the caller then degrades to a file-only node. */
-function grammarFor(lang: Language): unknown | null {
-  return loadOptionalGrammar(lang) ?? CORE_GRAMMARS[lang] ?? null;
-}
-
-/** Where a language's grammar comes from right now: `"optional"` for a locally
- * built native grammar (see {@link OPTIONAL_GRAMMAR_PKG}), `"core"` for a
- * statically-imported registry grammar, or null when neither is available. Lets
- * tests and diagnostics tell which Kotlin grammar is really parsing. */
-export function grammarSourceOf(lang: Language): "optional" | "core" | null {
-  if (loadOptionalGrammar(lang)) return "optional";
-  return CORE_GRAMMARS[lang] ? "core" : null;
-}
-
 export interface WalkCtx {
   rel: string;
   source: string;
@@ -766,21 +606,22 @@ interface DefDescriptor {
  * no such limit as long as each returned chunk is under 32 KB, so we always feed
  * the source in <32 KB slices. Code-unit indexing matches `String.slice`. */
 const PARSE_CHUNK = 16384;
-function parseSource(source: string): Parser.SyntaxNode {
+function parseSource(parser: Parser, source: string): Parser.SyntaxNode {
   return parser.parse((index: number) => source.slice(index, index + PARSE_CHUNK)).rootNode;
 }
 
+/** Callers check `nativeReady` (native.ts) first and hand a file whose grammar is
+ * unavailable to its breadth-tier stand-in. A language with no stand-in (most of
+ * the optional grammars) still reaches here, and is indexed as a file-only node. */
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
   // A `.h` header carrying C++ constructs is really C++ — the C grammar can't
   // parse classes/templates — so route it to the C++ extractor. Shared with the
   // build banner's label so the two can never name different languages.
   lang = contentOverride(rel, lang, source)?.grammar ?? lang;
-  const grammar = grammarFor(lang);
   // An optional grammar that isn't built leaves the file indexed but symbol-less,
   // rather than throwing and marking it a parse error.
-  if (!grammar) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
-  parser.setLanguage(grammar as never);
-  const root = parseSource(source);
+  if (!nativeReady(lang)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
+  const root = parseSource(nativeParser(lang), source);
   // Markup/style languages carry no call graph, so they bypass the
   // definition/among-calls walk for a dedicated shape (rules, id'd elements) or,
   // for Razor (embedded C# is opaque here), a file node only.
