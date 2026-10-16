@@ -6,6 +6,7 @@
  */
 import "dotenv/config";
 import { Command } from "commander";
+import { existsSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Graft } from "./engine.js";
@@ -63,7 +64,7 @@ import { AUTOPUSH_CHILD_ENV, recordTrailPush } from "./brain/autopush.js";
 import { startSpinner } from "./util/spinner.js";
 import { contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
-import { ensureFreshChildren, ensureFreshGraph, refreshNote } from "./graph/refresh.js";
+import { deepNoteFor, ensureFreshChildren, ensureFreshGraph, refreshNote, summaryStaleness } from "./graph/refresh.js";
 import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
 import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
@@ -84,7 +85,19 @@ import { compactWrites, formatNonInteractiveHelp, formatPlan, runPicker } from "
 import { buildGraphWithProgress } from "./claude/build-progress.js";
 import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, runUpgrade } from "./cli-meta.js";
-import { ensureDefaultBuildConfig, missingBuildConfigPath, patchBuildConfig, type BuildConfig } from "./util/state.js";
+import {
+  DEFAULT_DEEP_STALE_THRESHOLD,
+  ensureDefaultBuildConfig,
+  globalSettingsPath,
+  isValidDeepStaleThreshold,
+  missingBuildConfigPath,
+  patchBuildConfig,
+  patchGlobalSettings,
+  readBuildConfig,
+  readGlobalSettings,
+  resolveDeepStaleThreshold,
+  type BuildConfig,
+} from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
 import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel, setHostModel } from "./claude/ledger.js";
@@ -245,6 +258,8 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
     : await ensureFreshGraph(root, { contextDir: globalDir, disabled });
   const note = refreshNote(r);
   if (note) console.error(note);
+  const deep = deepNoteFor(root, { contextDir: globalDir, children: ws?.children });
+  if (deep) console.error(deep);
 }
 
 /** Attached to every query command: `--no-refresh` answers from the graph exactly
@@ -815,6 +830,76 @@ program
     }
 
     if (bothMissing || markdownFail || wiringFail) process.exit(1);
+  });
+
+program
+  .command("deep-threshold")
+  .description(
+    "Show or set the % of out-of-date node summaries (changed or new code) above which queries recommend `graft build --deep` — " +
+      `per repo, or for every repo with --global (default ${DEFAULT_DEEP_STALE_THRESHOLD}; 0 = anything out of date, 100 = never)`,
+  )
+  .argument("[percent]", "new threshold, 0–100 (omit to show the current one)")
+  .argument(...DIR_ARG)
+  .option("-g, --global", "set/reset the default for every repo (~/.graft/settings.json); a repo's own value still wins")
+  .option("--reset", "remove the value: a repo's falls back to the global one, the global one to the default")
+  .action((percentArg: string | undefined, dirArg: string | undefined, opts: { reset?: boolean; global?: boolean }) => {
+    // `graft deep-threshold <dir>` shows that repo's value: a lone non-number that
+    // names a directory is the dir, not a malformed percent.
+    let percent = percentArg;
+    if (dirArg === undefined && percent !== undefined && Number.isNaN(Number(percent.replace(/%$/, "")))) {
+      if (existsSync(percent) && statSync(percent).isDirectory()) [dirArg, percent] = [percent, undefined];
+    }
+    // Repo-level, like every `.graft/config.json` setting: the nearest graft root.
+    const dir = queryRoot(dirArg);
+    if (opts.reset && percent !== undefined) {
+      console.error("graft deep-threshold: pass a percent or --reset, not both");
+      process.exit(1);
+    }
+    let value: number | undefined;
+    if (percent !== undefined) {
+      value = Number(percent.trim().replace(/%$/, ""));
+      if (percent.trim() === "" || !isValidDeepStaleThreshold(value)) {
+        console.error(`graft deep-threshold: "${percent}" is not a percent between 0 and 100`);
+        process.exit(1);
+      }
+    }
+    if (opts.reset || value !== undefined) {
+      if (opts.global) patchGlobalSettings({ deepStaleThreshold: value });
+      else patchBuildConfig(dir, { deepStaleThreshold: value });
+    }
+
+    const repoPath = join(dir, ".graft", "config.json");
+    const globalPath = globalSettingsPath();
+    const repoValue = readBuildConfig(dir)?.deepStaleThreshold;
+    const globalValue = readGlobalSettings()?.deepStaleThreshold;
+    const { value: threshold, source } = resolveDeepStaleThreshold(dir);
+    const from = { repo: `this repo, ${repoPath}`, global: `global, ${globalPath}`, default: "default" }[source];
+    const shown = (v: unknown) => (isValidDeepStaleThreshold(v) ? `${v}%` : "not set");
+    console.log(`deep-threshold: ${threshold}% (${from})`);
+    console.log(`  this repo: ${shown(repoValue)}`);
+    console.log(`  global:    ${shown(globalValue)}`);
+    console.log(`  default:   ${DEFAULT_DEEP_STALE_THRESHOLD}%`);
+    if (opts.global && source === "repo") {
+      console.log(`note: this repo keeps its own ${threshold}% — \`graft deep-threshold --reset\` here to use the global value`);
+    }
+    const when =
+      threshold >= 100
+        ? "never shown"
+        : threshold === 0
+          ? "shown whenever any node summary is out of date (changed or new code)"
+          : `shown when more than ${threshold}% of node summaries are out of date (changed or new code)`;
+    console.log(`the \`graft build --deep\` recommendation is ${when}`);
+    const graph = loadGraphCached(contextDirFor(dir, program.opts<GlobalOpts>().dir));
+    const s = summaryStaleness(graph);
+    if (s.total > 0 && s.summarized === 0) {
+      console.log(`now: no \`graft build --deep\` yet — none of the ${s.total} nodes has a prose summary (100% out of date)`);
+    } else if (s.total > 0) {
+      const outdated = s.stale + s.unsummarized;
+      const pct = Math.round((outdated / s.total) * 100);
+      console.log(
+        `now: ${outdated} of ${s.total} node summaries out of date (${pct}%) — ${s.stale} changed, ${s.unsummarized} new`,
+      );
+    }
   });
 
 program

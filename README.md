@@ -285,6 +285,8 @@ On a terminal, `init` shows you every agent it knows about — flagging the ones
 
 With no TTY to prompt on — CI, a Dockerfile, a piped shell — `init` writes **nothing** and prints the command to run instead. Pass `--agents <ids>` or `--yes` to make a scripted run explicit.
 
+Agents without a statusline (Kilo Code over MCP, GitHub Copilot over the CLI) still hear when the LLM layer has drifted or was never built. Each query auto-refreshes the structural graph, which marks the per-symbol summaries of edited code `stale` and leaves new code `pending` (never summarized). Once more than 10% of summaries are out of date — changed plus never-summarized code (configurable with `graft deep-threshold <percent>`, per repo or for all repos with `--global`) — every MCP tool result (at its end) and every CLI query (on stderr) carries a one-line `[graft] … graft build --deep is recommended` note, for the agent to pass on to you. A repo only ever built by `graft init` / `graft build` has no summaries at all, so it gets the note on every query until you run `graft build --deep` — or opt out with `graft deep-threshold 100` (add `--global` for every repo).
+
 | Flag | Effect |
 |---|---|
 | `--agents <ids...>` | wire only these, no prompt — ids: `agents`, `cursor`, `gemini`, `grok`, `copilot`, `kilo`, `kiro`, `windsurf`, `adal`, `claude` |
@@ -393,6 +395,12 @@ graft blast --depth all --format json  # the full transitive closure, machine-re
 
 graft check [dir]                    # fail (exit 1) if graft/ has drifted from the code (never auto-refreshes — it's the drift report)
 graft check --json                   # print the drift report as JSON
+
+graft deep-threshold [dir]           # show the % of out-of-date summaries (changed + new code) above which queries recommend `graft build --deep`, and where it comes from
+graft deep-threshold 25 [dir]        # set it for this repo, in .graft/config.json (0 = anything out of date, 100 = never)
+graft deep-threshold 25 --global     # set the default for every repo, in ~/.graft/settings.json (a repo's own value still wins)
+graft deep-threshold --reset [dir]   # drop this repo's value: falls back to the global one, else 10
+graft deep-threshold --reset --global  # drop the global value: back to the built-in 10
 
 # ask / skeleton / callers / grep / map / blast all refresh the graph first if the working tree moved:
 #   --no-refresh                     # answer from the graph exactly as it is on disk

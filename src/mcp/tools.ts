@@ -7,7 +7,7 @@ import { formatAsk, skeleton, formatSkeleton } from '../ask/ask.js';
 import { formatCheckReport } from '../context/check.js';
 import { formatGraphCheckReport } from '../graph/check.js';
 import { loadGraphCached } from '../graph/load.js';
-import { ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
+import { deepNoteFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
@@ -330,16 +330,24 @@ async function callToolScoped(
     const named = currentModel(root, latestSession(root)?.model) !== UNKNOWN_MODEL;
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     let note: string | null = null;
+    let deep: string | null = null;
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
         ? await ensureFreshChildren(root, ws.children, { contextDir: dirOverride })
         : await ensureFreshGraph(root, { contextDir: dirOverride });
       note = refreshNote(r);
+      // Read after the refresh, which is what marks changed nodes' summaries stale.
+      // Skipped for graft_check_freshness, whose report already names them.
+      deep = deepNoteFor(root, { contextDir: dirOverride, children: ws?.children });
     }
     const fed = ws ? await callWorkspaceTool(root, dirOverride, name, args) : null;
     const res = fed ?? (await callSingleTool(root, name, args, dirOverride));
     recordMcpSavings(root, res);
-    return note ? { ...res, text: `${note}\n${res.text}` } : res;
+    // The nudge goes LAST: a result must still open with what the tool produced
+    // (its savings line, or e.g. `repo map — …`), and it may fire on every call.
+    let text = note ? `${note}\n${res.text}` : res.text;
+    if (deep) text = `${text.replace(/\n*$/, '')}\n\n${deep}\n`;
+    return text === res.text ? res : { ...res, text };
   } catch (err) {
     return { text: err instanceof Error ? err.message : String(err), isError: true };
   }

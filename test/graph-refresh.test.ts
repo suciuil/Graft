@@ -10,14 +10,26 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../src/graph/build.js";
-import { ensureFreshChildren, ensureFreshGraph, refreshNote } from "../src/graph/refresh.js";
+import { deepNoteFor, deepRebuildNote, ensureFreshChildren, ensureFreshGraph, refreshNote, summaryStaleness } from "../src/graph/refresh.js";
 import { extractCachePath } from "../src/graph/extract-cache.js";
 import { fingerprintPath, isClean, probeDrift } from "../src/graph/fingerprint.js";
-import { readGraph, wiringPath } from "../src/graph/write.js";
-import { acquireLock, readStats, releaseLock, writeStats, emptyStats } from "../src/util/state.js";
+import { readGraph, wiringPath, writeGraph } from "../src/graph/write.js";
+import {
+  acquireLock,
+  emptyStats,
+  ensureDefaultBuildConfig,
+  patchBuildConfig,
+  patchGlobalSettings,
+  readBuildConfig,
+  readGlobalSettings,
+  readStats,
+  releaseLock,
+  resolveDeepStaleThreshold,
+  writeStats,
+} from "../src/util/state.js";
 import { callTool } from "../src/mcp/tools.js";
 import type { GraphV1 } from "../src/graph/types.js";
-import { chmodDenialUnavailable } from "./helpers.js";
+import { chmodDenialUnavailable, runCli } from "./helpers.js";
 
 const MATH = "export function add(a: number, b: number): number {\n  return a + b;\n}\n";
 /** A *function*, because a plain `export const` is not extracted as a symbol node. */
@@ -480,3 +492,195 @@ test("a process killed while holding the lock releases it", async (t) => {
   assert.equal(signal, "SIGTERM", "and the exit still reports the signal, for whoever is waiting on us");
   assert.equal(code, null);
 });
+
+const node = (id: string, summary_state: GraphV1["nodes"][number]["summary_state"]) =>
+  ({ id, summary_state }) as GraphV1["nodes"][number];
+const graphWith = (...nodes: GraphV1["nodes"]): GraphV1 => ({ nodes }) as unknown as GraphV1;
+
+test("summaryStaleness counts changed and never-summarized nodes, deep-built or not", () => {
+  const g = graphWith(node("a", "stale"), node("b", "ready"), node("c", "pending"), node("d", "none"));
+  assert.deepEqual(summaryStaleness(g), { stale: 1, unsummarized: 1, total: 3, summarized: 2 }, "`none` nodes are not summarizable");
+  assert.deepEqual(summaryStaleness(null), { stale: 0, unsummarized: 0, total: 0, summarized: 0 });
+  // Only `graft init` / plain `graft build` so far: everything is out of date.
+  const keyless = graphWith(node("a", "pending"), node("b", "pending"), node("c", "none"));
+  assert.deepEqual(summaryStaleness(keyless), { stale: 0, unsummarized: 2, total: 2, summarized: 0 });
+});
+
+const counts = (stale: number, unsummarized: number, total: number, summarized = total - unsummarized) =>
+  ({ stale, unsummarized, total, summarized });
+
+test("deepRebuildNote fires only above the threshold, including for a never-deep-built graph", () => {
+  assert.equal(deepRebuildNote(counts(0, 0, 0)), null);
+  assert.equal(deepRebuildNote(counts(1, 0, 10)), null, "exactly 10% is not above it");
+  assert.match(
+    deepRebuildNote(counts(1, 1, 10)) ?? "",
+    /^\[graft\] 2 of 10 node summaries \(20%\) are out of date .*\(1 changed, 1 new\).*graft build --deep/,
+  );
+  assert.match(deepRebuildNote(counts(0, 2, 10)) ?? "", /\(0 changed, 2 new\)/, "new code alone counts");
+  const keyless = summaryStaleness(graphWith(node("a", "pending"), node("b", "pending")));
+  assert.match(
+    deepRebuildNote(keyless) ?? "",
+    /^\[graft\] no `graft build --deep` has run yet: none of the 2 nodes has a prose summary.*recommended/,
+  );
+  assert.equal(deepRebuildNote(keyless, 100), null, "100 opts a repo out of the nudge");
+});
+
+test("deepRebuildNote honors a custom threshold: 0 = anything out of date, 100 = never", () => {
+  assert.match(deepRebuildNote(counts(0, 1, 1000), 0) ?? "", /Shown above 0% out of date/);
+  assert.equal(deepRebuildNote(counts(0, 0, 1000), 0), null, "nothing out of date is never worth a nudge");
+  assert.equal(deepRebuildNote(counts(500, 500, 1000), 100), null);
+  assert.equal(deepRebuildNote(counts(2, 1, 10), 50), null);
+  assert.match(deepRebuildNote(counts(3, 3, 10), 50) ?? "", /change with `graft deep-threshold <percent>` \(100 = never\)/);
+});
+
+/** A scratch `~`, so a real `~/.graft/settings.json` can never steer these tests. */
+const scratchHome = (): string => mkdtempSync(join(tmpdir(), "graft-home-"));
+
+/** For in-process code that resolves the home dir itself (the MCP path). */
+async function withHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test("deepNoteFor: repo value, else global value, else default — skipping bad values", async () => {
+  const d = repo();
+  const home = scratchHome();
+  await buildGraph(d);
+  const g = graphOf(d);
+  const [first] = g.nodes.filter((n) => n.summary_state !== "none");
+  first.summary_state = "stale";
+  first.summary = "old";
+  writeGraph(g, outOf(d));
+  const pct = (1 / summaryStaleness(g).total) * 100;
+  assert.ok(pct > 10, "fixture: one stale node is above the default");
+
+  assert.match(deepNoteFor(d, { home }) ?? "", /Shown above 10% out of date/);
+  patchGlobalSettings({ deepStaleThreshold: 100 }, home);
+  assert.equal(deepNoteFor(d, { home }), null, "the global value applies to a repo with none of its own");
+  assert.deepEqual(resolveDeepStaleThreshold(d, home), { value: 100, source: "global" });
+
+  patchBuildConfig(d, { deepStaleThreshold: 0 });
+  assert.match(deepNoteFor(d, { home }) ?? "", /Shown above 0% out of date/, "the repo's own value wins");
+  assert.deepEqual(resolveDeepStaleThreshold(d, home), { value: 0, source: "repo" });
+
+  patchBuildConfig(d, { deepStaleThreshold: 250 });
+  assert.equal(deepNoteFor(d, { home }), null, "an out-of-range repo value falls through to the global one");
+  patchGlobalSettings({ deepStaleThreshold: -5 }, home);
+  assert.deepEqual(resolveDeepStaleThreshold(d, home), { value: 10, source: "default" });
+});
+
+test("graft init never scaffolds deepStaleThreshold, so it cannot shadow the global value", () => {
+  const d = repo();
+  ensureDefaultBuildConfig(d);
+  assert.ok(readBuildConfig(d), "the scaffold was written");
+  assert.equal("deepStaleThreshold" in (readBuildConfig(d) ?? {}), false);
+});
+
+test("graft deep-threshold shows, sets, validates and resets the threshold, per repo and --global", () => {
+  const d = repo();
+  const home = scratchHome();
+  const cli = (...args: string[]) => runCli(["deep-threshold", ...args], { home });
+
+  const show = cli(d);
+  assert.equal(show.status, 0, show.describe());
+  assert.match(show.stdout, /deep-threshold: 10% \(default\)/);
+
+  const global = cli("30", "--global", d);
+  assert.equal(global.status, 0, global.describe());
+  assert.match(global.stdout, /deep-threshold: 30% \(global, /);
+  assert.equal(readGlobalSettings(home)?.deepStaleThreshold, 30);
+  assert.equal(readBuildConfig(d)?.deepStaleThreshold, undefined, "--global leaves the repo alone");
+
+  const set = cli("25", d);
+  assert.equal(set.status, 0, set.describe());
+  assert.match(set.stdout, /deep-threshold: 25% \(this repo, /);
+  assert.match(set.stdout, /global: {4}30%/);
+  assert.equal(readBuildConfig(d)?.deepStaleThreshold, 25);
+
+  const shadowed = cli("40", "-g", d);
+  assert.match(shadowed.stdout, /note: this repo keeps its own 25%/, "say why the new global value is not in effect here");
+
+  const bad = cli("150", d);
+  assert.equal(bad.status, 1, bad.describe());
+  assert.match(bad.stderr, /not a percent between 0 and 100/);
+  assert.equal(readBuildConfig(d)?.deepStaleThreshold, 25, "a rejected value changes nothing");
+
+  const reset = cli("--reset", d);
+  assert.equal(reset.status, 0, reset.describe());
+  assert.match(reset.stdout, /deep-threshold: 40% \(global, /, "the repo falls back to the global value");
+  assert.equal(readBuildConfig(d)?.deepStaleThreshold, undefined);
+
+  const resetGlobal = cli("--reset", "--global", d);
+  assert.match(resetGlobal.stdout, /deep-threshold: 10% \(default\)/);
+  assert.equal(readGlobalSettings(home)?.deepStaleThreshold, undefined);
+
+  const help = runCli(["--help"]);
+  assert.match(help.stdout, /^\s+deep-threshold \[options\] \[percent\] \[dir\]/m, "listed among the graft commands");
+});
+
+test("an edit after a deep build surfaces the --deep nudge on MCP and stays silent before it", () =>
+  withHome(scratchHome(), async () => {
+  const d = repo();
+  await buildGraph(d);
+  // Simulate a finished `--deep`: every summarizable node gets a ready summary.
+  const g = graphOf(d);
+  for (const n of g.nodes) {
+    if (n.summary_state === "none") continue;
+    n.summary_state = "ready";
+    n.summary = `summary of ${n.id}`;
+  }
+  writeGraph(g, outOf(d));
+
+  const clean = await callTool(d, "graft_find_code", { query: "add" });
+  assert.doesNotMatch(clean.text, /graft build --deep/, "nothing stale, nothing to say");
+  assert.equal(deepNoteFor(d), null);
+
+  writeFileSync(join(d, "src", "math.ts"), MATH.replace("a + b", "b + a"));
+  const after = await callTool(d, "graft_find_code", { query: "add" });
+  assert.ok(graphOf(d).nodes.some((n) => n.summary_state === "stale"), "the refresh marked the edited node stale");
+  assert.match(after.text, /node summaries \(\d+%\) are out of date .*\(\d+ changed, 0 new\).*graft build --deep/);
+
+  const check = await callTool(d, "graft_check_freshness", {});
+  assert.doesNotMatch(check.text, /node summaries \(\d+%\)/, "the freshness report already names stale summaries");
+  }));
+
+test("new code added after a deep build counts toward the --deep nudge on its own", () =>
+  withHome(scratchHome(), async () => {
+    const d = repo();
+    await buildGraph(d);
+    const g = graphOf(d);
+    for (const n of g.nodes) {
+      if (n.summary_state === "none") continue;
+      n.summary_state = "ready";
+      n.summary = `summary of ${n.id}`;
+    }
+    writeGraph(g, outOf(d));
+
+    // Nothing existing changes: only a new file with a new function appears.
+    writeFileSync(join(d, "src", "mul.ts"), MUL);
+    const after = await callTool(d, "graft_find_code", { query: "mul" });
+    assert.ok(hasSymbol(d, "src/mul.ts#mul"), "fixture: the refresh indexed the new function");
+    assert.equal(graphOf(d).nodes.some((n) => n.summary_state === "stale"), false, "nothing was changed");
+    assert.match(after.text, /are out of date .*\(0 changed, [1-9]\d* new\).*graft build --deep/);
+  }));
+
+test("a graph only ever built by `graft build` gets the nudge too — unless the threshold is 100", () =>
+  withHome(scratchHome(), async () => {
+    const d = repo();
+    await buildGraph(d);
+    const first = await callTool(d, "graft_find_code", { query: "add" });
+    assert.match(first.text, /no `graft build --deep` has run yet: none of the \d+ nodes has a prose summary/);
+
+    patchBuildConfig(d, { deepStaleThreshold: 100 });
+    const optedOut = await callTool(d, "graft_find_code", { query: "add" });
+    assert.doesNotMatch(optedOut.text, /graft build --deep/);
+  }));

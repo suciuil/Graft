@@ -34,12 +34,13 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { contextDirFor } from "../context/node-file.js";
-import { acquireLockIn, releaseLockIn } from "../util/state.js";
+import { acquireLockIn, DEFAULT_DEEP_STALE_THRESHOLD, readDeepStaleThreshold, releaseLockIn } from "../util/state.js";
 import { CACHE_DIR } from "../context/node-file.js";
 import { buildGraph } from "./build.js";
 import { driftCount, isClean, probeDrift, readFingerprint, type Drift } from "./fingerprint.js";
-import { invalidateGraphCaches } from "./load.js";
+import { invalidateGraphCaches, loadGraphCached } from "./load.js";
 import { seedGraph, type SeedResult } from "./seed.js";
+import type { GraphV1 } from "./types.js";
 import { wiringPath } from "./write.js";
 
 /** How long to wait for another process's in-flight rebuild before giving up and
@@ -270,4 +271,92 @@ export function refreshNote(r: RefreshResult): string | null {
   // count is the interesting half (it's the branch diff), the provenance explains
   // where a graph came from in a directory the user knows they never built.
   return r.note ? `[graft] ${built} — ${r.note}` : `[graft] ${built}`;
+}
+
+/*
+ * The `graft build --deep` nudge. Its threshold is a percentage set with
+ * `graft deep-threshold`, per repo or `--global` (see `resolveDeepStaleThreshold`).
+ *
+ * "Out of date" is `stale` (summarized, then the code changed) plus `pending`
+ * (never summarized: new code, or a graph only ever built by `graft init` /
+ * plain `graft build`). A graph with no `--deep` build at all is therefore 100%
+ * out of date and nudges on every query — deliberately; `graft deep-threshold
+ * 100` (per repo or `--global`) is the way to opt out of the LLM layer.
+ */
+
+export interface SummaryStaleness {
+  /** Summarized, then the code changed. */
+  stale: number;
+  /** Never summarized (`pending`): new code, or no deep build yet at all. */
+  unsummarized: number;
+  /** Summarizable nodes (`summary_state !== "none"`). */
+  total: number;
+  /** Nodes holding a summary (`ready` or `stale`); 0 means no `--deep` build ever ran. */
+  summarized: number;
+}
+
+export function summaryStaleness(graph: GraphV1 | null): SummaryStaleness {
+  const s: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
+  if (!graph) return s;
+  for (const n of graph.nodes) {
+    if (n.summary_state === "none") continue;
+    s.total++;
+    if (n.summary_state === "pending") s.unsummarized++;
+    else s.summarized++;
+    if (n.summary_state === "stale") s.stale++;
+  }
+  return s;
+}
+
+/** The one-line `graft build --deep` recommendation, or null at or below
+ * `thresholdPct` percent out of date. */
+export function deepRebuildNote(
+  s: SummaryStaleness,
+  thresholdPct: number = DEFAULT_DEEP_STALE_THRESHOLD,
+): string | null {
+  const outdated = s.stale + s.unsummarized;
+  if (s.total === 0 || outdated === 0 || (outdated / s.total) * 100 <= thresholdPct) return null;
+  const pct = Math.round((outdated / s.total) * 100);
+  const what =
+    s.summarized === 0
+      ? `no \`graft build --deep\` has run yet: none of the ${s.total} nodes has a prose summary`
+      : `${outdated} of ${s.total} node summaries (${pct}%) are out of date since the last \`graft build --deep\` ` +
+        `(${s.stale} changed, ${s.unsummarized} new)`;
+  return (
+    `[graft] ${what} — file:line answers are current, the prose summaries are not. ` +
+    "Tell the user a `graft build --deep` is recommended (an LLM pass: it needs an API key and costs tokens). " +
+    `Shown above ${thresholdPct}% out of date; change with \`graft deep-threshold <percent>\` (100 = never).`
+  );
+}
+
+/**
+ * The deep-rebuild nudge for a repo (or, given `children`, a workspace's child
+ * repos combined), read from the graph on disk. For hosts with no statusline —
+ * Kilo over MCP, Copilot over the CLI — the agent relaying this is the only way
+ * the user learns the meaning tier has drifted. The threshold is `root`'s own
+ * (repo config, else `~/.graft/settings.json`, else the default), also for a
+ * workspace. Never throws: a nudge is not worth failing a query over.
+ */
+export function deepNoteFor(
+  root: string,
+  opts: { contextDir?: string; children?: string[]; home?: string } = {},
+): string | null {
+  try {
+    // Same dir rule as `ensureFreshChildren`: a child's graph lives in its own
+    // `<child>/graft`, never under the parent's `--dir`.
+    const dirs = opts.children
+      ? opts.children.map((c) => contextDirFor(resolve(root, c)))
+      : [contextDirFor(resolve(root), opts.contextDir)];
+    const sum: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
+    for (const d of dirs) {
+      const s = summaryStaleness(loadGraphCached(d));
+      sum.stale += s.stale;
+      sum.unsummarized += s.unsummarized;
+      sum.total += s.total;
+      sum.summarized += s.summarized;
+    }
+    return deepRebuildNote(sum, readDeepStaleThreshold(resolve(root), opts.home));
+  } catch {
+    return null;
+  }
 }
