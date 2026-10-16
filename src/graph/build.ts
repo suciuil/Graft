@@ -17,9 +17,10 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { walkDir } from "../ingest/fs.js";
 import { contextDirFor, ensureGitignored, ensureSearchable } from "../context/node-file.js";
-import { extractFile, languageLabelOfSource, languageOf, type RawEdge } from "./extract.js";
-import { extractGeneric, genericLangOf, warmGenericGrammars } from "./generic.js";
-import { containerLangOf, extractContainer, warmContainerGrammars } from "./container.js";
+import { extractFile, languageLabelOf, languageLabelOfSource, languageOf, type Language, type RawEdge } from "./extract.js";
+import { extractGeneric, fallbackLangOf, genericLangOf, warmGenericGrammars, type GenericLang } from "./generic.js";
+import { containerLangOf, extractContainer, warmContainerGrammars, type ContainerLang } from "./container.js";
+import { missingNativePackages, nativeReady, type NativeFallback } from "./native.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
@@ -43,6 +44,56 @@ import type { GraphV1, Kind, NodeV1, Relation, ScopeV1 } from "./types.js";
 import type { CruxSummarizer } from "../ai/crux.js";
 
 export { listSourceFiles } from "./source-files.js";
+
+/**
+ * Which tier extracts a file. {@link buildGraph} and `checkGraph` both dispatch on
+ * this, so a tier the build extracts can never be one the check can't see.
+ *
+ * Depth tier (hand-written, native grammar) when a language claims the file and its
+ * native grammar loads. When it doesn't load (npm 12 skips the install script that
+ * builds `tree-sitter-kotlin`), the file goes to that language's WASM stand-in in
+ * the breadth tier and `fellBack` names the language. A container (.vue) is checked
+ * before the breadth tier so a future grammar claiming its extension can't shadow
+ * it; anything else goes to the breadth tier (generic tags.scm over a WASM grammar).
+ */
+export interface FileTier {
+  lang: Language | null;
+  container: ContainerLang | null;
+  generic: GenericLang | null;
+  fellBack: Language | null;
+}
+
+export function tierOf(path: string): FileTier {
+  const depth = languageOf(path);
+  if (depth) {
+    const standIn = nativeReady(depth) ? null : fallbackLangOf(depth);
+    return standIn
+      ? { lang: null, container: null, generic: standIn, fellBack: depth }
+      : { lang: depth, container: null, generic: null, fellBack: null };
+  }
+  const container = containerLangOf(path);
+  if (container) return { lang: null, container, generic: null, fellBack: null };
+  return { lang: null, container: null, generic: genericLangOf(path), fellBack: null };
+}
+
+/** Load every WASM grammar these files need, before a synchronous parse loop can
+ * call `extractGeneric`/`extractContainer`: the breadth tier's, the containers',
+ * and the stand-ins for depth languages (a container's embedded one included)
+ * whose native grammar didn't load. */
+export async function warmGrammarsFor(paths: Iterable<string>): Promise<void> {
+  const generic = new Set<string>();
+  const containers = new Set<string>();
+  for (const path of paths) {
+    const t = tierOf(path);
+    if (t.generic) generic.add(t.generic.name);
+    if (t.container) {
+      containers.add(t.container.name);
+      if (!nativeReady(t.container.inner)) generic.add(fallbackLangOf(t.container.inner)!.name);
+    }
+  }
+  await warmGenericGrammars(generic);
+  await warmContainerGrammars(containers);
+}
 
 /** Minimum non-file node count for a discovered sub-scope to stand on its own
  * (over-split guard 3). A scope with fewer nodes than this is folded into the
@@ -119,6 +170,9 @@ export interface GraphBuildResult {
   byKind: Record<Kind, number>;
   byRelation: Record<Relation, number>;
   languages: string[];
+  /** Languages parsed by a WASM stand-in because their native grammar didn't load,
+   * and the packages to allow at install to fix it. Absent when everything loaded. */
+  nativeFallback?: NativeFallback;
   meaning: EnrichStats;
   errors: string[];
 }
@@ -191,29 +245,38 @@ export async function buildGraph(
   let parsed = 0;
   let reused = 0;
 
-  // Breadth tier: WASM grammars load asynchronously, so warm the ones this repo
-  // needs ONCE here (buildGraph is async) before the synchronous parse loop below
-  // can call extractGeneric. Depth-tier (native) grammars need no warmup.
-  await warmGenericGrammars(
-    new Set(files.map((f) => genericLangOf(f.abs)?.name).filter((n): n is string => !!n)),
-  );
-  // Container tier (.vue and friends) loads its wrapper grammars the same way,
-  // for the same reason: extractContainer runs inside the sync loop below.
-  await warmContainerGrammars(
-    new Set(files.map((f) => containerLangOf(f.abs)?.name).filter((n): n is string => !!n)),
-  );
+  // Breadth and container tiers: WASM grammars load asynchronously, so warm the
+  // ones this repo needs ONCE here (buildGraph is async) before the synchronous
+  // parse loop below can call extractGeneric/extractContainer. This is also where
+  // the depth tier's native grammars load, each on first ask, and where one that
+  // can't load gets its WASM stand-in warmed instead.
+  await warmGrammarsFor(files.map((f) => f.abs));
+  /** Languages whose files went to a stand-in: grammars for the fix, labels for people. */
+  const fellBack = new Set<Language>();
+  const fellBackLabels = new Set<string>();
 
   files.forEach((f, i) => {
     const rel = f.rel;
     opts.onProgress?.({ phase: "parse", index: i, total: files.length, file: rel });
-    // Depth tier (hand-written, native grammar) if a language claims the file;
-    // otherwise the breadth tier (generic tags.scm over a WASM grammar).
-    const lang = languageOf(f.abs);
-    // A container is neither tier: its wrapper grammar only locates the embedded
-    // block, which then goes to the depth-tier extractor. Checked before the
-    // breadth tier so a future grammar claiming .vue can't shadow it.
-    const container = lang ? null : containerLangOf(f.abs);
-    const generic = lang || container ? null : genericLangOf(f.abs);
+    const { lang, container, generic, fellBack: standIn } = tierOf(f.abs);
+    // Path-only label, for the fallback report; the banner's label is sniffed
+    // from the source further down, once it has been read.
+    const pathLabel = languageLabelOf(f.abs) ?? container?.name ?? generic?.name ?? "unknown";
+    // A .vue file's embedded script falls back the same way its language does.
+    const inner = container && !nativeReady(container.inner) ? container.inner : null;
+    if (standIn) {
+      fellBack.add(standIn);
+      fellBackLabels.add(pathLabel);
+    }
+    if (inner) {
+      fellBack.add(inner);
+      fellBackLabels.add(inner);
+    }
+    // Which stand-in parsed this file, if one did. A cached parse is replayed only
+    // when the same parser would produce it now: otherwise a file parsed by the
+    // stand-in would keep its basic parse after a reinstall restored the native
+    // grammar, for as long as its bytes didn't change.
+    const via = standIn ? generic!.name : inner ? fallbackLangOf(inner)!.name : undefined;
     const cached = priorExtract.files[rel];
 
     // Every file is read and hashed, every build — only the *parse* is memoized.
@@ -251,7 +314,7 @@ export async function buildGraph(
     const label = languageLabelOfSource(f.abs, source) ?? container?.name ?? generic?.name ?? "unknown";
 
     const hash = contentHash(source);
-    if (cached && hash === cached.hash) {
+    if (cached && hash === cached.hash && cached.via === via) {
       entries[rel] = { ...cached, size: f.size, mtimeMs: f.mtimeMs };
       sources.set(rel, source);
       reused++;
@@ -276,11 +339,11 @@ export async function buildGraph(
       rawEdges.push(...fileEdges);
       sources.set(rel, source);
       langs.add(label);
-      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: fileNodes, rawEdges: fileEdges };
+      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: fileNodes, rawEdges: fileEdges, ...(via ? { via } : {}) };
     } catch (err) {
       const message = `${rel}: parse failed — ${err instanceof Error ? err.message : String(err)}`;
       errors.push(message);
-      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: [], rawEdges: [], error: message };
+      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: [], rawEdges: [], error: message, ...(via ? { via } : {}) };
     }
   });
 
@@ -411,6 +474,9 @@ export async function buildGraph(
     byKind,
     byRelation,
     languages: [...langs].sort(),
+    ...(fellBack.size > 0
+      ? { nativeFallback: { languages: [...fellBackLabels].sort(), packages: missingNativePackages(fellBack) } }
+      : {}),
     meaning,
     errors,
   };

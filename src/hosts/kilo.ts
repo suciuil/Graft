@@ -29,13 +29,19 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { localServerEntry, type McpWrite } from './mcp-config.js';
 import type { PlannedWrite } from './plan.js';
+import type { Brand } from '../brand.js';
 
 /**
  * The rule file, relative to the repo root — posix separators because it is
  * written verbatim into `instructions`, where a Windows backslash would not
- * match. `join()` normalizes it back to native when used as a path.
+ * match. `join()` normalizes it back to native when used as a path. Named after
+ * the repo's name for the tool, like every other owned file (see `hostRelPath`).
  */
-export const KILO_RULE_REL = '.kilo/rules/graft.md';
+export function kiloRuleRel(name: Brand = 'graft'): string {
+  return `.kilo/rules/${name}.md`;
+}
+
+export const KILO_RULE_REL = kiloRuleRel('graft');
 
 /**
  * Candidate config locations, highest precedence first. Merging into whichever
@@ -98,8 +104,29 @@ function isPlainObject(v: unknown): v is Record<string, any> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+type KiloRead =
+  | { kind: 'absent' }
+  | { kind: 'unparseable' }
+  | { kind: 'ok'; root: Record<string, any>; strictJson: boolean };
+
+/** Read a Kilo config, through JSONC comments if need be. `strictJson` is false
+ * when it only parsed after comment-stripping: such a file must not be rewritten. */
+export function readKiloConfig(path: string): KiloRead {
+  if (!existsSync(path)) return { kind: 'absent' };
+  const raw = readFileSync(path, 'utf8');
+  let parsed: unknown;
+  let strictJson = true;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    strictJson = false;
+    try { parsed = JSON.parse(stripJsonc(raw)); } catch { return { kind: 'unparseable' }; }
+  }
+  return isPlainObject(parsed) ? { kind: 'ok', root: parsed, strictJson } : { kind: 'unparseable' };
+}
+
 /** The file selecting Kilo Code would touch beyond its rule file — pure, no writes. */
-export function kiloConfigTargets(repo: string): PlannedWrite[] {
+export function kiloConfigTargets(repo: string, name: Brand = 'graft'): PlannedWrite[] {
   return [
     {
       hostId: 'kilo', id: 'kilo-config',
@@ -107,47 +134,42 @@ export function kiloConfigTargets(repo: string): PlannedWrite[] {
       scope: 'repo',
       // Tagged 'mcp' so the picker doesn't label Kilo Code as having no MCP.
       kind: 'mcp',
-      what: 'mcp.graft + instructions[]',
+      what: `mcp.${name} + instructions[]`,
     },
   ];
 }
 
 /**
- * Register the rule file in `instructions` and (unless `mcp` is false) the graft
- * server under `mcp`, preserving every other key.
+ * Register the rule file in `instructions` and (unless `mcp` is false) the
+ * server under `mcp`, preserving every other key. `name` is the repo's name for
+ * the tool: under trail, graft's own entries come out, since `init` removes
+ * graft's copy of the rule file they point at.
  */
-export function writeKiloConfig(repo: string, opts: { mcp?: boolean } = {}): McpWrite {
+export function writeKiloConfig(repo: string, opts: { mcp?: boolean; name?: Brand } = {}): McpWrite {
   const path = kiloConfigPath(repo);
   const id = 'kilo-config';
-  const existed = existsSync(path);
-
-  let root: Record<string, any> = {};
-  /** False when the file only parses after comment-stripping — do not rewrite it. */
-  let strictJson = true;
-  if (existed) {
-    const raw = readFileSync(path, 'utf8');
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      strictJson = false;
-      try { parsed = JSON.parse(stripJsonc(raw)); } catch { return { id, path, action: 'skipped-unparseable' }; }
-    }
-    if (!isPlainObject(parsed)) return { id, path, action: 'skipped-unparseable' };
-    root = parsed;
-  }
+  const name = opts.name ?? 'graft';
+  const rule = kiloRuleRel(name);
+  const read = readKiloConfig(path);
+  if (read.kind === 'unparseable') return { id, path, action: 'skipped-unparseable' };
+  const existed = read.kind === 'ok';
+  const root: Record<string, any> = read.kind === 'ok' ? read.root : {};
+  const strictJson = read.kind === 'ok' ? read.strictJson : true;
   const before = JSON.stringify(root);
 
   // `instructions` is a list of paths/globs. A non-array value is the user's own
   // shape, not ours to reinterpret — leave it and let the MCP half still land.
-  if (root.instructions === undefined) root.instructions = [KILO_RULE_REL];
-  else if (Array.isArray(root.instructions) && !root.instructions.includes(KILO_RULE_REL))
-    root.instructions.push(KILO_RULE_REL);
+  if (root.instructions === undefined) root.instructions = [rule];
+  else if (Array.isArray(root.instructions)) {
+    if (name === 'trail') root.instructions = root.instructions.filter((e: unknown) => e !== kiloRuleRel('graft'));
+    if (!root.instructions.includes(rule)) root.instructions.push(rule);
+  }
 
   if (opts.mcp !== false) {
     const bucket = (root.mcp ??= {});
     if (!isPlainObject(bucket)) return { id, path, action: 'skipped-unparseable' };
-    bucket.graft = localServerEntry();
+    if (name === 'trail') delete bucket.graft;
+    bucket[name] = localServerEntry(name);
   }
 
   if (JSON.stringify(root) === before) return { id, path, action: 'unchanged' };

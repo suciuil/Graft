@@ -33,10 +33,10 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readJson, writeJsonAtomic, cacheDir } from './util/state.js';
-import { HOSTS } from './hosts/registry.js';
-import { START } from './hosts/sections.js';
+import { HOSTS, hostRelPath } from './hosts/registry.js';
+import { markersFor } from './hosts/sections.js';
 import { getNpmViewVersion, readCurrentVersion } from './cli-meta.js';
-import { cacheIsStale, markRulesChecked, readLink, readRulesCache } from './brain/link.js';
+import { brand } from './brand.js';
 import { graftCliPath } from './claude/paths.js';
 
 /**
@@ -148,46 +148,12 @@ export function maybeRefreshInBackground(home?: string, now = Date.now()): boole
   }
 }
 
-/**
- * Refresh the attached brain's rules in a detached child, when they are stale.
- *
- * The same shape as the update check above, and for the same reason: this runs
- * inside session-start hooks and MCP boot, where waiting on the network is a
- * stalled first turn. So nothing here blocks — the child does the fetch and
- * this call returns immediately.
- *
- * Without it a brain is pulled exactly once, at `graft trail connect`, and
- * never again. That was survivable when connecting happened after the brain
- * finished building; it is not survivable now that onboarding connects DURING
- * the build, because the one pull returns an empty rulebook and nothing would
- * ever go back for the real one.
- *
- * The attempt is stamped before spawning, so a brain that is still building
- * costs one request per TTL window rather than one per command.
- */
-export function maybeRefreshBrainRules(repo: string, now = Date.now()): boolean {
-  try {
-    if (!readLink(repo)) return false;
-    const cache = readRulesCache(repo);
-    if (!cacheIsStale(cache, now)) return false;
-    markRulesChecked(repo, now);
-    const child = spawn(process.execPath, [graftCliPath(), '_brain-refresh', repo], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.unref();
-    return true;
-  } catch {
-    return false; // no spawn, or an unreadable repo — the cached rules still serve
-  }
-}
-
 /** One line, or nothing. Nothing is the common case — don't spend context on
  * "you're up to date". */
 export function formatUpdateNudge(current: string, latest: string | null | undefined): string | null {
   if (!isNewer(latest, current)) return null;
-  return `⬆ graft ${current} → ${latest} available: run \`npm i -g @nanonets/graft@latest\` (restart your agent after).`;
+  // `upgrade`, not a bare npm install: under graft it brings the trail command along.
+  return `⬆ ${brand()} ${current} → ${latest} available: run \`${brand()} upgrade\` (restart your agent after).`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -300,16 +266,20 @@ export function writeStamp(
  */
 export function wiredHostIds(repo: string): string[] {
   const ids: string[] = [];
-  if (existsSync(join(repo, '.claude', 'helpers', 'graft-hooks.cjs'))) ids.push('claude');
+  if (existsSync(join(repo, '.trail', 'hook.cjs')) || ['graft', 'trail'].some((n) => existsSync(join(repo, '.claude', 'helpers', `${n}-hooks.cjs`)))) ids.push('claude');
   for (const host of HOSTS) {
-    const path = join(repo, host.relPath);
-    if (!existsSync(path)) continue;
-    // A shared file (AGENTS.md, GEMINI.md) counts only if graft's fenced section
-    // is in it — the user may own the file for entirely unrelated reasons.
-    if (host.kind === 'section') {
-      try { if (!readFileSync(path, 'utf8').includes(START)) continue; } catch { continue; }
-    }
-    ids.push(host.id);
+    // Under either name: a repo on trail has trail's files and blocks.
+    const wired = (['graft', 'trail'] as const).some((n) => {
+      const path = join(repo, hostRelPath(host, n));
+      if (!existsSync(path)) return false;
+      // A shared file (AGENTS.md, GEMINI.md) counts only if graft's fenced section
+      // is in it — the user may own the file for entirely unrelated reasons.
+      if (host.kind === 'section') {
+        try { return readFileSync(path, 'utf8').includes(markersFor(n).start); } catch { return false; }
+      }
+      return true;
+    });
+    if (wired) ids.push(host.id);
   }
   return ids;
 }
@@ -338,15 +308,19 @@ function ownedFilesDrifted(repo: string, hosts: string[]): boolean {
   const wanted = new Set(hosts);
   for (const host of HOSTS) {
     if (host.kind !== 'owned' || !wanted.has(host.id)) continue;
-    const path = join(repo, host.relPath);
-    try {
-      if (!existsSync(path)) continue;
-      // Line endings are the checkout's to choose (git `core.autocrlf` rewrites
-      // them), and a CRLF working copy of the right text is not stale content.
-      const have = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
-      if (have !== host.content().replace(/\r\n/g, '\n')) return true;
-    } catch {
-      // Unreadable is not evidence of drift; leave it to the next session.
+    // Under either name, each compared with the text that name renders: a repo on
+    // trail has trail's file, in trail's spelling.
+    for (const n of ['graft', 'trail'] as const) {
+      const path = join(repo, hostRelPath(host, n));
+      try {
+        if (!existsSync(path)) continue;
+        // Line endings are the checkout's to choose (git `core.autocrlf` rewrites
+        // them), and a CRLF working copy of the right text is not stale content.
+        const have = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+        if (have !== host.content(n).replace(/\r\n/g, '\n')) return true;
+      } catch {
+        // Unreadable is not evidence of drift; leave it to the next session.
+      }
     }
   }
   return false;
@@ -363,6 +337,8 @@ export interface WiringRefresh {
    * version renders, rather than an upgrade. The two need different wording: the
    * user did not upgrade anything, a file was overwritten underneath them. */
   restored?: boolean;
+  /** True when it moved a repo wired as graft over to trail. */
+  switched?: boolean;
 }
 
 /**
@@ -373,6 +349,11 @@ export interface WiringRefresh {
  * that init was given, never builds the graph (this runs at session start — a
  * rebuild there would stall the agent's first turn), and no-ops when the repo has
  * no graft wiring at all.
+ *
+ * `toTrail` says whether this repo should move from graft's wiring to trail's
+ * (see upkeep-run.ts). When it should, the refresh runs whatever the stamp says:
+ * the person installed trail, which is the signal, whether or not graft's own
+ * version moved.
  */
 export function reconcileWiring(
   repo: string,
@@ -380,13 +361,16 @@ export function reconcileWiring(
   deps: {
     wired?: (repo: string) => string[];
     drifted?: (repo: string, hosts: string[]) => boolean;
-    rewrite: (repo: string, hosts: string[], opts: WiringOpts) => void;
+    rewrite: (repo: string, hosts: string[], opts: WiringOpts, toTrail: boolean) => void;
+    toTrail?: (repo: string) => boolean;
   },
 ): WiringRefresh | null {
   try {
     const stamp = readStamp(repo);
+    const toTrail = deps.toTrail?.(repo) ?? false;
     const content = wiringContentHash();
-    const stampCurrent = !!stamp && stamp.version === current && stamp.content === content;
+    // A move to trail runs whatever the stamp says (see above).
+    const stampCurrent = !!stamp && stamp.version === current && stamp.content === content && !toTrail;
     // The stamp is the record of *intent* (what the picker chose); disk is the
     // fallback for repos wired before stamps existed. Union, not just disk:
     // otherwise a host whose rule file went missing — deleted by hand, lost to a
@@ -400,7 +384,7 @@ export function reconcileWiring(
     // reconciliation rather than a version check — see `ownedFilesDrifted`.
     if (stampCurrent && !(deps.drifted ?? ownedFilesDrifted)(repo, hosts)) return null;
     const opts = wiringOpts(stamp);
-    deps.rewrite(repo, hosts, opts);
+    deps.rewrite(repo, hosts, opts, toTrail);
     writeStamp(repo, current, hosts, opts);
     return {
       from: stamp?.version ?? 'unwired',
@@ -412,6 +396,7 @@ export function reconcileWiring(
       // else had replaced. Absent otherwise, so the ordinary upgrade result keeps
       // the exact shape its callers and tests already assert on.
       ...(stampCurrent ? { restored: true as const } : {}),
+      ...(toTrail ? { switched: true as const } : {}),
     };
   } catch {
     return null; // a refresh is an optimization; never fail the caller over it
@@ -420,6 +405,13 @@ export function reconcileWiring(
 
 export function formatWiringRefresh(r: WiringRefresh | null): string | null {
   if (!r) return null;
+  // Said to the agent at session start, which is who can tell the person.
+  if (r.switched)
+    return (
+      `[trail] graft is now trail, and this repo just moved to it: the same commands under the new name, plus learnings in .trail/learnings/ that the whole team shares. ` +
+      `trail is reading the user's past Claude sessions here in the background, and what it learns is there from the next session. ` +
+      `Tell the user this once, in a line at the end of your first reply, and that committing .trail/ and .claude/settings.json once moves their team over too.`
+    );
   // Name the out-of-repo writes explicitly: those are machine-wide and shared by
   // every repo, so a user seeing this line should not have to guess what moved.
   const scope = r.global && r.hosts.includes('agents') ? " (including this machine's ~/.codex config)" : '';

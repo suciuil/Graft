@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { buildConfigPath } from '../util/state.js';
 import { NO_MODEL, formatDollars, type InputRate, type Pricing } from './price.js';
 import { callScope, type ModelTable } from './call-scope.js';
+import { brand, tag } from '../brand.js';
 
 export interface Savings {
   /** How many source files the baseline covers. */
@@ -215,20 +216,21 @@ function modelTableBlock(savedTokens: number): string {
  * nothing for it to copy by mistake.
  */
 function tallyExample(savedTokens: number, rate: InputRate | null): string {
+  const b = brand();
   if (rate === null) {
     const table = modelTableBlock(savedTokens);
     // Fenced, because the column padding IS the table: unfenced, a chat host
     // collapses the runs of spaces and the box falls apart. The fence is part
     // of the example so the agent relays it along with everything else.
     return table
-      ? `\u{1F331} graft saved ~N tokens by this turn, as estimated below:\n\`\`\`${table}\`\`\``
-      : '\u{1F331} graft saved ~N tokens by this turn';
+      ? `\u{1F331} ${b} saved ~N tokens by this turn, as estimated below:\n\`\`\`${table}\`\`\``
+      : `\u{1F331} ${b} saved ~N tokens by this turn`;
   }
-  if (rate.measured) return '\u{1F331} graft saved ~N tokens (~$X) this turn';
+  if (rate.measured) return `\u{1F331} ${b} saved ~N tokens (~$X) this turn`;
   const name = modelLabel(rate);
   return name
-    ? `\u{1F331} graft saved ~N tokens (~$X for ${name}) this turn`
-    : '\u{1F331} graft saved ~N tokens (~$X) this turn';
+    ? `\u{1F331} ${b} saved ~N tokens (~$X for ${name}) this turn`
+    : `\u{1F331} ${b} saved ~N tokens (~$X) this turn`;
 }
 
 /**
@@ -262,7 +264,8 @@ function tallyTail(example: string): string {
 export function savingsTurnNudge(savedTokens: number): string {
   // Leading space, not leading punctuation: each branch below ends its own
   // sentence, so this only joins them.
-  const sum = ' Sum each such line across your graft calls — e.g. ';
+  const b = brand();
+  const sum = ` Sum each such line across your ${b} calls — e.g. `;
   const scope = callScope();
   const rate = savedTokens > 0 ? scope.pricing.rate : null;
   const example = tallyExample(savedTokens, rate);
@@ -277,16 +280,16 @@ export function savingsTurnNudge(savedTokens: number): string {
     // Both of the latter turn the next call into an exactly-priced one, and file
     // the saving under a real model instead of `unknown`.
     const instruction = modelTableBlock(savedTokens)
-      ? 'Reproduce the table exactly, summed across your graft calls, in a ' +
+      ? `Reproduce the table exactly, summed across your ${b} calls, in a ` +
         'collapsed/expandable section.'
       : scope.overMcp
-        ? 'Send `model: "<your model id>"` with your graft tool calls to have ' +
+        ? `Send \`model: "<your model id>"\` with your ${b} tool calls to have ` +
           'savings priced directly.'
-        : 'Pass `--agent-model <your model id>` on your graft calls to have ' +
+        : `Pass \`--agent-model <your model id>\` on your ${b} calls to have ` +
           'savings priced directly.';
     return (
       ' This call cannot be priced: nothing named the model you are running. ' +
-      'At the end of your reply, tell the user the total graft tokens saved ' +
+      `At the end of your reply, tell the user the total ${b} tokens saved ` +
       `this turn. ${instruction}${sum}${tallyTail(example)}`
     );
   }
@@ -304,7 +307,7 @@ export function savingsTurnNudge(savedTokens: number): string {
   // is the one thing this whole module exists to prevent.
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
-    'reply, tell the user the total graft tokens saved this turn and what they ' +
+    `reply, tell the user the total ${b} tokens saved this turn and what they ` +
     'were worth, as ONE line — no table: this call is priced, and a table ' +
     `belongs only to a call that is not.${sum}${tallyTail(example)}`
   );
@@ -336,7 +339,7 @@ export function savingsLine(body: string, saved: Savings | undefined): string {
   const pct = Math.round((delta / base) * 100);
   noteClaimedSavings(delta);
   return (
-    `[graft] tokens saved ≈ ${formatCount(delta)} (${pct}%) — this output ≈ ` +
+    `${tag()} tokens saved ≈ ${formatCount(delta)} (${pct}%) — this output ≈ ` +
     `${formatCount(pack)} tok vs reading the ${saved.files} file(s) it covers whole ≈ ` +
     `${formatCount(base)} tok (estimate).` +
     savingsTurnNudge(delta)
@@ -352,7 +355,8 @@ export function savingsLine(body: string, saved: Savings | undefined): string {
  */
 export function sumSavingsFooters(text: string): number {
   let total = 0;
-  for (const m of text.matchAll(/\[graft\] tokens saved ≈ ([\d,]+)/g)) {
+  // The code a query saved reading, and the digging a reused learning saved.
+  for (const m of text.matchAll(/\[(?:graft|trail)\] (?:tokens|learnings) saved ≈ ([\d,]+)/g)) {
     total += Number(m[1].replace(/,/g, '')) || 0;
   }
   return total;

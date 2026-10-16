@@ -4,6 +4,8 @@ import { readStats, readSession, emptyStats, type Stats } from './state.js';
 import { readWiring, computeStats } from './stats.js';
 import { pricingFor } from '../context/price.js';
 import { agentModel } from './ledger.js';
+import { adoptRepoBrand } from '../brand.js';
+import { noteCount } from '../notes/home.js';
 
 /**
  * The statusline's fast path is the hook-maintained cache (graft/.cache/stats.json).
@@ -27,6 +29,7 @@ export function main(): void {
   let input: any = {};
   try { input = JSON.parse(readFileSync(0, 'utf8')); } catch { /* no/invalid stdin */ }
   const dir = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  adoptRepoBrand(dir);
   const session = readSession(dir, input.session_id || 'default');
   const agent = input?.agent?.name;
   if (agent) { process.stdout.write(renderSubagent(agent, session)); return; }
@@ -36,5 +39,5 @@ export function main(): void {
   // The bar shows a fallback only: `renderStatusline` prefers this session's own
   // measured billing when it has any, so nothing is passed for it here.
   const rate = pricingFor(agentModel(dir, session.model)).rate;
-  process.stdout.write(renderStatusline(stats, session, { ctxPct, rate }).join('\n'));
+  process.stdout.write(renderStatusline(stats, session, { ctxPct, rate, notes: noteCount(dir) }).join('\n'));
 }
