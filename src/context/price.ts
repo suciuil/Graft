@@ -23,8 +23,12 @@
  * every model the user's agent offers and lets them read their own row.
  *
  * Precedence (see {@link pricingFor}): what the session was BILLED, else this
- * table's list price for the model we were told we are running. Nothing else.
+ * table's list price for the model we were told we are running, else the list
+ * price in the local LiteLLM catalog (`price-catalog.ts`) for that same model.
+ * The catalog is fetched only by an explicit `graft prices update` and carries
+ * its fetch date, which the wording names alongside every figure it supplies.
  */
+import { catalogPrice } from './price-catalog.js';
 
 /** Input $/Mtok, list price, per model family. Output tokens are irrelevant —
  * what graft saves is context the agent would otherwise have read IN.
@@ -192,6 +196,11 @@ export function refinesModelId(candidate: string, claim: string): boolean {
  * same way before filing (see `ledgerKey`), so one model reached by two gateways
  * is one row rather than two lines that never add up. */
 export function inputUsdPerMtok(model: unknown): number | null {
+  return builtinInputUsdPerMtok(model) ?? catalogInput(model);
+}
+
+/** {@link inputUsdPerMtok} from graft's own table only. */
+function builtinInputUsdPerMtok(model: unknown): number | null {
   if (typeof model !== 'string') return null;
   const raw = model.trim();
   if (!raw) return null;
@@ -199,6 +208,11 @@ export function inputUsdPerMtok(model: unknown): number | null {
   if (!id) return null;
   for (const [pattern, usd] of INPUT_USD_PER_MTOK) if (pattern.test(id)) return usd;
   return null;
+}
+
+function catalogInput(model: unknown): number | null {
+  if (typeof model !== 'string' || !model.trim()) return null;
+  return catalogPrice(model)?.input ?? null;
 }
 
 /** One turn's input-token usage, as the host's transcript reports it. */
@@ -246,13 +260,23 @@ const MICROS_PER_USD = 1_000_000;
 /** What this turn's input tokens cost, in micro-dollars, or null on a model we
  * have no price for. */
 export function turnInputCostMicros(usage: TurnUsage): number | null {
-  const list = inputUsdPerMtok(usage.model);
-  if (list === null) return null;
-  const weighted =
-    usage.input +
-    usage.cacheCreate * CACHE_CREATE_MULTIPLIER +
-    usage.cacheRead * cacheReadMultiplier(usage.model);
-  return Math.round((weighted * list * MICROS_PER_USD) / 1_000_000);
+  const list = builtinInputUsdPerMtok(usage.model);
+  if (list !== null) {
+    const weighted =
+      usage.input +
+      usage.cacheCreate * CACHE_CREATE_MULTIPLIER +
+      usage.cacheRead * cacheReadMultiplier(usage.model);
+    return Math.round((weighted * list * MICROS_PER_USD) / 1_000_000);
+  }
+  // A catalog-priced model carries its own cache rates where LiteLLM lists them.
+  const c = catalogPrice(usage.model);
+  if (!c) return null;
+  // tokens × $/Mtok is micro-dollars directly.
+  const micros =
+    usage.input * c.input +
+    usage.cacheCreate * (c.cacheWrite ?? c.input * CACHE_CREATE_MULTIPLIER) +
+    usage.cacheRead * (c.cacheRead ?? c.input * CACHE_READ_MULTIPLIER);
+  return Math.round(micros);
 }
 
 /** Every input token this turn was billed for, cached or not — the denominator
@@ -276,6 +300,10 @@ export interface InputRate {
    * rather than `vertex_ai/claude-opus-5`). The tally prefers it: the user
    * picked the model from a menu showing this string, not the wire id. */
   label?: string;
+  /** Set when the list price came from the local LiteLLM catalog rather than
+   * graft's own table: the ISO date that catalog was fetched, so the wording can
+   * say where the figure came from and how old it is. */
+  catalogFetchedAt?: string;
 }
 
 /**
@@ -344,9 +372,11 @@ export function blendedRate(
  */
 export function listRate(model: AgentModel): InputRate | null {
   if (model.confidence !== 'certain' || !model.id) return null;
-  const usdPerMtok = inputUsdPerMtok(model.id);
-  if (usdPerMtok === null) return null;
-  return { usdPerMtok, measured: false, model: model.id, label: model.label };
+  const builtin = builtinInputUsdPerMtok(model.id);
+  if (builtin !== null) return { usdPerMtok: builtin, measured: false, model: model.id, label: model.label };
+  const c = catalogPrice(model.id);
+  if (!c) return null;
+  return { usdPerMtok: c.input, measured: false, model: model.id, label: model.label, catalogFetchedAt: c.fetchedAt };
 }
 
 /**

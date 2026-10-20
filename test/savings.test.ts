@@ -4,6 +4,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   savingsFor,
   savingsLine,
@@ -13,12 +16,23 @@ import {
   setRepoRoot,
   setMcpSurface,
   setModelTable,
+  setDeepDue,
 } from '../src/context/savings.js';
 import { NO_MODEL, pricingFor, type AgentModel } from '../src/context/price.js';
 import { hasSavingsTally } from '../src/claude/tally.js';
 import type { GraphV1, NodeV1 } from '../src/graph/types.js';
 
 const certain = (id: string, label?: string): AgentModel => ({ id, confidence: 'certain', label });
+
+/** Pin the local price catalog to an empty one, so a `graft prices update` on the
+ * developer's machine can never price a model these wording tests expect to be
+ * unpriced. */
+const pricesFile = join(mkdtempSync(join(tmpdir(), 'graft-savings-prices-')), 'prices.json');
+writeFileSync(
+  pricesFile,
+  JSON.stringify({ version: 1, source: 'LiteLLM', url: 'x', fetchedAt: new Date().toISOString(), models: {} }),
+);
+process.env.GRAFT_PRICES_FILE = pricesFile;
 
 /** The footer for a fixed 1,000-token saving, priced however the caller set it
  * up. Every wording assertion below reads this one string. */
@@ -51,6 +65,7 @@ function clearPricing(): void {
   setPricing(null);
   setModelTable(null);
   setMcpSurface(false);
+  setDeepDue(null);
 }
 
 function fileNode(path: string, chars?: number): NodeV1 {
@@ -170,6 +185,71 @@ test('the tally prefers the host display name over the wire id', () => {
 
 // ── unpriced: nothing named the model ──────────────────────────────────────
 
+test('a due deep build gets its own ⚠️ line under the tally, the block agents actually relay', () => {
+  // Observed: Copilot closed with the savings tally and never mentioned the
+  // separate "[graft] … build --deep is recommended" note printed above it.
+  setPricing(pricingFor(certain('claude-opus-5')));
+  setDeepDue('no summaries yet');
+  const f = footer();
+  const [tally, warning] = f.slice(f.indexOf('\u{1F331}')).split('\n');
+  assert.match(tally, /\(~\$X for claude-opus-5\) this turn$/, 'the savings line itself is unchanged');
+  assert.equal(warning, "\u26A0\uFE0F 'graft build --deep' recommended (no summaries yet).");
+  assertUnquotedTally(f);
+  assert.ok(hasSavingsTally(tally.replace('~N', '~1,200')), 'still counted as a reported tally');
+
+  setPricing(pricingFor(NO_MODEL));
+  assert.match(
+    footer(),
+    /🌱 graft saved ~N tokens by this turn\n⚠️ 'graft prices update' recommended \([^\n]*\)\n⚠️ 'graft build --deep' recommended \(no summaries yet\)\./,
+  );
+
+  setDeepDue(null);
+  setPricing(pricingFor(certain('claude-opus-5')));
+  assert.doesNotMatch(footer(), /build --deep|⚠️/, 'nothing due, nothing said');
+  setDeepDue('   ');
+  assert.doesNotMatch(footer(), /build --deep/, 'a blank reason is no reason');
+  clearPricing();
+});
+
+test('a saving graft cannot price suggests `graft prices update` under the tally', () => {
+  setPricing(pricingFor(certain('claude-opus-6')));
+  setDeepDue('no summaries yet');
+  const f = footer();
+  const [tally, prices, deep] = f.slice(f.indexOf('\u{1F331}')).split('\n');
+  assert.equal(tally, '🌱 graft saved ~N tokens by this turn');
+  assert.equal(
+    prices,
+    "⚠️ 'graft prices update' recommended (no known price for the model used: it fetches model prices from " +
+      'LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)',
+  );
+  assert.equal(deep, "⚠️ 'graft build --deep' recommended (no summaries yet).", 'the deep line stays last');
+  assertUnquotedTally(f);
+
+  setDeepDue(null);
+  setPricing(pricingFor(NO_MODEL));
+  assert.match(footer(), /by this turn\n⚠️ 'graft prices update' recommended \([^)]*\)\.$/, 'also when nothing named the model');
+  clearPricing();
+});
+
+test('the line depends only on whether a price is known, not on the stored catalog', () => {
+  // Shown with a catalog stored (it simply does not list the model)...
+  setPricing(pricingFor(certain('claude-opus-6')));
+  assert.match(footer(), /⚠️ 'graft prices update' recommended/);
+  // ...and with none at all.
+  process.env.GRAFT_PRICES_FILE = join(tmpdir(), 'graft-no-such-prices-file.json');
+  assert.match(footer(), /⚠️ 'graft prices update' recommended/);
+  process.env.GRAFT_PRICES_FILE = pricesFile;
+  clearPricing();
+});
+
+test('a priced saving never suggests `graft prices update`', () => {
+  setPricing(pricingFor(certain('claude-opus-5')));
+  assert.doesNotMatch(footer(), /prices update/);
+  setPricing({ rate: { usdPerMtok: 5, measured: true }, model: certain('claude-opus-5') });
+  assert.doesNotMatch(footer(), /prices update/);
+  clearPricing();
+});
+
 test('with no model and no host table, the tally is tokens alone', () => {
   setPricing(pricingFor(NO_MODEL));
   setModelTable(null);
@@ -240,11 +320,11 @@ test('a host that lists its models gets a per-model table instead of nothing', (
   // Fenced, because the padding IS the table — unfenced, a chat host collapses
   // the space runs and the box falls apart.
   assert.match(f, /below:\n```\n\+/);
-  // The block ends on its closing fence and nothing else. It used to end
-  // ```" — a quote that closed graft's own example and was then copied
-  // verbatim into the user's reply. Nor is a full stop appended here: it would
-  // be reproduced just as faithfully, dangling off the fence.
-  assert.ok(f.endsWith('+\n```'), `the footer ends on the closing fence: ${JSON.stringify(f.slice(-12))}`);
+  // The block ends on its closing fence, followed only by the price-update line
+  // (no price is known here). It used to end ```" — a quote that closed graft's
+  // own example and was then copied verbatim into the user's reply. Nor does a
+  // full stop dangle off the fence: it closes the last line instead.
+  assert.match(f, /\+\n```\n⚠️ 'graft prices update' recommended \([^\n]*\)\.$/);
   // And the agent is told where to put it.
   assert.match(f, /collapsed\/expandable section/);
   clearPricing();

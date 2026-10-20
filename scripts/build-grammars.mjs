@@ -768,6 +768,11 @@ function generateUnit(cli, unit, abi) {
   const env = { ...process.env };
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   env[pathKey] = `${dirname(process.execPath)}${delimiter}${env[pathKey] ?? ""}`;
+  if (process.platform === "win32") {
+    // Forward slashes: NODE_OPTIONS treats a backslash inside quotes as an escape.
+    const shim = join(repoRoot, "scripts", "tree-sitter-grammar-path.cjs").replace(/\\/g, "/");
+    env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --require "${shim}"`.trim();
+  }
   const r = spawnSync(cli.exe, args, {
     cwd: unit.dir,
     env,
@@ -822,9 +827,9 @@ function gitModified(repo, files) {
  * modified vs HEAD means a committed, matching pair written in checkout order
  * (tree-sitter-json's grammar.js is hours "newer" than its parser.c from one commit).
  *
- * A parser.c above the ABI graft's runtime loads is regenerated at that ABI too, when
- * it is new content (e.g. an upstream moved to ABI 15): it would build, then silently
- * fail to load, and the language would drop out of graft.
+ * A parser.c above the ABI graft's runtime loads is regenerated at that ABI too (e.g.
+ * an upstream moved to ABI 15): it would build, then silently fail to load, and the
+ * language would drop out of graft. A failed attempt is retried on the next build.
  *
  * Returns `{ generated, pending, failed }`. `pending`: some needed generating but could
  * not (CLI unavailable) — the binding must not then be rebuilt from the stale src/.
@@ -850,7 +855,7 @@ function regenerate(name, dir, entry) {
       reason = "--generate";
     } else if (rec) {
       if (rec.in !== inHash && rec.parser === parserHash) reason = "grammar.js changed since src/parser.c was generated";
-      else if (abiTooNew && rec.parser !== parserHash) reason = `new src/parser.c is ABI ${abiNow}; graft's runtime loads ≤ ${MAX_ABI}`;
+      else if (abiTooNew) reason = `new src/parser.c is ABI ${abiNow}; graft's runtime loads ≤ ${MAX_ABI}`;
     } else {
       const newest = Math.max(...inputs.map((f) => statSync(f).mtimeMs));
       if (newest > statSync(parserC).mtimeMs) {

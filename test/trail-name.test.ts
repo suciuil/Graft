@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brand, cmd, graftNotice, handoverStampPath, noticeStampPath, strandedRepoNotice, tag, trailHandoverLine } from "../src/brand.js";
 import { track } from "../src/telemetry/track.js";
+import { patchState } from "../src/telemetry/identity.js";
 import { commandInvokesGraft } from "../src/claude/session-metrics.js";
 import { savingsLine, sumSavingsFooters } from "../src/context/savings.js";
 import { homeEnv, tmpRepo } from "./helpers.js";
@@ -141,15 +142,15 @@ test("a shell command running trail counts as a retrieval, like graft", () => {
   assert.equal(commandInvokesGraft("echo trail"), false);
 });
 
-test("every telemetry event says which name ran it", () => {
+test("no telemetry event is recorded under either name", () => {
   process.env.GRAFT_POSTHOG_KEY = "phc_test_key";
   const home = scratchHome();
   const open = { HOME: home, USERPROFILE: home } as NodeJS.ProcessEnv;
-  const viaTrail = track("first_run", {}, { home, env: { ...open, TRAIL_INVOKED_AS: "trail" } });
+  patchState({ enabled: true }, home); // opted in under an older version: must not matter now
+  assert.equal(track("first_run", {}, { home, env: { ...open, TRAIL_INVOKED_AS: "trail" } }), null);
   const other = scratchHome();
-  const viaGraft = track("first_run", {}, { home: other, env: { HOME: other, USERPROFILE: other } });
-  assert.equal(viaTrail?.properties.cli_name, "trail");
-  assert.equal(viaGraft?.properties.cli_name, "graft");
+  patchState({ enabled: true }, other);
+  assert.equal(track("first_run", {}, { home: other, env: { HOME: other, USERPROFILE: other } }), null);
 });
 
 // --- the two command layouts, end to end ---
@@ -186,10 +187,10 @@ test("trail --help groups the commands, and lists the workspace ones only once s
   for (const c of ["workspace", "login", "logout"]) assert.match(on.out, new RegExp(`^  ${c} `, "m"), c);
 });
 
-test("graft --help keeps its old flat list, including check, without the trail group", () => {
+test("graft --help keeps its flat list, including check, without the trail group", () => {
   const r = run("graft", ["--help"], scratchHome());
   assert.equal(r.status, 0);
-  assert.match(r.out, /^Usage: graft /m);
+  assert.match(r.out, /^Commands:$/m);
   for (const c of ["check", "stats", "viz"]) assert.match(r.out, new RegExp(`^  ${c} `, "m"), c);
   assert.doesNotMatch(r.out, /^  trail /m);
   assert.ok(!r.out.includes("Workspace ·"));

@@ -16,15 +16,17 @@ This page covers anonymous usage stats only. A Trail workspace you choose to
 connect is separate, and sends more: see
 [What stays on your machine](README.md#what-stays-on-your-machine).
 
+**Telemetry is permanently disabled in this version.** Nothing is recorded or
+sent, and it cannot be turned on: no command, setting, `trail init` option or
+environment variable enables it (`trail telemetry enable` refuses). The rest of
+this document describes the contract the disabled code was written against.
+
 Nothing is ever sent from a command you run. Events are appended to a local file
 and a detached background process posts them at most once a day, so no `trail
 ask` ever waits on the network.
 
-The one exception is the `install` event below, which the npm postinstall hook
-records and hands to that same detached process immediately — an install that
-never runs a command would otherwise never reach a flush, and "installed and
-never used" is a number we need to see. `npm install` itself still waits on
-nothing: the child is detached and its output discarded.
+The npm postinstall hook records no `install` event and starts no background
+process; it only prints a one-line hint.
 
 ## What is sent
 
@@ -136,22 +138,19 @@ variables, API keys, model names, hostnames, usernames, or email addresses.
 - IP-based geolocation is used only to derive a country for aggregate stats;
   PostHog does not retain the IP on the event.
 
-## Opting out
+## Turning it on or off
 
-Any one of these fully disables telemetry:
+You can't: telemetry is **permanently off** in this version. The single gate
+every event passes through (`src/telemetry/gate.ts`) always answers "off",
+whatever the PostHog key stamped at publish time, whatever an older version
+saved in `~/.graft/telemetry.json`, and whatever the environment says.
 
-1. **Uncheck "anonymous usage stats" in the `trail init` picker.** Takes effect
-   immediately and is remembered for this machine.
-2. **`trail telemetry disable`** at any time. `trail telemetry status` shows the
-   current state, and `trail telemetry enable` turns it back on.
-3. **Set [`DO_NOT_TRACK`](https://web.archive.org/web/20251005054121/https://consoledonottrack.com/)** to any value other
-   than `0`. Respected unconditionally — it outranks Trail-code's own setting.
-4. **Run in CI.** `CI`, `GITHUB_ACTIONS`, `GITLAB_CI` and friends switch it off
-   without being asked. A build server is not a user.
-5. **Build from source.** The PostHog key is stamped in only at publish time
-   (`scripts/stamp-telemetry-key.mjs`); a clone, a fork, or a local
-   `npm run build` compiles with an empty key and the telemetry module is inert.
-   Forks never send events anywhere.
+- `trail telemetry status` reports it as permanently disabled.
+- `trail telemetry enable` refuses with an error and changes nothing.
+- `trail telemetry disable` is accepted and changes nothing.
+- `trail init` never shows the "anonymous usage stats" row.
+- `trail telemetry debug` shows the local queue, which stays empty. Events left
+  in it by an older version are never sent.
 
 ## Where the events go
 

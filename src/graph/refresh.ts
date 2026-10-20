@@ -34,7 +34,14 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { contextDirFor } from "../context/node-file.js";
-import { acquireLockIn, DEFAULT_DEEP_STALE_THRESHOLD, readDeepStaleThreshold, releaseLockIn } from "../util/state.js";
+import {
+  acquireLockIn,
+  DEFAULT_DEEP_STALE_THRESHOLD,
+  readDeepStaleThreshold,
+  releaseLockIn,
+  resolveDeepStaleThreshold,
+  type DeepStaleThresholdSource,
+} from "../util/state.js";
 import { CACHE_DIR } from "../context/node-file.js";
 import { buildGraph } from "./build.js";
 import { driftCount, isClean, probeDrift, readFingerprint, type Drift } from "./fingerprint.js";
@@ -309,15 +316,27 @@ export function summaryStaleness(graph: GraphV1 | null): SummaryStaleness {
   return s;
 }
 
+/** Out-of-date share of the summarizable nodes, 0–100, unrounded. */
+export function outdatedPercent(s: SummaryStaleness): number {
+  return s.total === 0 ? 0 : ((s.stale + s.unsummarized) / s.total) * 100;
+}
+
+/** Whether a `graft build --deep` is due: something is out of date and the share
+ * is strictly above `thresholdPct`. The single rule behind both the query nudge
+ * and `graft staleness`, so the two can never disagree. */
+export function deepRebuildDue(s: SummaryStaleness, thresholdPct: number = DEFAULT_DEEP_STALE_THRESHOLD): boolean {
+  return s.total > 0 && s.stale + s.unsummarized > 0 && outdatedPercent(s) > thresholdPct;
+}
+
 /** The one-line `graft build --deep` recommendation, or null at or below
  * `thresholdPct` percent out of date. */
 export function deepRebuildNote(
   s: SummaryStaleness,
   thresholdPct: number = DEFAULT_DEEP_STALE_THRESHOLD,
 ): string | null {
+  if (!deepRebuildDue(s, thresholdPct)) return null;
   const outdated = s.stale + s.unsummarized;
-  if (s.total === 0 || outdated === 0 || (outdated / s.total) * 100 <= thresholdPct) return null;
-  const pct = Math.round((outdated / s.total) * 100);
+  const pct = Math.round(outdatedPercent(s));
   const what =
     s.summarized === 0
       ? `no \`${cmd("graft build --deep")}\` has run yet: none of the ${s.total} nodes has a prose summary`
@@ -342,6 +361,21 @@ export function deepNoteFor(
   root: string,
   opts: { contextDir?: string; children?: string[]; home?: string } = {},
 ): string | null {
+  return deepDueFor(root, opts)?.note ?? null;
+}
+
+/** The short reason a deep build is due, for the savings tally to carry:
+ * "no summaries yet" or "29% of summaries out of date". */
+export function deepDueReason(s: SummaryStaleness): string {
+  return s.summarized === 0 ? "no summaries yet" : `${Math.round(outdatedPercent(s))}% of summaries out of date`;
+}
+
+/** {@link deepNoteFor}'s note plus its short reason, or null when no deep build
+ * is due. Never throws. */
+export function deepDueFor(
+  root: string,
+  opts: { contextDir?: string; children?: string[]; home?: string } = {},
+): { note: string; reason: string } | null {
   try {
     // Same dir rule as `ensureFreshChildren`: a child's graph lives in its own
     // `<child>/graft`, never under the parent's `--dir`.
@@ -349,15 +383,140 @@ export function deepNoteFor(
       ? opts.children.map((c) => contextDirFor(resolve(root, c)))
       : [contextDirFor(resolve(root), opts.contextDir)];
     const sum: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
-    for (const d of dirs) {
-      const s = summaryStaleness(loadGraphCached(d));
-      sum.stale += s.stale;
-      sum.unsummarized += s.unsummarized;
-      sum.total += s.total;
-      sum.summarized += s.summarized;
-    }
-    return deepRebuildNote(sum, readDeepStaleThreshold(resolve(root), opts.home));
+    for (const d of dirs) addStaleness(sum, summaryStaleness(loadGraphCached(d)));
+    const note = deepRebuildNote(sum, readDeepStaleThreshold(resolve(root), opts.home));
+    return note ? { note, reason: deepDueReason(sum) } : null;
   } catch {
     return null;
   }
+}
+
+/** One file's share of the out-of-date summaries. */
+export interface FileStaleness {
+  path: string;
+  outdated: number;
+  total: number;
+}
+
+/** Everything `graft staleness` reports: is a `--deep` build worth its tokens yet. */
+export interface StalenessReport {
+  /** False when no graph exists yet: there is nothing to measure until `graft build`. */
+  indexed: boolean;
+  totals: SummaryStaleness;
+  /** Out-of-date share, 0–100, unrounded. */
+  pct: number;
+  threshold: number;
+  thresholdSource: DeepStaleThresholdSource;
+  /** Exactly when queries would show the `graft build --deep` nudge. */
+  recommended: boolean;
+  /** Per child repo of a workspace; empty for a single repo. */
+  repos: { name: string; totals: SummaryStaleness; pct: number }[];
+  /** Files holding the most out-of-date summaries, worst first. */
+  files: FileStaleness[];
+}
+
+const addStaleness = (into: SummaryStaleness, s: SummaryStaleness): void => {
+  into.stale += s.stale;
+  into.unsummarized += s.unsummarized;
+  into.total += s.total;
+  into.summarized += s.summarized;
+};
+
+/**
+ * The out-of-date share of `root`'s node summaries (or, given `children`, a
+ * workspace's child repos combined), judged against the same threshold and rule
+ * as the query nudge. Read from the graph on disk: refresh it first for numbers
+ * that include uncommitted edits.
+ */
+export function stalenessReport(
+  root: string,
+  opts: { contextDir?: string; children?: string[]; home?: string; top?: number } = {},
+): StalenessReport {
+  const base = resolve(root);
+  const sources = opts.children
+    ? opts.children.map((c) => ({ name: c.replace(/\\/g, "/"), dir: contextDirFor(resolve(base, c)) }))
+    : [{ name: "", dir: contextDirFor(base, opts.contextDir) }];
+  const totals: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
+  const repos: StalenessReport["repos"] = [];
+  const byFile = new Map<string, FileStaleness>();
+  let indexed = false;
+  for (const { name, dir } of sources) {
+    const graph = loadGraphCached(dir);
+    if (graph) indexed = true;
+    const s = summaryStaleness(graph);
+    addStaleness(totals, s);
+    if (opts.children) repos.push({ name, totals: s, pct: outdatedPercent(s) });
+    for (const n of graph?.nodes ?? []) {
+      if (n.summary_state === "none") continue;
+      const path = name ? `${name}/${n.path}` : n.path;
+      const f = byFile.get(path) ?? { path, outdated: 0, total: 0 };
+      f.total++;
+      if (n.summary_state === "stale" || n.summary_state === "pending") f.outdated++;
+      byFile.set(path, f);
+    }
+  }
+  const { value: threshold, source: thresholdSource } = resolveDeepStaleThreshold(base, opts.home);
+  const files = [...byFile.values()]
+    .filter((f) => f.outdated > 0)
+    .sort((a, b) => b.outdated - a.outdated || a.path.localeCompare(b.path))
+    .slice(0, Math.max(0, opts.top ?? 10));
+  return {
+    indexed,
+    totals,
+    pct: outdatedPercent(totals),
+    threshold,
+    thresholdSource,
+    recommended: deepRebuildDue(totals, threshold),
+    repos,
+    files,
+  };
+}
+
+/** A percent for people: whole when it is, one decimal when rounding would hide
+ * which side of the threshold it falls on (10.4% vs a 10% threshold). */
+const showPct = (p: number): string => {
+  const r = Math.round(p * 10) / 10;
+  return Number.isInteger(r) ? `${r}%` : `${r.toFixed(1)}%`;
+};
+
+export function formatStalenessReport(r: StalenessReport): string {
+  const deep = `\`${cmd("graft build --deep")}\``;
+  if (!r.indexed) return `no graft index here yet — run \`${cmd("graft build")}\` first, then ${deep} for the prose summaries`;
+  const t = r.totals;
+  if (t.total === 0) return "staleness: no summarizable nodes — nothing for a deep build to do";
+  const outdated = t.stale + t.unsummarized;
+  const lines: string[] = [];
+  lines.push(
+    t.summarized === 0
+      ? `staleness: 100% — no ${deep} has run yet; none of the ${t.total} nodes has a prose summary`
+      : outdated === 0
+        ? `staleness: 0% — all ${t.total} node summaries are current`
+        : `staleness: ${showPct(r.pct)} of node summaries out of date — ${outdated} of ${t.total} (${t.stale} changed, ${t.unsummarized} new)`,
+  );
+  const from = { repo: "this repo", global: "global", default: "default" }[r.thresholdSource];
+  const verdict =
+    r.recommended
+      ? `above it — ${deep} is recommended (an LLM pass: needs an API key, costs tokens)`
+      : outdated === 0
+        ? "every summary is current — nothing for a deep build to do"
+        : r.threshold >= 100
+          ? `the nudge is off here; run ${deep} whenever you want the summaries current`
+          : `at or below it — ${deep} is not needed yet`;
+  lines.push(`threshold: ${r.threshold}% (${from}) → ${verdict}`);
+  if (r.repos.length > 0) {
+    lines.push("by repo:");
+    for (const repo of r.repos) {
+      const o = repo.totals.stale + repo.totals.unsummarized;
+      lines.push(`  ${showPct(repo.pct).padStart(6)}  ${repo.name}  (${o} of ${repo.totals.total})`);
+    }
+  }
+  if (r.files.length > 0) {
+    lines.push("most out-of-date files:");
+    const width = String(Math.max(...r.files.map((f) => f.total))).length;
+    for (const f of r.files) {
+      lines.push(`  ${String(f.outdated).padStart(width)} of ${String(f.total).padStart(width)}  ${f.path}`);
+    }
+  }
+  lines.push(`change the threshold with \`${cmd("graft deep-threshold")} <percent>\` (100 = never nudge)`);
+  return lines.join("\n");
 }

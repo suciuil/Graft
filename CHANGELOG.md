@@ -2,8 +2,107 @@
 
 ## Unreleased
 
+### Changed
+
+- **Telemetry is permanently disabled.** Nothing is recorded or sent, and it
+  cannot be turned on: the gate always answers "off", whatever the publish-time
+  key, a setting saved by an older version, or the environment says.
+  `graft telemetry enable` refuses with an error, `graft init` no longer shows
+  the "anonymous usage stats" row, no first-run notice is printed, and the npm
+  postinstall hook records no `install` event and starts no background flush.
+  `graft telemetry status` says it is permanently disabled; events queued by an
+  older version are never sent.
+- The deep-build line under the savings tally now puts the command in single
+  quotes: `⚠️ 'graft build --deep' recommended (…)`.
+
 ### Added
 
+- **`graft prices update` / `graft prices status`: dollar savings for models graft
+  does not list.** `update` downloads LiteLLM's public model price catalog with
+  one anonymous GET (no credentials, no model ids, nothing about the repo) and
+  stores only the input-side rates in `~/.graft/prices.json` (`GRAFT_PRICES_FILE`
+  overrides the path). When graft's built-in table has no price for the model a
+  call names, that catalog prices it, including its own cache-read/write rates,
+  and the nudge says the figure came from LiteLLM and when it was fetched. A
+  session's measured billing and the built-in table still take precedence. The
+  stored catalog is used until the next update replaces it, and a failed update
+  keeps the previous copy.
+- **A `⚠️ 'graft prices update' recommended (…)` line under the savings tally**
+  whenever a saving is reported in tokens alone because graft knows no price for
+  the model. It sits between the tally and the deep-build line.
+
+- **`graft api url`, `graft api key`, `graft model`: save the LLM settings once.**
+  Each shows the current value of `GRAFT_BASE_URL` / `GRAFT_API_KEY` (masked) /
+  `GRAFT_MODEL`, the saved one, and what `build --deep` would use and why. Given
+  a value, or answered at the prompt in a terminal, it saves it as a user
+  environment variable, so new terminals, IDEs and MCP hosts see it (Windows:
+  `HKCU\Environment`, written without putting the key on a command line;
+  macOS/Linux: `~/.graft/env.sh`, mode 600 and sourced from the shell profile,
+  or a fish `conf.d` file). `api key` asks for the key with hidden input.
+  `model` lists the models the endpoint serves, mid-tier first with top-tier
+  ones marked as not needed, and lets you pick one by number; `model --list`
+  prints that list. The recommended model (in the picker, the list, and the
+  `build --deep` hint) is the endpoint's latest Gemini Flash (not Flash-Lite),
+  else its latest GPT terra, else its latest Claude Sonnet. After saving, one `GET /models` checks the endpoint, the
+  key, and that the model is listed (`--no-verify` skips it). `--unset` removes
+  a saved value. The `build --deep` failure hints and the no-key warning now
+  name these commands.
+
+- **`graft build --deep` says how to fix a failed LLM pass.** When the deep
+  pass fails, the report now ends with a "How to fix it:" block naming the
+  setting to change: an unreachable endpoint (connection refused, DNS, timeout,
+  wrong path) → `GRAFT_BASE_URL`, including when it is unset and graft's
+  default endpoint was used; a rejected or expired key → `GRAFT_API_KEY` (never
+  echoed); an unknown model (the default or `GRAFT_MODEL`) → `GRAFT_MODEL`,
+  listing the models the endpoint serves (`GET /models`, mid-tier first) or,
+  when it will not list them, examples such as `claude-sonnet-5.5`,
+  `gpt-5.5-terra`, `gemini-3.8-flash` — with a note that a top-tier model
+  (Opus, astra/sol, Pro) is not needed. Each hint shows the shell syntax to
+  set the variable and which flag or variable the bad value came from. Quota
+  and balance failures get no hint, since no setting fixes them. Workspace
+  builds print the hints once for all child repos.
+
+- **Agents now pass on a due `graft build --deep`.** The `[graft] … build --deep
+  is recommended` note was observed going unrelayed (GitHub Copilot closed with
+  the savings tally only): it prints before the savings line, whose "at the end
+  of your reply…" claims the slot an agent fills. While a deep build is due,
+  the example tally now gets a second line,
+  `⚠️ graft build --deep recommended (no summaries yet | N% of summaries out
+  of date)`, on the CLI and over MCP, and the agent instructions and skill say
+  to keep that line and never to run the deep build unasked.
+- **Clearer help.** `graft --help` is now just the command list, A→Z (a
+  group's commands by full path: `api key`, `api url`). Each entry says in
+  plain words what the command does and lists its arguments, every one of its
+  options, and examples. The global options appear only on the commands they
+  affect: `--dir` on the commands that read or write the graph,
+  `--agent-model` on the query commands, and `--provider`, `--model`,
+  `--api-key`, `--base-url` on `build`. `graft <command> --help` and
+  `graft help <command>` print that same entry; `graft /h` and `graft /help`
+  (unlisted) print the same as `graft help`. `-h/--help` and `-v/--version`
+  still work but are not listed, and `--agent-model` no longer advertises
+  `GRAFT_AGENT_MODEL`, which has been ignored since 0.18.0. `trail --help` keeps
+  its grouped layout. An unknown command (`graft buld`) prints the error and
+  the "Did you mean …?" suggestion followed by that full help, on stderr
+  (`graft api foo` shows the `api` commands); other errors stay one line.
+  `graft --model x` with no command now prints a short
+  error with the corrected command (`graft --model x build --deep`, never
+  echoing an API key) instead of the whole help.
+- **`graft staleness [dir]`: is a `--deep` build worth it yet.** Prints what
+  share of a repo's node summaries are out of date (changed plus new code),
+  the deep-threshold it is judged against and where that value comes from, the
+  verdict (the same rule as the query nudge, so the two never disagree), and
+  the files holding the most out-of-date summaries (`--top N`). Refreshes the
+  graph first (`--no-refresh` to skip), sums a workspace's child repos with a
+  per-repo split, and `--json` gives scripts `recommended` / `pct` / `totals`.
+  $0, no LLM.
+- **LLM calls trust the operating system's certificate store.** Behind a
+  corporate gateway or TLS-inspecting proxy signed by a company root, every
+  `--deep` call used to fail with a bare `Connection error.`
+  (`SELF_SIGNED_CERT_IN_CHAIN`) unless each machine set `NODE_EXTRA_CA_CERTS`.
+  graft now adds the OS store to Node's bundled roots on its first network
+  request, in every process an agent starts (CLI, `graft mcp`, hooks); queries
+  that never touch the network pay nothing. Needs Node 22.19+/24.5+ (older Node
+  is unchanged); `GRAFT_SYSTEM_CA=0` turns it off.
 - **`graft build --deep` pauses through an empty relay balance instead of
   failing.** On a `403 Insufficient account balance` from any relay, once the
   short balance backoff is spent, one rejected call is re-sent on a shared poll

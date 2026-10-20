@@ -332,6 +332,19 @@ saving was priced at. When the example carries no dollar figure, report the
 tokens alone — graft could not identify the model, and a number you invent is
 worse than none.
 
+When a \`graft build --deep\` is due (summaries missing, or more of them out of
+date than the repo's deep-threshold), the example tally gets a second line,
+\`⚠️ 'graft build --deep' recommended (29% of summaries out of date)\`. Keep that
+line, on its own line under the tally: it is the only place the user learns
+that the prose summaries lag the code. Don't run \`graft build --deep\` yourself
+unless asked — it is an LLM pass that needs an API key and costs tokens.
+
+When a saving could not be priced because graft knows no price for the model,
+the example tally also gets a \`⚠️ 'graft prices update' recommended (…)\` line.
+Keep it under the tally too: \`graft prices update\` fetches LiteLLM's public
+price catalog once and stores it locally, so later savings are priced in dollars.
+Don't run it yourself unless asked.
+
 Pass \`--agent-model <your own model id>\` on your graft calls when you know it
 (e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices the
 tokens it saves at YOUR model's rate and cannot see which model you are, and it

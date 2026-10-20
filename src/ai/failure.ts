@@ -31,20 +31,28 @@ export const MAX_CONSECUTIVE_FAILURES = 5;
  * under-matching just falls back to the consecutive-failure cutoff.
  */
 export function terminalReason(message: string): string | null {
+  switch (terminalKind(message)) {
+    case "balance":
+      return "the relay still reports insufficient account balance after backing off and waiting for a refill (GRAFT_BALANCE_WAIT_MS)";
+    case "quota":
+      return "the provider reports the quota/credit for this key is exhausted";
+    case "auth":
+      return "the provider rejected the API key";
+    default:
+      return null;
+  }
+}
+
+/** Which kind of {@link terminalReason} a message is, for callers that act on it (hints). */
+export function terminalKind(message: string): "balance" | "quota" | "auth" | null {
   const m = message.toLowerCase();
   // Checked before the 403 rule: a relay says "403 Insufficient account balance",
   // and "rejected the API key" would send the user after the wrong fix. By the time
   // it reaches the gate the transport has already backed off and waited
   // GRAFT_BALANCE_WAIT_MS for a refill.
-  if (isRelayBalanceError(message)) {
-    return "the relay still reports insufficient account balance after backing off and waiting for a refill (GRAFT_BALANCE_WAIT_MS)";
-  }
-  if (/quota|insufficient[_ ]funds|insufficient[_ ]quota|billing|payment required|402/.test(m)) {
-    return "the provider reports the quota/credit for this key is exhausted";
-  }
-  if (/\b401\b|\b403\b|unauthorized|invalid api key|invalid_api_key|authentication/.test(m)) {
-    return "the provider rejected the API key";
-  }
+  if (isRelayBalanceError(message)) return "balance";
+  if (/quota|insufficient[_ ]funds|insufficient[_ ]quota|billing|payment required|402/.test(m)) return "quota";
+  if (/\b401\b|\b403\b|unauthorized|invalid api key|invalid_api_key|authentication/.test(m)) return "auth";
   return null;
 }
 

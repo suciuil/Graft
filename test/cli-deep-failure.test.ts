@@ -129,3 +129,74 @@ test("#127: the doomed calls stop instead of one per file", async () => {
     await gateway.close();
   }
 });
+
+/** A gateway that answers chat calls with `status`/`body` and lists `models` on GET /models. */
+async function gatewayServer(
+  status: number,
+  body: unknown,
+  models?: string[],
+): Promise<{ url: string; close: () => Promise<void> }> {
+  const server: Server = createServer((req, res) => {
+    if (req.method === "GET" && req.url?.endsWith("/models") && models) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ object: "list", data: models.map((id) => ({ id, object: "model", created: 0, owned_by: "x" })) }));
+      return;
+    }
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  if (addr === null || typeof addr === "string") throw new Error("no port");
+  return {
+    url: `http://127.0.0.1:${addr.port}/v1`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+test("hints: an unknown model names GRAFT_MODEL and lists the endpoint's models", async () => {
+  const gateway = await gatewayServer(
+    404,
+    { error: { message: "The model `test-model` does not exist", type: "invalid_request_error", code: "model_not_found" } },
+    ["claude-opus-5", "text-embedding-3-small", "gemini-3.8-flash"],
+  );
+  try {
+    const r = await runBuild(repo(3), gateway.url);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /How to fix it:/);
+    assert.match(r.stderr, /Model "test-model" \(from --model\) was not found/);
+    assert.match(r.stderr, /Models this endpoint serves: gemini-3\.8-flash, claude-opus-5/);
+    assert.match(r.stderr, /GRAFT_MODEL\s*=\s*"gemini-3\.8-flash"/);
+    assert.match(r.stderr, /top-tier model .* is not necessary/);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("hints: a rejected key names GRAFT_API_KEY without echoing it", async () => {
+  const gateway = await gatewayServer(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error" } });
+  try {
+    const r = await runBuild(repo(3), gateway.url);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /rejected the API key \(from --api-key\)/);
+    assert.match(r.stderr, /GRAFT_API_KEY\s*=\s*"<your-api-key>"/);
+    assert.doesNotMatch(r.stderr, /test-key/);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("hints: an unreachable endpoint names GRAFT_BASE_URL", async () => {
+  // A port that was just free: nothing listens there, so every call is refused.
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const addr = probe.address();
+  if (addr === null || typeof addr === "string") throw new Error("no port");
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  const url = `http://127.0.0.1:${addr.port}/v1`;
+
+  const r = await runBuild(repo(3), url);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, new RegExp(`${url.replace(/[.]/g, "\\.")} could not be reached \\(from --base-url\\)`));
+  assert.match(r.stderr, /GRAFT_BASE_URL\s*=\s*"https:\/\/<your-llm-endpoint>\/v1"/);
+});

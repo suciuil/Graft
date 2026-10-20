@@ -11,6 +11,7 @@ import { patchBuildConfig, type BuildConfig } from "../util/state.js";
 import { brand, cmd, PACKAGE_FOR } from "../brand.js";
 import { nativeFallbackNotice } from "./native.js";
 import type { EngineConfig } from "../ai/providers.js";
+import { printLlmFailureHints } from "../ai/llm-hints.js";
 import { formatAsk } from "../ask/ask.js";
 import type { Direction } from "./traverse.js";
 import {
@@ -56,6 +57,8 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
   // Native grammars load once per process, so the children share one answer:
   // collected here and printed once at the end, not once per repo.
   const fellBack = { languages: new Set<string>(), packages: new Set<string>() };
+  // Every child shares one provider config, so its LLM failures get one set of hints.
+  const llmMessages: (string | undefined)[] = [];
   const buildChild = async (childDir: string, childName: string): Promise<void> => {
     // Persisted BEFORE the child build itself runs, same as the single-repo
     // path in cli.ts, so this build and every later no-flag child build agree.
@@ -76,10 +79,11 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
       patchBuildConfig(childDir, childConfigPatch);
     }
     const engine = new Graft({ ...opts.childConfig, contextDir: undefined });
-    if (opts.deep) await engine.init(childDir, { extensions: opts.extensions });
+    const c = opts.deep ? await engine.init(childDir, { extensions: opts.extensions }) : undefined;
     const g = await engine.graph(childDir, { llm: opts.deep, concurrency: opts.concurrency });
     console.log(`✓ ${childName}/: ${g.nodes} nodes, ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
     for (const e of g.errors) console.error(`✗ ${childName}/: ${e}`);
+    if (opts.deep) llmMessages.push(c?.fatal, ...(c?.errors ?? []), g.meaning.fatal, ...g.errors);
     for (const l of g.nativeFallback?.languages ?? []) fellBack.languages.add(l);
     for (const p of g.nativeFallback?.packages ?? []) fellBack.packages.add(p);
   };
@@ -103,6 +107,7 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
     opts.packageName ?? PACKAGE_FOR[brand()],
   );
   if (notice) console.error(notice);
+  if (opts.deep) await printLlmFailureHints(llmMessages, opts.childConfig, "");
 }
 
 export function runWorkspaceAsk(
