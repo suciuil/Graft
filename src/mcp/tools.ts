@@ -7,11 +7,11 @@ import { formatAsk, skeleton, formatSkeleton } from '../ask/ask.js';
 import { formatCheckReport } from '../context/check.js';
 import { formatGraphCheckReport } from '../graph/check.js';
 import { loadGraphCached } from '../graph/load.js';
-import { deepNoteFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
+import { deepDueFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
+import { withSavings, setDeepDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
 import { kiloModelRows } from '../hosts/models.js';
@@ -332,6 +332,7 @@ async function callToolScoped(
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     let note: string | null = null;
     let deep: string | null = null;
+    setDeepDue(null);
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
         ? await ensureFreshChildren(root, ws.children, { contextDir: dirOverride })
@@ -339,7 +340,10 @@ async function callToolScoped(
       note = refreshNote(r);
       // Read after the refresh, which is what marks changed nodes' summaries stale.
       // Skipped for graft_check_freshness, whose report already names them.
-      deep = deepNoteFor(root, { contextDir: dirOverride, children: ws?.children });
+      const due = deepDueFor(root, { contextDir: dirOverride, children: ws?.children });
+      deep = due?.note ?? null;
+      // Before the tool runs: its savings line's example tally carries this.
+      setDeepDue(due?.reason ?? null);
     }
     const fed = ws ? await callWorkspaceTool(root, dirOverride, name, args) : null;
     const res = fed ?? (await callSingleTool(root, name, args, dirOverride));

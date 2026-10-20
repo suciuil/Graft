@@ -54,6 +54,12 @@ export interface CallScope {
    * word wins when they disagree.
    */
   hostModel: string | null;
+  /**
+   * Set when a `graft build --deep` is due for this call's repo: a short reason
+   * ("29% of summaries out of date"). The savings tally carries it, because the
+   * tally is the one line agents reliably relay; a separate note gets dropped.
+   */
+  deepDue: string | null;
 }
 
 function freshScope(): CallScope {
@@ -65,6 +71,7 @@ function freshScope(): CallScope {
     claimedTokens: 0,
     agentModel: null,
     hostModel: null,
+    deepDue: null,
   };
 }
 

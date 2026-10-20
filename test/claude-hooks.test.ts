@@ -8,6 +8,7 @@ import { readStats, readSession } from '../src/claude/state.js';
 import { runSync } from '../src/claude/sync-run.js';
 import { savingsLine } from '../src/context/savings.js';
 import { CI_ENV_VARS } from '../src/telemetry/gate.js';
+import { patchState } from '../src/telemetry/identity.js';
 import { writeStats, emptyStats, acquireLock, resolveContextDir } from '../src/claude/state.js';
 
 test('underGraft detects edits inside graft/', () => {
@@ -542,30 +543,26 @@ test('cursor-mcp: a graft MCP tool is a graft read with savings from result_json
   }
 });
 
-test('cursor-session-end force-closes THIS conversation even though its file was just touched (idle gate skipped)', async () => {
+test('cursor-session-end runs cleanly and records nothing: telemetry is permanently off', async () => {
   const d = mkdtempSync(join(tmpdir(), 'graft-cursor-end-'));
   const home = mkdtempSync(join(tmpdir(), 'graft-cursor-end-home-'));
   mkdirSync(join(d, 'graft', '.cache', 'session'), { recursive: true });
   const sfile = join(d, 'graft', '.cache', 'session', 'c1.json');
-  // mtime = now: the idle sweep would skip this, but the end hook must summarize it.
   writeFileSync(sfile, JSON.stringify({ graftReads: 8, sourceReads: 2, savedTokens: 7400 }));
 
-  // Turn telemetry on against a scratch $HOME so the rollup actually queues (and
-  // marks the file), the observable proof the force-close ran — not just no-throw.
-  //
-  // EVERY CI variable has to go, not just `CI`: `inCi` is deliberately generous and
-  // also reads GITHUB_ACTIONS, GITLAB_CI and six more. Clearing `CI` alone passed on
-  // a laptop and failed on GitHub Actions, where GITHUB_ACTIONS is set — so the list
-  // comes from `CI_ENV_VARS` rather than being copied here, and cannot drift from it.
+  // Every gate an older graft had is opened — key, opt-in, no CI, no DO_NOT_TRACK —
+  // so this proves nothing can turn the rollup back on.
   const scrubbed = ['HOME', 'USERPROFILE', 'GRAFT_POSTHOG_KEY', 'DO_NOT_TRACK', ...CI_ENV_VARS];
   const saved = Object.fromEntries(scrubbed.map((k) => [k, process.env[k]]));
   for (const k of [...CI_ENV_VARS, 'DO_NOT_TRACK']) delete process.env[k];
   process.env.HOME = home; process.env.USERPROFILE = home;
   process.env.GRAFT_POSTHOG_KEY = 'phc_test_key';
+  patchState({ enabled: true }, home);
   process.env.CLAUDE_PROJECT_DIR = d;
   try {
     await runWithStdin(JSON.stringify({ conversation_id: 'c1' }), () => main('cursor-session-end'));
-    assert.equal(readSession(d, 'c1').summarized, true, 'the just-ended conversation was rolled up');
+    assert.notEqual(readSession(d, 'c1').summarized, true, 'no rollup was recorded');
+    assert.equal(existsSync(join(home, '.graft', 'telemetry-queue.ndjson')), false, 'nothing was queued');
   } finally {
     delete process.env.CLAUDE_PROJECT_DIR;
     for (const [k, v] of Object.entries(saved))

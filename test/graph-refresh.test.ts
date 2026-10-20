@@ -10,7 +10,20 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../src/graph/build.js";
-import { deepNoteFor, deepRebuildNote, ensureFreshChildren, ensureFreshGraph, refreshNote, summaryStaleness } from "../src/graph/refresh.js";
+import {
+  deepDueFor,
+  deepDueReason,
+  deepNoteFor,
+  deepRebuildDue,
+  deepRebuildNote,
+  ensureFreshChildren,
+  ensureFreshGraph,
+  formatStalenessReport,
+  outdatedPercent,
+  refreshNote,
+  stalenessReport,
+  summaryStaleness,
+} from "../src/graph/refresh.js";
 import { extractCachePath } from "../src/graph/extract-cache.js";
 import { fingerprintPath, isClean, probeDrift } from "../src/graph/fingerprint.js";
 import { readGraph, wiringPath, writeGraph } from "../src/graph/write.js";
@@ -624,7 +637,7 @@ test("graft deep-threshold shows, sets, validates and resets the threshold, per 
   assert.equal(readGlobalSettings(home)?.deepStaleThreshold, undefined);
 
   const help = runCli(["--help"]);
-  assert.match(help.stdout, /^\s+deep-threshold \[options\] \[percent\] \[dir\]/m, "listed among the graft commands");
+  assert.match(help.stdout, /^\s+deep-threshold \[percent\] \[dir\] \[options\]/m, "listed among the graft commands");
 });
 
 test("an edit after a deep build surfaces the --deep nudge on MCP and stays silent before it", () =>
@@ -683,4 +696,151 @@ test("a graph only ever built by `graft build` gets the nudge too — unless the
     patchBuildConfig(d, { deepStaleThreshold: 100 });
     const optedOut = await callTool(d, "graft_find_code", { query: "add" });
     assert.doesNotMatch(optedOut.text, /graft build --deep/);
+  }));
+
+/** Every summarizable node `ready`, then the first `n` of them `stale`. */
+function deepBuiltWithStale(d: string, n: number): GraphV1 {
+  const g = graphOf(d);
+  let left = n;
+  for (const node of g.nodes) {
+    if (node.summary_state === "none") continue;
+    node.summary = `summary of ${node.id}`;
+    node.summary_state = left-- > 0 ? "stale" : "ready";
+  }
+  writeGraph(g, outOf(d));
+  return g;
+}
+
+test("deepRebuildDue is the nudge's rule: strictly above the threshold, never for nothing out of date", () => {
+  for (const [s, t] of [[counts(1, 0, 10), 10], [counts(1, 1, 10), 10], [counts(0, 0, 10), 0], [counts(5, 5, 10), 100], [counts(0, 0, 0), 0]] as const) {
+    assert.equal(deepRebuildDue(s, t), deepRebuildNote(s, t) !== null, JSON.stringify([s, t]));
+  }
+  assert.equal(outdatedPercent(counts(1, 1, 8)), 25);
+  assert.equal(outdatedPercent(counts(0, 0, 0)), 0);
+});
+
+test("stalenessReport: share, threshold and verdict match the nudge, worst files first", async () => {
+  const d = repo();
+  const home = scratchHome();
+  writeFileSync(join(d, "src", "mul.ts"), MUL);
+  await buildGraph(d);
+  const g = deepBuiltWithStale(d, 1);
+  const total = summaryStaleness(g).total;
+
+  const r = stalenessReport(d, { home });
+  assert.equal(r.indexed, true);
+  assert.deepEqual(r.totals, { stale: 1, unsummarized: 0, total, summarized: total });
+  assert.equal(r.pct, (1 / total) * 100);
+  assert.deepEqual([r.threshold, r.thresholdSource], [10, "default"]);
+  assert.equal(r.recommended, deepNoteFor(d, { home }) !== null, "the report and the query nudge agree");
+  assert.equal(r.files.length, 1, "only files holding an out-of-date summary are listed");
+  assert.equal(r.files[0].outdated, 1);
+  assert.deepEqual(r.repos, [], "a single repo has no per-repo split");
+  assert.equal(stalenessReport(d, { home, top: 0 }).files.length, 0);
+
+  patchBuildConfig(d, { deepStaleThreshold: 100 });
+  const off = stalenessReport(d, { home });
+  assert.deepEqual([off.threshold, off.thresholdSource, off.recommended], [100, "repo", false]);
+  assert.match(formatStalenessReport(off), /threshold: 100% \(this repo\) → the nudge is off here/);
+});
+
+test("stalenessReport: no graph yet is reported as unindexed, not as 0% out of date", () => {
+  const r = stalenessReport(repo(), { home: scratchHome() });
+  assert.equal(r.indexed, false);
+  assert.equal(r.recommended, false);
+  assert.match(formatStalenessReport(r), /no graft index here yet — run `graft build` first/);
+});
+
+test("stalenessReport: a workspace sums its child repos and names each one", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "graft-ws-"));
+  for (const child of ["a", "b"]) {
+    mkdirSync(join(parent, child, "src"), { recursive: true });
+    writeFileSync(join(parent, child, "src", "math.ts"), MATH);
+    await buildGraph(join(parent, child));
+  }
+  deepBuiltWithStale(join(parent, "a"), 0);
+  const r = stalenessReport(parent, { children: ["a", "b"], home: scratchHome() });
+  assert.deepEqual(r.repos.map((x) => [x.name, x.pct]), [["a", 0], ["b", 100]]);
+  assert.equal(r.totals.total, r.repos[0].totals.total + r.repos[1].totals.total);
+  assert.ok(r.files.every((f) => f.path.startsWith("b/")), "file paths carry their repo");
+  assert.match(formatStalenessReport(r), /by repo:\n\s+0%  a .*\n\s+100%  b /);
+});
+
+test("formatStalenessReport keeps a decimal where rounding would hide the threshold side", () => {
+  const base = { indexed: true, threshold: 10, thresholdSource: "default" as const, repos: [], files: [] };
+  const s = counts(52, 0, 500);
+  const near = formatStalenessReport({ ...base, totals: s, pct: outdatedPercent(s), recommended: deepRebuildDue(s, 10) });
+  assert.match(near, /staleness: 10\.4% of node summaries out of date — 52 of 500 \(52 changed, 0 new\)/);
+  assert.match(near, /above it — `graft build --deep` is recommended/);
+
+  const clean = counts(0, 0, 40);
+  const none = formatStalenessReport({ ...base, totals: clean, pct: 0, recommended: false });
+  assert.match(none, /staleness: 0% — all 40 node summaries are current/);
+  assert.match(none, /nothing for a deep build to do/);
+
+  const never = counts(0, 7, 7, 0);
+  assert.match(formatStalenessReport({ ...base, totals: never, pct: 100, recommended: true }), /staleness: 100% — no `graft build --deep` has run yet/);
+});
+
+test("graft staleness prints the report, or JSON, and rejects a bad --top", async () => {
+  const d = repo();
+  const home = scratchHome();
+  await buildGraph(d);
+  deepBuiltWithStale(d, 1);
+
+  const text = runCli(["staleness", d], { home });
+  assert.equal(text.status, 0, text.describe());
+  assert.match(text.stdout, /staleness: \d+(\.\d)?% of node summaries out of date/);
+  assert.match(text.stdout, /threshold: 10% \(default\) → above it/);
+  assert.match(text.stdout, /most out-of-date files:\n\s+1 of \s*\d+\s+src\/math\.ts/);
+
+  const json = runCli(["staleness", d, "--json", "--no-refresh"], { home });
+  assert.equal(json.status, 0, json.describe());
+  const r = JSON.parse(json.stdout);
+  assert.equal(r.recommended, true);
+  assert.equal(r.totals.stale, 1);
+
+  const bad = runCli(["staleness", d, "--top", "lots"], { home });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /--top "lots" is not a whole number/);
+});
+
+test("deepDueReason: 'no summaries yet' before any deep build, else the rounded share", () => {
+  assert.equal(deepDueReason(counts(0, 7, 7, 0)), "no summaries yet");
+  assert.equal(deepDueReason(counts(687, 866, 5353)), "29% of summaries out of date");
+});
+
+test("deepDueFor pairs the note with its reason, and is null whenever the note is", async () => {
+  const d = repo();
+  const home = scratchHome();
+  await buildGraph(d);
+  const due = deepDueFor(d, { home });
+  assert.equal(due?.note, deepNoteFor(d, { home }));
+  assert.equal(due?.reason, "no summaries yet");
+  patchBuildConfig(d, { deepStaleThreshold: 100 });
+  assert.equal(deepDueFor(d, { home }), null);
+});
+
+test("over MCP the savings tally carries the deep-build recommendation, until it is opted out", () =>
+  withHome(scratchHome(), async () => {
+    const d = repo();
+    // Big enough that the answer is smaller than the file: only then is a saving
+    // (and so a tally) printed at all.
+    writeFileSync(join(d, "src", "big.ts"), "// padding line for the savings baseline\n".repeat(1500) + MUL);
+    await buildGraph(d);
+    const tallyOf = (text: string) => text.slice(text.indexOf("\u{1F331}")).split("\n").slice(0, 3).join("\n");
+
+    const due = await callTool(d, "graft_find_code", { query: "mul" });
+    assert.ok(due.text.includes("\u{1F331}"), `fixture: a saving was claimed\n${due.text}`);
+    // Unpriced (no model sent), so the price-update line sits between the tally
+    // and the deep-build line.
+    assert.match(
+      tallyOf(due.text),
+      /this turn\n⚠️ 'graft prices update' recommended \(no known price for the model used[^\n]*\n⚠️ 'graft build --deep' recommended \(no summaries yet\)/,
+    );
+
+    patchBuildConfig(d, { deepStaleThreshold: 100 });
+    const off = await callTool(d, "graft_find_code", { query: "mul" });
+    assert.ok(off.text.includes("\u{1F331}"));
+    assert.doesNotMatch(tallyOf(off.text), /build --deep/, "no stale carry-over from the previous call");
   }));

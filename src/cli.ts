@@ -16,6 +16,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Graft } from "./engine.js";
 import { resolveConfig, type EngineConfig } from "./ai/providers.js";
+import { printLlmFailureHints } from "./ai/llm-hints.js";
+import { runSettingCommand, terminalPrompter, userEnvStore, type SettingDeps, type SettingOptions } from "./ai/llm-settings.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
@@ -24,6 +26,13 @@ import { statuslineWanted } from "./claude/settings-merge.js";
 import { runHostsInit } from "./hosts/init.js";
 import { kiloRuleRel } from "./hosts/kilo.js";
 import { formatModelPrices, readHostModels } from "./hosts/models.js";
+import { listRate } from "./context/price.js";
+import {
+  catalogPrice,
+  priceCatalogPath,
+  priceCatalogStatus,
+  updatePriceCatalog,
+} from "./context/price-catalog.js";
 import { hostModelFor } from "./hosts/host-model.js";
 import { hostIds, hostWiringName } from "./hosts/registry.js";
 import { checkoutRoot, ensureRepoHome, keepsNotes, noteCount, rememberRepo, repoName, repoPlace, shownPath } from "./notes/home.js";
@@ -33,7 +42,7 @@ import { openBrowser } from "./util/browser.js";
 import { learningsAtBase, teammateEdits, withBaseLearnings } from "./check/learning-edits.js";
 import { contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
-import { deepNoteFor, ensureFreshChildren, ensureFreshGraph, refreshNote, summaryStaleness } from "./graph/refresh.js";
+import { deepDueFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
 import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
 import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
@@ -86,7 +95,7 @@ import { checkLocally } from "./check/local-check.js";
 import { formatOverlap, maybeRefreshBranches, overlapsWith, pushedWhen, readBranchCache, refreshBranches } from "./notes/branches.js";
 import { ensureRepoTrail, LEARNINGS_DIR } from "./notes/repo-trail.js";
 import type { AskResult } from "./ask/ask.js";
-import { claimedSavings, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
+import { claimedSavings, setDeepDue, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readStamp, readUpdateCache, refreshUpdateCache, wiredHostIds, wiringOpts, writeStamp } from "./upkeep.js";
 import { shouldMoveToTrail } from "./upkeep-run.js";
 import {
@@ -101,12 +110,19 @@ import {
   isTrackedCommand,
   langsValue,
   offReason,
+  userCanEnable,
   maybeFlushInBackground,
   patchState,
   runFlush,
   track,
   trackFirstRunIfNew,
 } from "./telemetry/index.js";
+import { installSystemCaFetch } from "./util/system-ca.js";
+import { helpExamples, missingCommandHint } from "./cli-help.js";
+import { installGraftHelp } from "./cli-help-graft.js";
+
+// Before any command builds an LLM client: they capture globalThis.fetch when created.
+installSystemCaFetch();
 
 const program = new Command();
 const currentVersion = readCurrentVersion(import.meta.url);
@@ -185,24 +201,33 @@ function noteHit(found: boolean): void {
   queryNote.hit = found ? "yes" : "no";
 }
 
+const GLOBAL_OPTIONS_HEADING = "Global options (before or after the command):";
+
 program
   .name(brand())
+  .usage("[global options] <command> [command options]")
   .description(
     TRAIL
       ? "Memory for your coding agents: a code map, and the learnings each session\n" +
           "leaves in your repo's .trail/, so your whole team's Claude starts from them."
       : "Build a repo's context graph as linked markdown, and keep it in sync with the code.",
   )
+  .optionsGroup(GLOBAL_OPTIONS_HEADING)
   .version(currentVersion, "-v, --version")
   .option("--dir <path>", "context graph directory (default: <repo>/graft)")
+  .option(
+    "--agent-model <id>",
+    "model YOU are running, to price saved tokens — not --model",
+  )
+  .optionsGroup("LLM options (used by `build --deep`; or set the env vars once):")
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter | llm-incubator (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN)")
   .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL)")
-  .option(
-    "--agent-model <id>",
-    "model YOU are running, to price saved tokens (env GRAFT_AGENT_MODEL) — not --model",
-  );
+  // graft's own help (installGraftHelp, below) carries examples on every command.
+  .addHelpText("after", TRAIL ? helpExamples(brand(), false) : "");
+// -v/--version still works; it is just not listed among the global options.
+program.options.find((o) => o.long === "--version")?.hideHelp();
 
 interface GlobalOpts {
   dir?: string;
@@ -275,8 +300,9 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
     : await ensureFreshGraph(root, { contextDir: globalDir, disabled });
   const note = refreshNote(r);
   if (note) console.error(note);
-  const deep = deepNoteFor(root, { contextDir: globalDir, children: ws?.children });
-  if (deep) console.error(deep);
+  const deep = deepDueFor(root, { contextDir: globalDir, children: ws?.children });
+  if (deep) console.error(deep.note);
+  setDeepDue(deep?.reason ?? null);
 }
 
 /** Attached to every query command: `--no-refresh` answers from the graph exactly
@@ -310,7 +336,7 @@ function parseTabs(raw: string | undefined): VizTab[] | undefined {
  * not editorialize on stderr at startup (`mcp` runs its own upkeep at boot, and
  * `_update-check` IS the fetch).
  */
-const UPKEEP_SKIP = new Set(["version", "upgrade", "_update-check", "_trail-past-read", "mcp"]);
+const UPKEEP_SKIP = new Set(["version", "upgrade", "_update-check", "_trail-past-read", "mcp", "/h", "/help"]);
 
 /**
  * Every other command: top up the cached registry answer in the background and,
@@ -431,7 +457,7 @@ program
   });
 
 grouped(program.command("telemetry"), GROUP.setup)
-  .description("Show, inspect, or turn off the anonymous usage stats (see TELEMETRY.md)")
+  .description("Show the anonymous usage stats status — permanently off in this version; `debug` shows that nothing is queued")
   .argument("[action]", "status (default) | enable | disable | debug", "status")
   .action((action: string) => {
     switch (action) {
@@ -439,14 +465,12 @@ grouped(program.command("telemetry"), GROUP.setup)
         console.log(formatStatus());
         return;
       case "enable":
-        patchState({ enabled: true });
-        console.log(`telemetry: on — anonymous, aggregate-only. \`${cmd("graft telemetry status")}\` for details.`);
+        // Permanently off: there is nothing to turn on, and no setting is written.
+        console.error("✗ telemetry cannot be enabled: it is permanently disabled in this version of graft. Nothing is recorded or sent.");
+        process.exit(1);
         return;
       case "disable":
-        // Also stamp the notice as shown: someone who has just opted out should
-        // not be told about telemetry again the next time they run a command.
-        patchState({ enabled: false, noticeShownAt: new Date().toISOString() });
-        console.log("telemetry: off. Nothing further will be recorded or sent.");
+        console.log("telemetry: off. It is permanently disabled in this version of graft; nothing is recorded or sent.");
         return;
       case "debug":
         console.log(formatDebug());
@@ -679,8 +703,8 @@ grouped(program.command("build"), GROUP.setup)
       deep = false;
       console.error(
         "⚠ no API key set — falling back to the structural build (no LLM summaries).\n" +
-          "  Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL for your\n" +
-          `  provider) and re-run \`${cmd("graft build --deep")}\` to add concept nodes and summaries.`,
+          `  Set GRAFT_API_KEY (\`${cmd("graft api key")}\`), and GRAFT_BASE_URL / GRAFT_MODEL for your provider\n` +
+          `  (\`${cmd("graft api url")}\`, \`${cmd("graft model")}\`), then re-run \`${cmd("graft build --deep")}\` to add concept nodes and summaries.`,
       );
     }
     if (deep && resolved.usedLegacyEnv) {
@@ -719,9 +743,10 @@ grouped(program.command("build"), GROUP.setup)
           process.stderr.write(
             `\r${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
           ),
-      }).catch((err: unknown) => {
+      }).catch(async (err: unknown) => {
         // Only the stage and a code enum; the message stays on this machine.
         track("build_failed", { stage: "summarize", code: errorCode(err) }, { repo: buildRoot });
+        await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
         throw err;
       });
       process.stderr.write("\n");
@@ -753,8 +778,9 @@ grouped(program.command("build"), GROUP.setup)
         process.stderr.write(
           `\r${phase === "enrich" ? "summarizing" : "parsing"} ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
         ),
-    }).catch((err: unknown) => {
+    }).catch(async (err: unknown) => {
       track("build_failed", { stage: "graph", code: errorCode(err) }, { repo: buildRoot });
+      if (deep) await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
       throw err;
     });
     process.stderr.write("\n");
@@ -816,6 +842,7 @@ grouped(program.command("build"), GROUP.setup)
         }
         if (conceptErrors.length > 0) console.error(`  ${conceptErrors.length} concept-pass error(s).`);
         console.error(`  meaning coverage: ${ready}/${total} symbols (${pct}%).`);
+        await printLlmFailureHints([conceptFatal, m.fatal, ...conceptErrors, ...g.errors], cliConfig());
         console.error(
           `  Nothing computed was lost: re-run \`${cmd("graft build --deep")}\` to resume from what is cached.\n` +
             "  Pass --allow-partial to accept a degraded meaning tier and exit 0.",
@@ -1051,6 +1078,142 @@ program
     }
   });
 
+/** What the `api url` / `api key` / `model` commands read and write through. */
+function settingDeps(): SettingDeps {
+  return {
+    store: userEnvStore(),
+    env: process.env,
+    platform: process.platform,
+    config: cliConfig(),
+    cwd: process.cwd(),
+    out: (l) => console.log(l),
+    err: (l) => console.error(l),
+    prompt: process.stdin.isTTY && process.stdout.isTTY ? terminalPrompter() : undefined,
+  };
+}
+
+const SAVED_WHERE =
+  "saved as a user environment variable (Windows: HKCU\\Environment; macOS/Linux: ~/.graft/env.sh, sourced from your shell profile)";
+
+const apiCommand = grouped(program.command("api"), GROUP.setup).description(
+  "Show or set the LLM endpoint `graft build --deep` uses: `api url` (GRAFT_BASE_URL) and `api key` (GRAFT_API_KEY)",
+);
+
+apiCommand
+  .command("url")
+  .description(`Show or set GRAFT_BASE_URL, the LLM endpoint for \`graft build --deep\` — ${SAVED_WHERE}`)
+  .argument("[url]", "new base URL, e.g. https://my-gateway.example.com/v1 (omit to show it, and to be prompted in a terminal)")
+  .option("--unset", "remove the saved value")
+  .option("--no-verify", "skip the check against the endpoint after saving")
+  .action(async (value: string | undefined, opts: SettingOptions) => {
+    process.exitCode = await runSettingCommand("url", value, opts, settingDeps());
+  });
+
+apiCommand
+  .command("key")
+  .description(`Show (masked) or set GRAFT_API_KEY, the key for the LLM endpoint — ${SAVED_WHERE}`)
+  .argument("[key]", "new API key (omit to be prompted with hidden input, which keeps it out of your shell history)")
+  .option("--unset", "remove the saved value")
+  .option("--no-verify", "skip the check against the endpoint after saving")
+  .action(async (value: string | undefined, opts: SettingOptions) => {
+    process.exitCode = await runSettingCommand("key", value, opts, settingDeps());
+  });
+
+grouped(program.command("model"), GROUP.setup)
+  .description(
+    `Show or set GRAFT_MODEL, the model \`graft build --deep\` uses — in a terminal, pick from the models the endpoint serves; ${SAVED_WHERE}`,
+  )
+  .argument("[id]", "new model id, e.g. claude-sonnet-5.5 (omit to show it, and to pick one in a terminal)")
+  .option("--list", "list the models the endpoint serves (mid-tier first) and exit")
+  .option("--unset", "remove the saved value")
+  .option("--no-verify", "skip the check against the endpoint after saving")
+  .action(async (value: string | undefined, opts: SettingOptions) => {
+    process.exitCode = await runSettingCommand("model", value, opts, settingDeps());
+  });
+
+const pricesCommand = grouped(program.command("prices"), GROUP.setup).description(
+  "Show or update the local copy of LiteLLM's model price catalog, which prices savings for models graft's built-in table does not list",
+);
+
+pricesCommand
+  .command("update")
+  .description(
+    `Download LiteLLM's public model price catalog (one anonymous GET, nothing about you or your models is sent) and store it in ${priceCatalogPath()}`,
+  )
+  .action(async () => {
+    try {
+      const { catalog, path } = await updatePriceCatalog();
+      const count = Object.keys(catalog.models).length;
+      console.log(`✓ stored LiteLLM prices for ${count} models in ${path}`);
+      console.log(
+        `  used to price savings for models graft's built-in table does not list, until the next \`${cmd("graft prices update")}\``,
+      );
+    } catch (e) {
+      console.error(`✗ ${cmd("graft prices update")}: ${e instanceof Error ? e.message : String(e)}`);
+      console.error("  any previously stored prices are unchanged");
+      process.exitCode = 1;
+    }
+  });
+
+pricesCommand
+  .command("status")
+  .description("Show whether a local price catalog is stored, how old it is, and optionally what it lists for one model")
+  .argument("[model]", "a model id to look up, e.g. claude-opus-4-5")
+  .action((model: string | undefined) => {
+    const s = priceCatalogStatus();
+    if (s.state === "missing") {
+      console.log(`no local model prices (${s.path}) — run \`${cmd("graft prices update")}\` to fetch them from LiteLLM`);
+    } else {
+      const when = `fetched ${s.fetchedAt!.slice(0, 10)}, ${s.ageDays} day${s.ageDays === 1 ? "" : "s"} ago`;
+      console.log(`local model prices: ${s.models} models from LiteLLM, ${when} (${s.path})`);
+    }
+    if (model) {
+      const builtin = listRate({ id: model, confidence: "certain" });
+      if (builtin && !builtin.catalogFetchedAt) {
+        console.log(`${model}: $${builtin.usdPerMtok}/Mtok input (graft's built-in table)`);
+      } else if (builtin) {
+        const c = catalogPrice(model);
+        const cache = [
+          c?.cacheRead !== undefined ? `cache read $${c.cacheRead}/Mtok` : "",
+          c?.cacheWrite !== undefined ? `cache write $${c.cacheWrite}/Mtok` : "",
+        ].filter(Boolean);
+        console.log(`${model}: $${builtin.usdPerMtok}/Mtok input${cache.length ? `, ${cache.join(", ")}` : ""} (LiteLLM catalog)`);
+      } else {
+        console.log(`${model}: no known price`);
+      }
+    }
+  });
+
+grouped(program.command("staleness"), GROUP.setup)
+  .description(
+    "Show what % of a repo's node summaries are out of date (changed or new code) and whether `graft build --deep` is worth running yet, " +
+      "judged against the deep-threshold ($0, no LLM)",
+  )
+  .argument(...DIR_ARG)
+  .option("--top <n>", "list this many most-out-of-date files, worst first (0 = none)", "10")
+  .option("--json", "output the report as JSON")
+  .option(...NO_REFRESH_FLAG)
+  .action(async (dirArg: string | undefined, opts: { top: string; json?: boolean; refresh?: boolean }) => {
+    const top = Number(opts.top);
+    if (!Number.isInteger(top) || top < 0) {
+      console.error(`graft staleness: --top "${opts.top}" is not a whole number of files`);
+      process.exit(1);
+    }
+    const dir = queryRoot(dirArg);
+    const globalDir = program.opts<GlobalOpts>().dir;
+    // Refresh like any query, so edits since the last build count as changed or
+    // new; but not via refreshBefore, whose nudge would only repeat this report.
+    const ws = readWorkspace(dir, globalDir);
+    const disabled = opts.refresh === false;
+    const r = ws
+      ? await ensureFreshChildren(dir, ws.children, { contextDir: globalDir, disabled })
+      : await ensureFreshGraph(dir, { contextDir: globalDir, disabled });
+    const note = refreshNote(r);
+    if (note) console.error(note);
+    const report = stalenessReport(dir, { contextDir: globalDir, children: ws?.children, top });
+    console.log(opts.json ? JSON.stringify(report, null, 2) : formatStalenessReport(report));
+  });
+
 // Under trail this is part of `status`; the old name still runs, unlisted.
 program
   .command("stats", { hidden: TRAIL })
@@ -1104,7 +1267,8 @@ program
   .option("--json", "output the rolled-up savings as JSON")
   .addHelpText(
     "after",
-    [
+    // Under graft, these examples and the pricing note are part of the command's entry.
+    !TRAIL ? "" : [
       "",
       "Examples:",
       "  graft savings              every day on record, per model and in total",
@@ -1713,11 +1877,12 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
     else if (noAgents) ids = ["claude"];
     else if (opts.yes || opts.dryRun) ids = detectedIds;
     else if (process.stdin.isTTY && process.stderr.isTTY) {
-      // Only offer the row when telemetry could actually run. `disabled` still
-      // counts: someone who turned it off should be able to turn it back on here.
+      // The consent row is only offered when telemetry could run, which it never
+      // can now (permanently off), so the picker shows agents only.
       const reason = offReason();
       const picked = await runPicker(plan, repo, home, {
-        offerTelemetry: reason === null || reason === "disabled",
+        offerTelemetry: reason === null || userCanEnable(reason),
+        telemetryChecked: reason === null,
       });
       if (picked === null) {
         console.error("· cancelled — nothing written");
@@ -2635,7 +2800,7 @@ if (TRAIL) {
     status: "code map, learnings and tokens saved",
     upgrade: "install the latest trail",
     uninstall: "remove everything trail or graft wrote to this repo",
-    telemetry: "show or turn off the anonymous usage stats",
+    telemetry: "anonymous usage stats: permanently off",
     check: "check your diff against everything the team has learned",
     team: "what the team learned this week, and where work overlaps",
     workspace: "your workspace's repos, team page and invite link",
@@ -2645,6 +2810,43 @@ if (TRAIL) {
   };
   for (const c of program.commands) if (summaries[c.name()]) c.summary(summaries[c.name()]!);
   program.addHelpText("after", "\ntrail <command> --help for flags · every graft command still works");
+}
+
+// `build --deep` is the one command the LLM options act on, so its own help lists them too.
+program.commands.find((c) => c.name() === "build")?.configureHelp({ showGlobalOptions: true });
+// The top-level -h works but is not listed among the global options. Added last:
+// every subcommand copies the program's help option when it is created, and keeps
+// its own listed `-h, --help`.
+program.addHelpOption(program.createOption("-h, --help", "display help for command").hideHelp());
+
+// `graft /h` and `graft /help`: the Windows-style spelling of `graft help`, same
+// output (and `/h <command>` like `help <command>`). Hidden, so no help lists them.
+for (const name of ["/h", "/help"]) {
+  program
+    .command(name, { hidden: true })
+    .description("Show the help — the same as `graft help`")
+    .argument("[command...]", "the command to show the help of")
+    .action((words: string[]) => {
+      let target: Command = program;
+      for (const word of words) {
+        const next = (target.commands as Command[]).find((c) => c.name() === word || c.aliases().includes(word));
+        if (!next) break;
+        target = next;
+      }
+      target.outputHelp();
+    });
+}
+if (!TRAIL) installGraftHelp(program);
+
+// Only global options and no command (`graft --model x`): say what is missing
+// rather than dumping the whole help as an error.
+const globalValueOptions = program.options
+  .filter((o) => o.required || o.optional)
+  .flatMap((o) => [o.long, o.short].filter((f): f is string => Boolean(f)));
+const noCommand = missingCommandHint(process.argv.slice(2), globalValueOptions, brand());
+if (noCommand) {
+  console.error(noCommand);
+  process.exit(1);
 }
 
 program.parseAsync(process.argv).catch((err) => {

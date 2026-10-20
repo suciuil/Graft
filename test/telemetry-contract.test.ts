@@ -19,15 +19,17 @@ import {
 } from '../src/telemetry/contract.js';
 import { track } from '../src/telemetry/track.js';
 import { peek } from '../src/telemetry/queue.js';
+import { patchState } from '../src/telemetry/identity.js';
 import { tmpRepo } from './helpers.js';
 
-/** An env where every gate is open, so the allowlist is what's under test. */
+/** A machine that had opted in under an older graft: even that must record nothing now. */
 const OPEN: NodeJS.ProcessEnv = {};
 
 function sandbox(tag: string): string {
   const home = tmpRepo(tag);
   mkdirSync(join(home, '.graft'), { recursive: true });
   process.env.GRAFT_POSTHOG_KEY = 'phc_test_key';
+  patchState({ enabled: true }, home);
   return home;
 }
 
@@ -39,38 +41,12 @@ test('an event that is not in the contract is dropped whole', () => {
   assert.deepEqual(peek(home), []);
 });
 
-test('an unlisted property is dropped, and the rest of the event survives', () => {
-  const home = sandbox('tel-unknown-prop');
-  const ev = track(
-    'query',
-    { command: 'ask', surface: 'cli', path: '/Users/someone/secret/repo/src/auth.ts' },
-    { home, env: OPEN },
-  );
-  assert.ok(ev);
-  assert.equal(ev.properties.command, 'ask');
-  assert.equal(ev.properties.surface, 'cli');
-  assert.equal('path' in ev.properties, false, 'a path must never survive the allowlist');
-  assert.equal(JSON.stringify(ev).includes('secret'), false);
-});
-
-test('a non-string value is dropped even under an allowed key', () => {
-  const home = sandbox('tel-nonstring');
-  // A caller passing a raw count instead of a bucket: the key is legal, the
-  // value is not, and the raw number must not reach the wire.
-  const ev = track('build_completed', { files_bucket: 4127 as unknown as string }, { home, env: OPEN });
-  assert.ok(ev);
-  assert.equal('files_bucket' in ev.properties, false);
-});
-
-test('every event carries the common properties, and no identifier beyond them', () => {
-  const home = sandbox('tel-common');
-  const ev = track('first_run', {}, { home, env: OPEN });
-  assert.ok(ev);
-  for (const k of ['app_version', 'os', 'arch', 'node_major', 'ci', 'agent_host', 'cli_name']) {
-    assert.ok(k in ev.properties, `missing common property ${k}`);
+test('every event in the contract is dropped too: telemetry is permanently off', () => {
+  const home = sandbox('tel-all-dropped');
+  for (const event of Object.keys(EVENTS)) {
+    assert.equal(track(event, { command: 'ask', surface: 'cli' }, { home, env: OPEN }), null, event);
   }
-  // distinct_id is the random install uuid and nothing else.
-  assert.match(ev.distinct_id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.deepEqual(peek(home), [], 'nothing reaches the local queue');
 });
 
 // Pinned rather than counted, so adding an event is a deliberate edit here and
@@ -135,15 +111,6 @@ test('errorCode maps to the enum and never returns the message', () => {
   assert.equal(errorCode(new Error('something nobody classified')), 'E_UNKNOWN');
 });
 
-test('a build_failed event carries a code, never the error text', () => {
-  const home = sandbox('tel-build-failed');
-  const err = new Error('ENOENT: /Users/someone/private-repo/src/index.ts');
-  const ev = track('build_failed', { stage: 'graph', code: errorCode(err) }, { home, env: OPEN });
-  assert.ok(ev);
-  assert.equal(JSON.stringify(ev).includes('private-repo'), false);
-  assert.equal(ev.properties.stage, 'graph');
-});
-
 // --- the allowlist must reject by design, not by exception ---
 
 test('a prototype key is not an event: EVENTS.constructor must not look like a hit', () => {
@@ -152,14 +119,6 @@ test('a prototype key is not an event: EVENTS.constructor must not look like a h
     assert.equal(track(name, { command: 'ask' }, { home, env: OPEN }), null, `${name} was accepted`);
   }
   assert.deepEqual(peek(home), []);
-});
-
-test('a prototype key as a PROPERTY name is dropped like any other unlisted key', () => {
-  const home = sandbox('tel-proto-prop');
-  const ev = track('query', { command: 'ask', __proto__: 'x', constructor: 'y' } as never, { home, env: OPEN });
-  assert.ok(ev);
-  assert.equal(ev.properties.command, 'ask');
-  assert.equal(Object.hasOwn(ev.properties, 'constructor'), false);
 });
 
 test('langsValue drops anything that is not a plain language token', () => {
@@ -174,37 +133,6 @@ test('langsValue drops anything that is not a plain language token', () => {
 });
 
 // --- the brain signup handoff ---
-
-// The push handoff is the one flow that spans both products, and the outcome is
-// the half that can vanish: a user who reads the URL and walks away kills the
-// process. Only an event already queued survives that, which is why `opened` is
-// the denominator and `settled` is not.
-test('brain signup: the outcome is a category, never the sentence the user saw', () => {
-  const home = sandbox('tel-brain-signup-outcome');
-  const ev = track(
-    'brain_signup_settled',
-    {
-      outcome: 'timed_out',
-      duration_bucket: durationBucket(5 * 60 * 1000),
-      error: 'timed out waiting for the browser — run `trail login` again',
-    },
-    { home, env: OPEN },
-  );
-  assert.equal(ev?.properties.outcome, 'timed_out');
-  assert.equal(ev?.properties.duration_bucket, '2-10m');
-  // The printed sentence names the repo and the link, so it must not ride along
-  // even when a call site passes it.
-  assert.equal(ev?.properties.error, undefined);
-});
-
-test('brain signup: opened carries only whether an agent ran it', () => {
-  const home = sandbox('tel-brain-signup-opened');
-  const ev = track('brain_signup_opened', { mode: 'agent', repo: 'acme/app', port: '51234' }, { home, env: OPEN });
-  assert.ok(ev);
-  assert.equal(ev.properties.mode, 'agent');
-  assert.equal(ev.properties.repo, undefined);
-  assert.equal(ev.properties.port, undefined);
-});
 
 test('brain signup: both events are in the contract', () => {
   assert.ok(EVENTS.brain_signup_opened);

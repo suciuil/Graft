@@ -10,11 +10,12 @@
  * breath.
  *
  * Once per MACHINE, not per repo: a dev with twelve checkouts should read this
- * one time. `graft init`'s picker is the other disclosure surface, for the users
- * who see it — this catches everyone else.
+ * one time. Telemetry is off until the user opts in, so in practice this is the
+ * reminder after `graft init`'s consent row; `graft telemetry enable` marks it
+ * shown itself, since that user has just read what they agreed to.
  */
 import { patchState, readState } from './identity.js';
-import { explainOff, offReason } from './gate.js';
+import { explainOff, offReason, userCanEnable } from './gate.js';
 import { peek } from './queue.js';
 import { buildBatch } from './send.js';
 import { posthogHost } from './key.js';
@@ -47,6 +48,12 @@ export function firstRunNotice(home?: string, env?: NodeJS.ProcessEnv): string |
  *  a real run must be gated on the real `DO_NOT_TRACK` and CI variables. */
 export function formatStatus(home?: string, env?: NodeJS.ProcessEnv): string {
   const reason = offReason(home, env);
+  if (reason === 'unavailable') {
+    return [
+      `telemetry: ${explainOff(reason)}`,
+      `  inspect:   ${cmd('graft telemetry debug')}   (shows the local queue: always empty)`,
+    ].join('\n');
+  }
   const pending = peek(home).length;
   const lines = [
     reason === null
@@ -54,12 +61,12 @@ export function formatStatus(home?: string, env?: NodeJS.ProcessEnv): string {
       : `telemetry: ${explainOff(reason)}`,
     `  contract:  ${TELEMETRY_DOC_URL}`,
   ];
-  if (reason === null || reason === 'disabled') {
+  if (reason === null || userCanEnable(reason)) {
     lines.push(`  endpoint:  ${posthogHost()}`);
     lines.push(`  queued:    ${pending} event${pending === 1 ? '' : 's'} waiting for the next daily flush`);
   }
   lines.push(
-    reason === 'disabled'
+    userCanEnable(reason)
       ? `  enable:    ${cmd('graft telemetry enable')}`
       : `  disable:   ${cmd('graft telemetry disable')}  (or set DO_NOT_TRACK=1)`,
   );

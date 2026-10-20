@@ -280,9 +280,9 @@ test('formatNonInteractiveHelp still helps when nothing was detected', () => {
 
 // --- the telemetry consent row ---
 
-/** Same driver, but with the consent row offered. */
-function driveWithConsent(repo: string, home: string, keys: PickerKey[]) {
-  let state = initialPickerState(planInit(repo, { home }), repo, home, { offerTelemetry: true });
+/** Same driver, but with the consent row offered — to a user who has already opted in, unless `checked` is false. */
+function driveWithConsent(repo: string, home: string, keys: PickerKey[], checked = true) {
+  let state = initialPickerState(planInit(repo, { home }), repo, home, { offerTelemetry: true, telemetryChecked: checked });
   for (const k of keys) state = reducePicker(state, k);
   return state;
 }
@@ -294,12 +294,20 @@ test('the consent row is absent unless it is offered', () => {
   assert.equal(pickedTelemetry(state), undefined, 'not offered means no answer, not "no"');
 });
 
-test('when offered, the consent row is last and starts checked', () => {
+test('when offered, the consent row is last and starts UNchecked — telemetry is opt-in', () => {
   const repo = fresh(); const home = fullHome();
   const state = initialPickerState(planInit(repo, { home }), repo, home, { offerTelemetry: true });
   assert.equal(state.rows.at(-1)?.id, TELEMETRY_ROW_ID);
   assert.equal(state.rows.at(-1)?.kind, 'setting');
-  assert.equal(pickedTelemetry(state), true);
+  assert.equal(pickedTelemetry(state), false, 'Enter alone never turns telemetry on');
+  // Someone who already opted in sees their choice, so Enter alone never turns it off either.
+  assert.equal(pickedTelemetry(driveWithConsent(repo, home, [])), true);
+});
+
+test('checking the row is how a user opts in', () => {
+  const repo = fresh(); const home = fullHome();
+  // Up from the first row wraps onto the consent row, which is last.
+  assert.equal(pickedTelemetry(driveWithConsent(repo, home, ['up', 'space'], false)), true);
 });
 
 test('unchecking the row is how a user declines', () => {
@@ -336,7 +344,7 @@ test('a (toggle all) is about agents and leaves the consent answer alone', () =>
 test('the rendered row shows the label, a rule, and what is not collected', () => {
   const repo = fresh(); const home = fullHome();
   const out = renderPicker(initialPickerState(planInit(repo, { home }), repo, home, { offerTelemetry: true }), false);
-  assert.match(out, /\[x\] anonymous usage stats/);
+  assert.match(out, /\[ \] anonymous usage stats/, 'unchecked: opt-in');
   assert.match(out, /no code, no file paths, no queries/);
   assert.equal(out.includes(TELEMETRY_ROW_ID), false, 'the internal id must never be shown');
   assert.match(out, /─/, 'a rule separates the settings from the agents');

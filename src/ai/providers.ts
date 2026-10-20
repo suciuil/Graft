@@ -82,8 +82,7 @@ export const DEFAULTS = {
 } as const;
 
 /** Merge user config with environment variables and defaults. */
-export function resolveConfig(config: EngineConfig = {}): ResolvedConfig {
-  const env = process.env;
+export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const providerDefaulted = !config.provider && !env.GRAFT_PROVIDER;
   let provider = config.provider ?? (env.GRAFT_PROVIDER as ProviderKind | undefined) ?? DEFAULTS.provider;
 

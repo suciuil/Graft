@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { buildConfigPath } from '../util/state.js';
 import { NO_MODEL, formatDollars, type InputRate, type Pricing } from './price.js';
 import { callScope, type ModelTable } from './call-scope.js';
-import { brand, tag } from '../brand.js';
+import { brand, cmd, tag } from '../brand.js';
 
 export interface Savings {
   /** How many source files the baseline covers. */
@@ -115,6 +115,42 @@ export function setModelTable(rows: ModelTable | null): void {
  */
 export function setMcpSurface(on: boolean): void {
   callScope().overMcp = on === true;
+}
+
+/**
+ * Record that a `graft build --deep` is due for this call's repo, with a short
+ * reason, or null when it is not.
+ *
+ * The separate `[graft] … build --deep is recommended` note was observed going
+ * unrelayed: it prints before the savings line, and the savings line's "at the
+ * end of your reply…" claims the one slot an agent fills. So the recommendation
+ * rides inside the example tally itself, the line agents copy verbatim.
+ */
+export function setDeepDue(reason: string | null): void {
+  callScope().deepDue = reason && reason.trim() ? reason.trim() : null;
+}
+
+/** The tally's deep-build line — on its own line, under the savings — or "" when
+ * no deep build is due. */
+function deepLine(): string {
+  const reason = callScope().deepDue;
+  return reason ? `\n\u26A0\uFE0F '${cmd('graft build --deep')}' recommended (${reason})` : '';
+}
+
+/**
+ * The tally's price-update line: shown exactly when the saving is reported in
+ * tokens alone because graft knows no price for the model, and "" whenever a
+ * dollar figure was shown.
+ *
+ * In the example tally for the same reason as {@link deepLine}: it is the block
+ * agents relay, so it is the only place the user reliably learns about it.
+ */
+function pricesLine(rate: InputRate | null): string {
+  if (rate !== null) return '';
+  return (
+    `\n\u26A0\uFE0F '${cmd('graft prices update')}' recommended (no known price for the model used: it fetches ` +
+    'model prices from LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)'
+  );
 }
 
 /**
@@ -216,6 +252,10 @@ function modelTableBlock(savedTokens: number): string {
  * nothing for it to copy by mistake.
  */
 function tallyExample(savedTokens: number, rate: InputRate | null): string {
+  return savingsTally(savedTokens, rate) + pricesLine(rate) + deepLine();
+}
+
+function savingsTally(savedTokens: number, rate: InputRate | null): string {
   const b = brand();
   if (rate === null) {
     const table = modelTableBlock(savedTokens);
@@ -298,7 +338,10 @@ export function savingsTurnNudge(savedTokens: number): string {
   const name = modelLabel(rate);
   const basis = rate.measured
     ? 'the rate this session is actually paying for input tokens'
-    : `${name} list rates (the model named on this call)`;
+    : rate.catalogFetchedAt
+      ? `${name} list rates from the local LiteLLM price catalog, fetched ${rate.catalogFetchedAt.slice(0, 10)} ` +
+        '(the model named on this call)'
+      : `${name} list rates (the model named on this call)`;
   // "One line, no table" is stated explicitly because the alternative was
   // observed: on a host whose rule file describes a per-model table for the
   // UNPRICED case, an agent that had just been given an exact figure produced

@@ -10,7 +10,7 @@ export { EVENTS, COMMON_KEYS, isTrackedCommand, errorCode, filesBucket, duration
 export type { AgentHost, Surface, TrackedCommand, BuildStage, ErrorCode } from './contract.js';
 export { track, trackFirstRunIfNew, trackInstallIfNew, detectHost } from './track.js';
 export type { QueuedEvent, TrackContext } from './track.js';
-export { telemetryOn, offReason, explainOff } from './gate.js';
+export { telemetryOn, offReason, explainOff, userCanEnable } from './gate.js';
 export { maybeFlushInBackground, runFlush } from './flush.js';
 export { firstRunNotice, formatStatus, formatDebug, NOTICE, TELEMETRY_DOC_URL } from './notice.js';
 export { patchState, readState } from './identity.js';

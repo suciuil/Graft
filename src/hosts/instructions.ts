@@ -121,6 +121,15 @@ substituting the summed tokens and dollars — its wording already says exactly
 what may and may not be claimed about the price. Write it as a plain line: no
 surrounding quotation marks, and drop any trailing full stop that merely closed
 graft's own sentence.
+When a \`graft build --deep\` is due, graft prints a \`[graft] … recommended\`
+note and the example tally gets a second line, "⚠️ 'graft build --deep'
+recommended (…)". Keep that line under the tally when you close your reply — it
+is how the user learns the prose summaries are out of date. Do not run \`graft
+build --deep\` yourself unless asked: it is an LLM pass that needs an API key
+and costs tokens.
+When a saving could not be priced because graft knows no price for the model,
+the tally also gets a "⚠️ 'graft prices update' recommended (…)" line. Keep it
+under the tally too; do not run \`graft prices update\` yourself unless asked.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }

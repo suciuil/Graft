@@ -314,7 +314,7 @@ Coming soon: a Trail workspace, for your team's view across repos. A team page w
 - **Your past sessions.** `trail init` reads your own messages from Claude Code's transcripts for the repo, on your machine. Your own Claude Code does the reading, with Claude Sonnet under your login, so your messages go only to Anthropic, and it counts toward your Claude usage. None of it goes to Trail.
 - **Your PR reviews.** When `gh` is installed and signed in, `trail init` reads the review comments on the repo's last 50 merged PRs with it, under your GitHub login. Anything that looks like a secret is taken out, and your own Claude Code reads them the same way. None of it goes to Trail.
 - **If you connect a Trail workspace.** No learning goes to Trail until you do. Once connected, the learnings in the repos you picked go to Trail, including those on teammates' pushed branches. So does a record of each search and check that used them: the search text, the files, and whose learnings were shown. That is how the team page counts reuse.
-- **Anonymous usage stats.** Buckets and fixed labels only, never the title, text or paths of a learning. [`TELEMETRY.md`](TELEMETRY.md) lists every field. Turn it off with `trail telemetry disable` or `DO_NOT_TRACK=1`.
+- **Anonymous usage stats.** Permanently disabled: nothing is recorded or sent, and it cannot be turned on. [`TELEMETRY.md`](TELEMETRY.md) has the details.
 
 ---
 
@@ -538,9 +538,9 @@ _Summary, sources, links, and your text ship today in markdown nodes. The crux s
 ## What runs where
 
 - **On your machine, no key, no network:** the structural code graph. `trail build` (wiring graph + per-file cards), `trail build --check`, `trail ask`, learnings and `trail check` are deterministic. They never call a model.
-- **Through your provider key:** the LLM-written parts. `trail build --deep` adds the concept nodes (file summaries + node synthesis) and the per-symbol summaries and cruxes. The graft map is vendor-neutral: set `GRAFT_PROVIDER` (`openai` for any OpenAI-compatible endpoint, `anthropic` for the native API, or `litellm` / `orcarouter` for a gateway that speaks the OpenAI-compatible format), your `GRAFT_API_KEY`, `GRAFT_MODEL`, and, for the `openai` wire format, `GRAFT_BASE_URL` to point at OpenRouter, Fireworks, Groq, a LiteLLM proxy, a local server, or OpenAI itself. Or pass `--provider/--model/--api-key/--base-url` on the command line. (`OPENROUTER_API_KEY` still works as a deprecated fallback, and `ORCAROUTER_API_KEY` as a second one.)
+- **Through your provider key:** the LLM-written parts. `trail build --deep` adds the concept nodes (file summaries + node synthesis) and the per-symbol summaries and cruxes. The graft map is vendor-neutral: set `GRAFT_PROVIDER` (`openai` for any OpenAI-compatible endpoint, `anthropic` for the native API, or `litellm` / `orcarouter` for a gateway that speaks the OpenAI-compatible format), your `GRAFT_API_KEY`, `GRAFT_MODEL`, and, for the `openai` wire format, `GRAFT_BASE_URL` to point at OpenRouter, Fireworks, Groq, a LiteLLM proxy, a local server, or OpenAI itself. Or pass `--provider/--model/--api-key/--base-url` on the command line, or save them once for every new terminal with `trail api url`, `trail api key` (asks for the key with hidden input) and `trail model` (lists the models the endpoint serves, mid-tier first, and lets you pick one). Those three store user environment variables (Windows: `HKCU\Environment`; macOS/Linux: `~/.graft/env.sh`, sourced from your shell profile), check the endpoint after saving, and print the current value and where it comes from when run without one; `--unset` removes a saved value. When `build --deep` fails because the endpoint is unreachable, the key is rejected, or the model is unknown, it says which of them to run. (`OPENROUTER_API_KEY` still works as a deprecated fallback, and `ORCAROUTER_API_KEY` as a second one.) On a corporate network whose gateway or TLS-inspecting proxy is signed by a company root, graft trusts the operating system's certificate store in addition to Node's bundled roots, so no `NODE_EXTRA_CA_CERTS` is needed wherever IT has deployed that root, including for MCP servers and hooks that agents start; set `GRAFT_SYSTEM_CA=0` to turn this off.
 - **Through Trail, only if you connect a workspace:** the learnings in the repos you picked, and the searches and checks that used them. See [What stays on your machine](#what-stays-on-your-machine).
-- **Anonymous usage stats:** a daily npm version check and one batched usage ping. The ping carries buckets and fixed labels only: never your code, file paths, repo name, symbols, queries, learnings or error messages. [`TELEMETRY.md`](TELEMETRY.md) is the complete list and `trail telemetry debug` prints exactly what your machine would send. Turn it off with `trail telemetry disable`, `DO_NOT_TRACK=1`, or by unchecking the box in `trail init`; it is off in CI and in any build from source.
+- **Anonymous usage stats: none.** Telemetry is permanently disabled and cannot be turned on; nothing is recorded or sent ([`TELEMETRY.md`](TELEMETRY.md)).
 
 Settings keep their `GRAFT_` names. See [`.env.example`](.env.example) for the full list (model, base URL, graph directory).
 
@@ -562,7 +562,7 @@ In Claude Code, the committed skill file is also how a teammate without Trail-co
 
 With no TTY to prompt on (CI, a Dockerfile, a piped shell), `init` writes **nothing** and prints the command to run instead. Pass `--agents <ids>` or `--yes` to make a scripted run explicit.
 
-Agents without a statusline (Kilo Code over MCP, GitHub Copilot over the CLI) still hear when the LLM layer has drifted or was never built. Each query auto-refreshes the structural graph, which marks the per-symbol summaries of edited code `stale` and leaves new code `pending` (never summarized). Once more than 10% of summaries are out of date (changed plus never-summarized code; configurable with `trail deep-threshold <percent>`, per repo or for all repos with `--global`), every MCP tool result (at its end) and every CLI query (on stderr) carries a one-line `[trail] … trail build --deep is recommended` note, for the agent to pass on to you. A repo only ever built by `trail init` / `trail build` has no summaries at all, so it gets the note on every query until you run `trail build --deep`, or opt out with `trail deep-threshold 100` (add `--global` for every repo).
+Agents without a statusline (Kilo Code over MCP, GitHub Copilot over the CLI) still hear when the LLM layer has drifted or was never built. Each query auto-refreshes the structural graph, which marks the per-symbol summaries of edited code `stale` and leaves new code `pending` (never summarized). Once more than 10% of summaries are out of date (changed plus never-summarized code; configurable with `trail deep-threshold <percent>`, per repo or for all repos with `--global`), every MCP tool result (at its end) and every CLI query (on stderr) carries a one-line `[trail] … trail build --deep is recommended` note, for the agent to pass on to you. A repo only ever built by `trail init` / `trail build` has no summaries at all, so it gets the note on every query until you run `trail build --deep`, or opt out with `trail deep-threshold 100` (add `--global` for every repo). To check a repo on demand instead of waiting for the note, `trail staleness [dir]` prints the out-of-date share, the threshold it is judged against, the verdict, and the files holding the most out-of-date summaries.
 
 | Flag | Effect |
 |---|---|
@@ -690,11 +690,18 @@ trail build --no-follow-submodules   # exclude submodules again and persist that
 trail build --follow-nested-repos    # include nested git clones the index doesn't track; persist the choice
 trail build --no-follow-nested-repos # exclude nested clones again and persist that choice (the default)
 
+trail staleness [dir]                # what % of summaries are out of date (changed + new code), whether `trail build --deep` is due against the threshold, and the worst files ($0, no LLM)
+trail staleness --top 20 --json      # more files, as JSON for scripts (`recommended`, `pct`, `totals`, per-repo split in a workspace)
+
 trail deep-threshold [dir]           # show the % of out-of-date summaries (changed + new code) above which queries recommend `trail build --deep`, and where it comes from
 trail deep-threshold 25 [dir]        # set it for this repo, in .graft/config.json (0 = anything out of date, 100 = never)
 trail deep-threshold 25 --global     # set the default for every repo, in ~/.graft/settings.json (a repo's own value still wins)
 trail deep-threshold --reset [dir]   # drop this repo's value: falls back to the global one, else 10
 trail deep-threshold --reset --global  # drop the global value: back to the built-in 10
+
+trail prices update                  # fetch LiteLLM's public model price catalog (one anonymous GET) into ~/.graft/prices.json,
+                                     # so savings for models the built-in table does not list are priced in dollars (kept until the next update)
+trail prices status [model]          # whether a local catalog is stored and how old it is; with a model, the price used for it
 
 trail status [dir]                   # the graft map, learnings and tokens saved, on one screen
 trail upgrade                        # npm install -g the latest published version
@@ -704,7 +711,7 @@ trail uninstall [dir]                # remove every file and config entry it wro
 trail uninstall -y                   # actually remove (without -y it prints what it would remove and exits)
 trail uninstall --keep-cache         # wiring only; leave graft/ and the .gitignore entry
 trail uninstall --no-global          # leave out-of-repo files alone (~/.claude, ~/.claude.json, ~/.codex, ~/.gemini)
-trail telemetry [status|enable|disable|debug]   # anonymous usage stats; debug prints exactly what would be sent
+trail telemetry [status|debug]                   # anonymous usage stats: permanently off; debug shows the (empty) queue
 
 # CI
 trail blast [dir]                    # blast radius of a diff: what depends on the lines this change touched (no LLM, no key)

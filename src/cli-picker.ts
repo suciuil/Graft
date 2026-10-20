@@ -113,11 +113,11 @@ export interface PickerRow {
  * The id of the telemetry consent row.
  *
  * The picker is where a user is already deciding what graft may touch, which
- * makes it the honest place to also ask whether they mind anonymous usage stats
- * — the same move munder-difflin makes with a pre-checked box in onboarding, and
- * the reason this is a disclosed default rather than a silent one. It is only
- * offered when telemetry could actually run: showing it in a fork, in CI, or
- * under DO_NOT_TRACK would be theatre.
+ * makes it the honest place to also ask whether they mind anonymous usage stats.
+ * Telemetry is opt-in: the row starts unchecked unless the user already opted
+ * in, so it is only ever turned on by ticking it. It is only offered when
+ * telemetry could actually run: showing it in a fork, in CI, or under
+ * DO_NOT_TRACK would be theatre.
  */
 export const TELEMETRY_ROW_ID = '__telemetry';
 
@@ -140,14 +140,15 @@ export function visibleRows(state: PickerState): PickerRow[] {
 /**
  * Claude Code starts checked — it's the deep integration — everything else off.
  *
- * `offerTelemetry` appends the consent row, checked. Default false so every
- * existing caller (and every test) sees exactly the host rows it always did.
+ * `offerTelemetry` appends the consent row, unchecked unless `telemetryChecked`
+ * (the user already opted in). Default false so every existing caller (and every
+ * test) sees exactly the host rows it always did.
  */
 export function initialPickerState(
   plan: HostPlan[],
   repo: string,
   home: string,
-  opts: { offerTelemetry?: boolean } = {},
+  opts: { offerTelemetry?: boolean; telemetryChecked?: boolean } = {},
 ): PickerState {
   const rows: PickerRow[] = plan.map((p) => ({
     id: p.id,
@@ -167,7 +168,7 @@ export function initialPickerState(
       summary: 'no code, no file paths, no queries',
       hasGlobal: false,
     });
-    checked.add(TELEMETRY_ROW_ID);
+    if (opts.telemetryChecked) checked.add(TELEMETRY_ROW_ID);
   }
   return { rows, cursor: 0, checked, done: false, aborted: false };
 }
@@ -346,7 +347,7 @@ export async function runPicker(
   plan: HostPlan[],
   repo: string,
   home: string,
-  opts: { offerTelemetry?: boolean; title?: string | null } = {},
+  opts: { offerTelemetry?: boolean; telemetryChecked?: boolean; title?: string | null } = {},
 ): Promise<Picked | null> {
   const state = await drivePicker(initialPickerState(plan, repo, home, opts), opts.title);
   return state ? { hosts: pickedHostIds(state), telemetry: pickedTelemetry(state) } : null;

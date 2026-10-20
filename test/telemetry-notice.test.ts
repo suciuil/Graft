@@ -21,55 +21,33 @@ import { tmpRepo } from './helpers.js';
  */
 const OPEN: NodeJS.ProcessEnv = {};
 
+/** A home whose user had opted in under an older graft, unless `state` says otherwise. */
 function home(tag: string, state?: Record<string, unknown>): string {
   const dir = tmpRepo(tag);
   mkdirSync(join(dir, '.graft'), { recursive: true });
-  if (state) writeFileSync(join(dir, '.graft', 'telemetry.json'), JSON.stringify(state));
+  if (state) writeFileSync(join(dir, '.graft', 'telemetry.json'), JSON.stringify({ enabled: true, ...state }));
   process.env.GRAFT_POSTHOG_KEY = 'phc_test_key';
   return dir;
 }
 
-test('the notice prints once per machine, then never again', () => {
-  const h = home('notice-once', { installId: 'x' });
-  const first = firstRunNotice(h, OPEN);
-  assert.ok(first, 'the first run must disclose');
-  assert.match(first, /anonymous/);
-  assert.match(first, /graft telemetry disable/);
-  assert.match(first, /TELEMETRY\.md/);
-  assert.equal(firstRunNotice(h, OPEN), null);
-  assert.equal(firstRunNotice(h, OPEN), null);
-  assert.ok(readState(h)?.noticeShownAt);
+test('no notice is ever printed: telemetry is permanently off, so there is nothing to disclose', () => {
+  for (const state of [undefined, { installId: 'x' }, { installId: 'x', enabled: false }]) {
+    const h = home('notice-never', state);
+    for (const env of [OPEN, { CI: 'true' }, { DO_NOT_TRACK: '1' }] as NodeJS.ProcessEnv[]) {
+      assert.equal(firstRunNotice(h, env), null);
+    }
+    assert.equal(readState(h)?.noticeShownAt, undefined);
+  }
 });
 
-test('the notice says what is NOT collected, in the first line a user reads', () => {
-  const h = home('notice-says-what', { installId: 'x' });
-  assert.match(firstRunNotice(h, OPEN) ?? '', /no code, no file paths, no queries/);
-});
-
-test('nothing is disclosed when nothing can be sent', () => {
-  // A fork: no key, so there is no collection to announce and announcing one
-  // would be worse than saying nothing.
-  const h = home('notice-nokey', { installId: 'x' });
-  delete process.env.GRAFT_POSTHOG_KEY;
-  assert.equal(firstRunNotice(h, OPEN), null);
-  assert.equal(readState(h)?.noticeShownAt, undefined, 'and the notice stays pending');
-});
-
-test('status names the switch that is actually closed', () => {
-  const h = home('notice-status-off', { installId: 'x', enabled: false });
+test('status says it is permanently off, offers no way to enable it, and never prints the key', () => {
+  const h = home('notice-status', { installId: 'x' });
+  enqueue({ event: 'query' }, h); // left over from an older graft: still never sent
   const out = formatStatus(h, OPEN);
-  assert.match(out, /telemetry: off/);
-  assert.match(out, /graft telemetry enable/);
-});
-
-test('status shows the endpoint and the pending count when it is on', () => {
-  const h = home('notice-status-on', { installId: 'x' });
-  enqueue({ event: 'query' }, h);
-  const out = formatStatus(h, OPEN);
-  assert.match(out, /telemetry: on/);
-  assert.match(out, /1 event waiting/);
-  assert.match(out, /https:\/\//);
+  assert.match(out, /^telemetry: off — telemetry is permanently disabled .* cannot be turned on/);
+  assert.doesNotMatch(out, /graft telemetry enable|graft telemetry disable/);
   assert.match(out, /graft telemetry debug/);
+  assert.equal(out.includes('phc_test_key'), false);
 });
 
 test('debug prints the exact batch and sends nothing', () => {
@@ -109,19 +87,4 @@ test('status prints the endpoint but never the key', () => {
 
 test('debug on an empty queue explains rather than printing an empty batch', () => {
   assert.match(formatDebug(home('notice-debug-empty', { installId: 'x' })), /nothing queued/);
-});
-
-test('CI gets no notice — there is no one there to read a disclosure', () => {
-  const h = home('notice-ci', { installId: 'x' });
-  assert.equal(firstRunNotice(h, { GITHUB_ACTIONS: 'true' }), null);
-  assert.equal(firstRunNotice(h, { CI: 'true' }), null);
-  assert.equal(readState(h)?.noticeShownAt, undefined, 'and it stays pending for a real run');
-  // A real run on the same machine still gets it.
-  assert.ok(firstRunNotice(h, OPEN));
-});
-
-test('DO_NOT_TRACK gets no notice either', () => {
-  const h = home('notice-dnt', { installId: 'x' });
-  assert.equal(firstRunNotice(h, { DO_NOT_TRACK: '1' }), null);
-  assert.match(formatStatus(h, { DO_NOT_TRACK: '1' }), /DO_NOT_TRACK/);
 });
