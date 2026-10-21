@@ -1,11 +1,11 @@
 /**
- * Tests for the C/C++ depth extractors and the JSON/YAML/Markdown/SCSS breadth
+ * Tests for the C/C++/CMake depth extractors and the JSON/YAML/Markdown/SCSS breadth
  * extractors. Each grammar is an optional, locally-built native dependency; the
  * per-language tests skip when its binding isn't built.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildGraph } from "../src/graph/build.js";
@@ -93,6 +93,61 @@ test("CSV breadth: header columns become variable nodes", { skip: grammarAvailab
   assert.equal(nodeById(graph, "data.csv#id")?.kind, "variable");
   assert.equal(nodeById(graph, "data.csv#name")?.kind, "variable");
   assert.equal(nodeById(graph, "data.csv#age")?.kind, "variable");
+});
+
+test("CMake depth: functions, macros, targets, calls, target links and includes", { skip: grammarAvailable("cmake") ? false : "cmake grammar not built" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-cmake-"));
+  try {
+    mkdirSync(join(dir, "cmake"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(
+      join(dir, "CMakeLists.txt"),
+      [
+        "cmake_minimum_required(VERSION 3.20)",
+        "project(Demo LANGUAGES CXX)",
+        "include(Helpers)",
+        "include(CTest)",
+        'option(DEMO_TESTS "Build tests" ON)',
+        "function(add_demo name)",
+        '  message(STATUS "adding ${name}")',
+        "  helper_fn(${name})",
+        "endfunction()",
+        "add_subdirectory(src)",
+        "add_executable(app main.cpp)",
+        "target_link_libraries(app PRIVATE core Threads::Threads)",
+        "add_demo(app)",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(dir, "cmake", "Helpers.cmake"), "MACRO(Helper_Fn x)\n  set(${x}_done ON)\nENDMACRO()\n");
+    writeFileSync(join(dir, "src", "CMakeLists.txt"), "add_library(core STATIC core.cpp)\nadd_library(demo::core ALIAS core)\n");
+    writeFileSync(join(dir, "notes.txt"), "not cmake\n");
+    await buildGraph(dir);
+    const graph = readGraph(wiringPath(join(dir, "graft")))!;
+
+    assert.deepEqual(graph.meta.languages, ["cmake"], "only the CMake files are indexed, not notes.txt");
+    assert.equal(nodeById(graph, "CMakeLists.txt#add_demo")?.kind, "function");
+    assert.equal(nodeById(graph, "CMakeLists.txt#add_demo")?.span, "L6-L9", "spans to endfunction()");
+    assert.equal(nodeById(graph, "cmake/Helpers.cmake#helper_fn")?.kind, "function", "a macro, keyed in lower case");
+    assert.equal(nodeById(graph, "cmake/Helpers.cmake#helper_fn")?.signature, "MACRO(Helper_Fn x)", "signature as written");
+    assert.equal(nodeById(graph, "CMakeLists.txt#app")?.kind, "target");
+    assert.equal(nodeById(graph, "src/CMakeLists.txt#core")?.kind, "target");
+    assert.equal(nodeById(graph, "CMakeLists.txt#DEMO_TESTS")?.kind, "variable");
+
+    assert.ok(hasEdge(graph, "calls", "CMakeLists.txt", "CMakeLists.txt#add_demo"), "a top-level call");
+    assert.ok(hasEdge(graph, "calls", "CMakeLists.txt#add_demo", "cmake/Helpers.cmake#helper_fn"), "case-insensitive call across files");
+    assert.ok(hasEdge(graph, "references", "CMakeLists.txt#app", "src/CMakeLists.txt#core"), "target_link_libraries");
+    assert.ok(hasEdge(graph, "references", "src/CMakeLists.txt#demo::core", "src/CMakeLists.txt#core"), "ALIAS");
+    assert.ok(hasEdge(graph, "imports", "CMakeLists.txt", "cmake/Helpers.cmake"), "include(Helpers) → the unique Helpers.cmake");
+    assert.ok(hasEdge(graph, "imports", "CMakeLists.txt", "src/CMakeLists.txt"), "add_subdirectory(src)");
+    assert.ok(hasEdge(graph, "imports", "CMakeLists.txt", "CTest"), "a CMake-shipped module stays its name");
+    const targets = new Set(graph.edges.map((e) => e.target));
+    for (const name of ["Threads::Threads", "message", "set", "project"]) {
+      assert.ok(![...targets].some((t) => t.endsWith(`#${name}`)), `${name} resolves to nothing`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("C++ header: a .h with a class is parsed as C++, not C", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {

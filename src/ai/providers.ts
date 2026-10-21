@@ -3,7 +3,19 @@ import type { Synthesizer } from "./synthesize.js";
 import type { CruxSummarizer } from "./crux.js";
 import type { ChatModel } from "./llm/types.js";
 import type { ProviderKind } from "./llm/factory.js";
-import { bareModelFallbacks, LLM_INCUBATOR_BASE_URL } from "./llm/factory.js";
+import { bareModelFallbacks, DEFAULT_BASE_URL, LLM_INCUBATOR_BASE_URL } from "./llm/factory.js";
+import {
+  DATABRICKS_DEFAULT_MODEL,
+  databricksHeaders,
+  databricksModelFallbacks,
+  databricksModelHeaders,
+  databricksRoot,
+  databricksRoute,
+  databricksRouteUrl,
+  isDatabricksGatewayUrl,
+  normalizeDatabricksModel,
+  type DatabricksRoute,
+} from "./llm/databricks.js";
 
 /**
  * User-facing configuration. Anything omitted falls back to environment
@@ -19,13 +31,13 @@ export interface EngineConfig {
   /** Where the graph lives. Env: GRAFT_DIR. Default: `<repo>/.context`. */
   contextDir?: string;
 
-  /** Wire format / SDK. Env: GRAFT_PROVIDER. Default: `llm-incubator` when no base URL is configured, else `openai`. */
+  /** Wire format / SDK. Env: GRAFT_PROVIDER. Default: the Databricks AI Gateway's route for the model when no base URL is configured, else `openai`. */
   provider?: ProviderKind;
   /** API key for the chosen provider. Env: GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN (legacy: OPENROUTER_API_KEY). */
   apiKey?: string;
   /** Model id. Env: GRAFT_MODEL. Provider-specific default. */
   model?: string;
-  /** Base URL of the endpoint. Env: GRAFT_BASE_URL, then ANTHROPIC_BASE_URL. */
+  /** Base URL of the endpoint. Env: GRAFT_BASE_URL, then ANTHROPIC_BASE_URL. Default: the Databricks AI Gateway. */
   baseUrl?: string;
 
   // --- advanced: bring your own components ---
@@ -49,6 +61,10 @@ export interface ResolvedConfig {
   modelFallbacks?: string[];
   baseUrl?: string;
   headers?: Record<string, string>;
+  /** Anthropic wire: extra headers for one model id. */
+  modelHeaders?: (model: string) => Record<string, string> | undefined;
+  /** Set when the endpoint is the Databricks AI Gateway: its workspace root and the route `model` takes. */
+  databricks?: { root: string; route: DatabricksRoute };
   /** Second wire format tried when `provider` was defaulted and the endpoint rejects it. */
   providerFallback?: { provider: ProviderKind; model: string };
   /** True when the key came from ANTHROPIC_AUTH_TOKEN: the Anthropic wire sends it as a Bearer token. */
@@ -84,7 +100,7 @@ export const DEFAULTS = {
 /** Merge user config with environment variables and defaults. */
 export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const providerDefaulted = !config.provider && !env.GRAFT_PROVIDER;
-  let provider = config.provider ?? (env.GRAFT_PROVIDER as ProviderKind | undefined) ?? DEFAULTS.provider;
+  const provider = config.provider ?? (env.GRAFT_PROVIDER as ProviderKind | undefined) ?? DEFAULTS.provider;
 
   const explicitKey = config.apiKey ?? env.GRAFT_API_KEY;
   const anthropicToken = explicitKey ? undefined : env.ANTHROPIC_AUTH_TOKEN;
@@ -105,9 +121,34 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
   if (!baseUrl && provider === "openai" && usedLegacyEnv) baseUrl = OPENROUTER_BASE_URL;
   // The orcarouter provider points at the gateway unless a base URL is given.
   if (!baseUrl && provider === "orcarouter") baseUrl = ORCAROUTER_BASE_URL;
-  // Nothing configured at all: the LLM Incubator gateway, not api.openai.com.
-  if (!baseUrl && provider === "openai" && providerDefaulted && !legacyRouting) provider = "llm-incubator";
+  // Nothing configured at all: the Databricks AI Gateway, not api.openai.com.
+  if (!baseUrl && provider === "openai" && providerDefaulted && !legacyRouting) baseUrl = DEFAULT_BASE_URL;
   if (!baseUrl && provider === "llm-incubator") baseUrl = LLM_INCUBATOR_BASE_URL;
+
+  // The Databricks gateway serves each model family under its own route and wire format.
+  if (isDatabricksGatewayUrl(baseUrl)) {
+    const root = databricksRoot(baseUrl!);
+    const model = normalizeDatabricksModel(config.model ?? env.GRAFT_MODEL ?? DATABRICKS_DEFAULT_MODEL);
+    const route = databricksRoute(model);
+    return {
+      contextDir: config.contextDir ?? env.GRAFT_DIR,
+      provider: route === "anthropic" ? "anthropic" : "openai",
+      apiKey,
+      model,
+      modelFallbacks: databricksModelFallbacks(model),
+      baseUrl: databricksRouteUrl(root, route),
+      headers: databricksHeaders(),
+      modelHeaders: route === "anthropic" ? databricksModelHeaders : undefined,
+      databricks: { root, route },
+      // Databricks takes its personal access token as a Bearer token on every route.
+      bearerAuth: apiKey ? true : undefined,
+      usedLegacyEnv,
+      chatModel: config.chatModel,
+      synthesizer: config.synthesizer,
+      summarizer: config.summarizer,
+      cruxSummarizer: config.cruxSummarizer,
+    };
+  }
 
   const model =
     config.model ??

@@ -13,7 +13,16 @@
     },
     "pack": "97bfa7cd9813924acaea9b9f24a73cd2821982547a8ff86b6aee4f71233cb5e4"
   },
-  "tree-sitter-kotlin": "35ed41725cbd93f8c52016d44d2221fd5bd4219e9f1e2a3c9994023439e6a616",
+  "tree-sitter-kotlin": {
+    "build": "1465f8bf4c62e049ac22c4cbd4ed76340afaec80abd58cea33069a82785de93f",
+    "gen": {
+      ".": {
+        "in": "11502c1ad1ba9284b2184563b02bd8025ad2bbb0bd75804b0051b608b7726c6f",
+        "parser": "7d1b08094aea7be1092fb3b3f566d180706d9ad4a197e63a69d649eb183b77d6"
+      }
+    },
+    "pack": "d0117158570cd7bd283d91ff244529cf2ace364eec5ee60c670ba8af51ab2472"
+  },
   "@tree-sitter-grammars/tree-sitter-markdown": {
     "gen": {
       "tree-sitter-markdown": {
@@ -155,5 +164,15 @@
     },
     "build": "7105c70c31c85e393ff94ee3753ae55d3f3224fab2dd3b48eb148e1a9c94cfbb",
     "pack": "253b98c815ab642984c9f98bac9d12c2db8ca6ae0d7bd7d7088ea46aa058d9cc"
+  },
+  "tree-sitter-cmake": {
+    "gen": {
+      ".": {
+        "in": "b28a4a331d56498b290b01aa6a37d2c18a6ef1c01a8c3981daabe79bbadb4d8a",
+        "parser": "ece92c2e3fbf15634fb90fab91d0af749348c069d27208eeb10dcdd4e77fe5a2"
+      }
+    },
+    "build": "b11054c177d1aad6178ce1016deb8a352bbcb986a86e134b941b41af6d45217e",
+    "pack": "d085276a3abdfb1f2ce67f744fc6e4e3f891a93982e9b10709f13168988decde"
   }
 }

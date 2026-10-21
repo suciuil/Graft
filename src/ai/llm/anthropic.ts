@@ -31,6 +31,10 @@ export interface AnthropicChatModelOptions {
   label?: string;
   /** Model ids tried in order when the endpoint reports `model` as unknown. */
   modelFallbacks?: string[];
+  /** Extra default headers on every request (e.g. a gateway's request tags). */
+  headers?: Record<string, string>;
+  /** Extra headers for one model id, sent with each request for that model. */
+  modelHeaders?: (model: string) => Record<string, string> | undefined;
   /** Inject a pre-built client (tests pass a stub; production omits it). */
   client?: Anthropic;
 }
@@ -52,21 +56,32 @@ function isModelNotFound(err: unknown): boolean {
   return err.status === 400 && /(invalid model|unknown model|not a valid model)/i.test(message);
 }
 
+/** Models that always think (e.g. Claude Sonnet/Opus 5.5 behind some gateways) refuse a forced tool. */
+function isRejectedForcedToolChoice(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status;
+  return status === 400 && /tool_choice[^.]*(not supported|is not supported|unsupported)/i.test(String((err as Error)?.message ?? ""));
+}
+
 export class AnthropicChatModel implements ChatModel {
   readonly label: string;
   private client: Anthropic;
   private models: string[];
+  private modelHeaders?: (model: string) => Record<string, string> | undefined;
   // Sticky across calls: once the bare id works, later calls skip the failing one.
   private modelIdx = 0;
+  // Sticky: once the endpoint refuses a forced tool_choice, later calls ask for the tool instead.
+  private forcedToolUnsupported = false;
 
   constructor(opts: AnthropicChatModelOptions) {
     this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
+    this.modelHeaders = opts.modelHeaders;
     this.client =
       opts.client ??
       new Anthropic({
         ...(opts.authToken ? { apiKey: null, authToken: opts.authToken } : { apiKey: opts.apiKey }),
         baseURL: anthropicBaseUrl(opts.baseUrl),
+        defaultHeaders: opts.headers,
         maxRetries: transportRetries(),
       });
   }
@@ -74,8 +89,12 @@ export class AnthropicChatModel implements ChatModel {
   private async send(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Messages.Message> {
     for (;;) {
       const mi = this.modelIdx;
+      const model = this.models[mi]!;
+      const headers = this.modelHeaders?.(model);
       try {
-        return await this.client.messages.create({ ...params, model: this.models[mi]! });
+        return await (headers
+          ? this.client.messages.create({ ...params, model }, { headers })
+          : this.client.messages.create({ ...params, model }));
       } catch (err) {
         if (isModelNotFound(err) && mi + 1 < this.models.length) {
           if (this.modelIdx === mi) {
@@ -140,8 +159,29 @@ export class AnthropicChatModel implements ChatModel {
       params.tools = tools;
     }
 
-    const resp = await this.send(params);
+    const resp = await this.sendWithToolChoiceCompat(params);
     return this.fromResponse(resp, fmt.kind);
+  }
+
+  /**
+   * A forced `tool_choice` ({type: "tool"}) is rejected by models that always
+   * think; for those the same tool is offered with `auto` and the model is told
+   * to answer only through it, which it does.
+   */
+  private async sendWithToolChoiceCompat(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Messages.Message> {
+    const forced = params.tool_choice?.type === "tool" ? params.tool_choice.name : undefined;
+    if (!forced) return this.send(params);
+    if (!this.forcedToolUnsupported) {
+      try {
+        return await this.send(params);
+      } catch (err) {
+        if (!isRejectedForcedToolChoice(err)) throw err;
+        this.forcedToolUnsupported = true;
+      }
+    }
+    const nudge: Anthropic.TextBlockParam = { type: "text", text: `Respond only by calling the \`${forced}\` tool; do not answer in plain text.` };
+    const system = typeof params.system === "string" ? [{ type: "text" as const, text: params.system }] : (params.system ?? []);
+    return this.send({ ...params, tool_choice: { type: "auto" }, system: [...system, nudge] });
   }
 
   /** Reconstruct an assistant turn, replaying the original blocks when we made them. */

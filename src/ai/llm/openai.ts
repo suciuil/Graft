@@ -132,6 +132,98 @@ function isRejectedToolsWithReasoning(err: unknown): boolean {
   );
 }
 
+/** The remedy above refused: the model cannot turn reasoning off (e.g. gpt-6.1-sol: only low…xhigh). */
+function isRejectedReasoningNone(err: unknown): boolean {
+  return (
+    err instanceof OpenAI.APIError &&
+    err.status === 400 &&
+    /reasoning_effort[^.]*does not support 'none'/i.test(String((err as { message?: string }).message ?? ""))
+  );
+}
+
+/**
+ * Models that always think refuse every forcing `tool_choice` — Claude behind a
+ * Databricks serving endpoint answers "tool_choice: type "tool" and "any" are
+ * not supported for this model" to both the object form and "required".
+ */
+function isRejectedForcedToolChoice(err: unknown): boolean {
+  return (
+    err instanceof OpenAI.APIError &&
+    err.status === 400 &&
+    /tool_choice[^.]*\bany\b[^.]*not supported/i.test(String((err as { message?: string }).message ?? ""))
+  );
+}
+
+/**
+ * The single tool `params` forces, by name or via "required", offered with
+ * `auto` instead and with a system instruction to answer only through it.
+ */
+function asAutoToolChoice(params: ChatParams): ChatParams | undefined {
+  const choice = params.tool_choice;
+  if (!choice || choice === "auto" || choice === "none" || params.tools?.length !== 1) return undefined;
+  const tool = params.tools[0]!;
+  if (tool.type !== "function") return undefined;
+  const nudge = `Respond only by calling the \`${tool.function.name}\` tool; do not answer in plain text.`;
+  const [first, ...rest] = params.messages;
+  const messages: ChatParams["messages"] =
+    first?.role === "system" && typeof first.content === "string"
+      ? [{ ...first, content: `${first.content}\n\n${nudge}` }, ...rest]
+      : [{ role: "system", content: nudge }, ...params.messages];
+  return { ...params, tool_choice: "auto", messages };
+}
+
+/** The single forced function of `params`, when there is exactly one. */
+function forcedSingleTool(params: ChatParams): OpenAI.Chat.Completions.ChatCompletionFunctionTool | undefined {
+  const choice = params.tool_choice;
+  if (!choice || typeof choice !== "object" || choice.type !== "function" || params.tools?.length !== 1) return undefined;
+  const tool = params.tools[0]!;
+  return tool.type === "function" && tool.function.name === choice.function.name ? tool : undefined;
+}
+
+/**
+ * A forced single tool rewritten as structured output: the tool's parameters
+ * become a `json_schema` response format. Used only for models that refuse
+ * function tools while reasoning and cannot turn reasoning off.
+ */
+function asResponseFormat(params: ChatParams, tool: OpenAI.Chat.Completions.ChatCompletionFunctionTool): ChatParams {
+  const { tools: _tools, tool_choice: _choice, reasoning_effort: _effort, ...rest } = params;
+  const fn = tool.function;
+  const instruction = fn.description ? `Answer with a JSON object for \`${fn.name}\`: ${fn.description}` : `Answer with a JSON object for \`${fn.name}\`.`;
+  return {
+    ...rest,
+    messages: [{ role: "system", content: instruction }, ...params.messages],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: fn.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64), schema: (fn.parameters ?? { type: "object" }) as Record<string, unknown>, strict: false },
+    },
+  } as ChatParams;
+}
+
+/** The structured-output reply presented as the tool call the caller forced. */
+function asToolCallResponse(
+  resp: OpenAI.Chat.Completions.ChatCompletion,
+  name: string,
+): OpenAI.Chat.Completions.ChatCompletion {
+  const choice = resp.choices[0];
+  if (!choice) return resp;
+  const args = contentText(choice.message.content as unknown).trim() || "{}";
+  return {
+    ...resp,
+    choices: [
+      {
+        ...choice,
+        finish_reason: "tool_calls",
+        message: {
+          ...choice.message,
+          content: null,
+          tool_calls: [{ id: `call_${resp.id ?? "structured"}`, type: "function", function: { name, arguments: args } }],
+        },
+      },
+      ...resp.choices.slice(1),
+    ],
+  };
+}
+
 /**
  * The endpoint does not serve the requested model id. Phrasings seen: OpenAI
  * (404 "The model `x` does not exist"), LiteLLM (400 "Invalid model name"),
@@ -156,6 +248,50 @@ function isRouteNotFound(err: unknown): boolean {
   );
 }
 
+/**
+ * Some gateways (Databricks) answer errors as `{"error_code": …, "message": …}`.
+ * The SDK reads only `{"error": {…}}` and would report "400 status code (no body)",
+ * losing the message every fallback below matches on — so such a body is
+ * rewritten into the shape the SDK reads. Any other response passes through untouched.
+ */
+export function errorEnvelopeFetch(base?: typeof fetch): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const res = await (base ?? globalThis.fetch)(input, init);
+    if (res.ok || !/json/i.test(res.headers.get("content-type") ?? "")) return res;
+    let body: unknown;
+    try {
+      body = JSON.parse(await res.clone().text());
+    } catch {
+      return res;
+    }
+    const b = body as { error?: unknown; error_code?: unknown; message?: unknown } | null;
+    if (!b || typeof b !== "object" || "error" in b || b.error_code === undefined || typeof b.message !== "string") return res;
+    const headers = new Headers(res.headers);
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+    const code = String(b.error_code);
+    return new Response(JSON.stringify({ error: { message: b.message, type: code, code } }), {
+      status: res.status,
+      statusText: res.statusText,
+      headers,
+    });
+  }) as typeof fetch;
+}
+
+/**
+ * The text of a reply's `content`: a string, or (some gateways, e.g. Databricks
+ * serving Qwen) a list of parts whose `text` parts carry the answer and whose
+ * `reasoning` parts do not.
+ */
+export function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((p): p is { type?: string; text: string } => !!p && typeof p.text === "string" && (p.type === undefined || p.type === "text" || p.type === "output_text"))
+    .map((p) => p.text)
+    .join("");
+}
+
 /** Base URLs to try in order: exactly as configured, then with the `/v1` suffix toggled. */
 export function baseUrlCandidates(baseUrl: string | undefined): (string | undefined)[] {
   if (!baseUrl?.trim()) return [undefined];
@@ -173,6 +309,10 @@ export class OpenAIChatModel implements ChatModel {
   // Sticky across calls: once a fallback works, later calls skip the failing attempt.
   private routeIdx = 0;
   private modelIdx = 0;
+  // Sticky: the model refuses function tools while reasoning and cannot stop reasoning.
+  private toolsAsResponseFormat = false;
+  // Sticky: the model accepts only `tool_choice: "auto"` (Claude 5.x behind Databricks serving endpoints).
+  private forcedToolUnsupported = false;
 
   constructor(opts: OpenAIChatModelOptions) {
     this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
@@ -185,6 +325,7 @@ export class OpenAIChatModel implements ChatModel {
         baseURL: this.baseUrls[0],
         defaultHeaders: opts.headers,
         maxRetries: transportRetries(),
+        fetch: errorEnvelopeFetch(),
       });
     this.clients = this.baseUrls.map((_, i) => (i === 0 ? first : undefined));
   }
@@ -271,10 +412,19 @@ export class OpenAIChatModel implements ChatModel {
     params: ChatParams,
   ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     let attempt = params;
+    let structured: string | undefined;
+    const forced = forcedSingleTool(params);
+    if (this.toolsAsResponseFormat && forced) {
+      attempt = asResponseFormat(params, forced);
+      structured = forced.function.name;
+    } else if (this.forcedToolUnsupported) {
+      attempt = asAutoToolChoice(params) ?? params;
+    }
+    const finish = (resp: OpenAI.Chat.Completions.ChatCompletion) => (structured ? asToolCallResponse(resp, structured) : resp);
     // Bounded: one retry per known incompatibility below, never an open loop.
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       try {
-        return await client.chat.completions.create(attempt);
+        return finish(await client.chat.completions.create(attempt));
       } catch (err) {
         // Checked before the tool_choice fallback below: a reasoning refusal
         // also names tool_choice, and turning reasoning off keeps the caller's
@@ -282,6 +432,24 @@ export class OpenAIChatModel implements ChatModel {
         if (isRejectedToolsWithReasoning(err) && attempt.reasoning_effort === undefined) {
           attempt = { ...attempt, reasoning_effort: "none" } as ChatParams;
           continue;
+        }
+        // Reasoning cannot be turned off either: ask for the forced tool's
+        // arguments as structured output instead, and keep doing so.
+        if (isRejectedReasoningNone(err) && attempt.reasoning_effort === "none" && forced && !structured) {
+          attempt = asResponseFormat(attempt, forced);
+          structured = forced.function.name;
+          this.toolsAsResponseFormat = true;
+          continue;
+        }
+        // Checked before the object-form fallback below, which would only swap in
+        // "required" — refused by these models just the same.
+        if (isRejectedForcedToolChoice(err)) {
+          const auto = asAutoToolChoice(attempt);
+          if (auto) {
+            attempt = auto;
+            this.forcedToolUnsupported = true;
+            continue;
+          }
         }
         if (isRejectedObjectToolChoice(err) && typeof attempt.tool_choice === "object" && attempt.tools?.length === 1) {
           attempt = { ...attempt, tool_choice: "required" };
@@ -300,7 +468,7 @@ export class OpenAIChatModel implements ChatModel {
         throw err;
       }
     }
-    return client.chat.completions.create(attempt);
+    return finish(await client.chat.completions.create(attempt));
   }
 
   private fromResponse(
@@ -321,7 +489,7 @@ export class OpenAIChatModel implements ChatModel {
       }
     };
 
-    let text = msg?.content ?? "";
+    let text = contentText(msg?.content);
     let toolCalls: ToolCall[] = rawCalls.map((c) => ({
       id: c.id,
       name: c.function.name,
@@ -335,6 +503,8 @@ export class OpenAIChatModel implements ChatModel {
       toolCalls = toolCalls.filter((c) => c.name !== JSON_TOOL);
     }
 
+    // A parts-list reply is replayed as plain text: its reasoning parts are not valid input.
+    const raw = msg && Array.isArray(msg.content as unknown) ? { ...msg, content: contentText(msg.content) } : msg;
     return {
       text,
       toolCalls,
@@ -342,9 +512,9 @@ export class OpenAIChatModel implements ChatModel {
       stopReason: choice?.finish_reason ?? null,
       assistant: {
         role: "assistant",
-        content: msg?.content ?? "",
+        content: contentText(msg?.content),
         toolCalls: toolCalls.length ? toolCalls : undefined,
-        providerRaw: { provider: PROVIDER, raw: msg },
+        providerRaw: { provider: PROVIDER, raw },
       },
     };
   }

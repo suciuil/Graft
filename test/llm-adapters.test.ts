@@ -12,6 +12,7 @@ import AnthropicSDK from "@anthropic-ai/sdk";
 import { OpenAIChatModel, baseUrlCandidates } from "../src/ai/llm/openai.js";
 import { resolveConfig, DEFAULT_MODELS } from "../src/ai/providers.js";
 import { ProviderFallbackChatModel, createChatModel, LLM_INCUBATOR_BASE_URL } from "../src/ai/llm/factory.js";
+import { DATABRICKS_BASE_URL, DATABRICKS_DEFAULT_MODEL } from "../src/ai/llm/databricks.js";
 import type { ChatModel } from "../src/ai/llm/types.js";
 import { AnthropicChatModel, anthropicBaseUrl } from "../src/ai/llm/anthropic.js";
 import type { ChatRequest } from "../src/ai/llm/types.js";
@@ -183,6 +184,41 @@ test("openai: does NOT paper over a rejected object tool_choice when multiple to
   assert.equal(callCount, 1); // no ambiguous retry — the caller asked for "a" specifically
 });
 
+test("openai: a model that refuses every forcing tool_choice gets the tool with auto and a nudge, sticky", async () => {
+  const REFUSED = '{"message":"tool_choice: type \\"tool\\" and \\"any\\" are not supported for this model."}';
+  const calls: any[] = [];
+  const resp = {
+    choices: [{ message: { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "record", arguments: '{"summary":"ok"}' } }] }, finish_reason: "tool_calls" }],
+  };
+  const client = {
+    chat: {
+      completions: {
+        create: async (params: any) => {
+          calls.push(params);
+          if (params.tool_choice !== "auto") throw new OpenAI.APIError(400, { message: REFUSED }, REFUSED, new Headers());
+          return resp;
+        },
+      },
+    },
+  } as unknown as OpenAI;
+  const m = new OpenAIChatModel({ apiKey: "x", model: "databricks-claude-sonnet-5-5", client });
+  const req = {
+    messages: [{ role: "system" as const, content: "You summarize." }, { role: "user" as const, content: "go" }],
+    tools: [{ name: "record", description: "d", parameters: { type: "object" } }],
+    responseFormat: { kind: "tool" as const, name: "record" },
+  };
+  const res = await m.create(req);
+  assert.equal(calls.length, 2, "the forced attempt, then auto — not a futile \"required\" in between");
+  assert.equal(calls[1].tool_choice, "auto");
+  assert.equal(calls[1].messages.length, 2, "the nudge joins the existing system message");
+  assert.match(calls[1].messages[0].content, /^You summarize\.\n\nRespond only by calling the `record` tool/);
+  assert.deepEqual(res.toolCalls.map((c) => c.args), [{ summary: "ok" }]);
+
+  await m.create(req);
+  assert.equal(calls.length, 3, "sticky: later calls go straight to auto");
+  assert.equal(calls[2].tool_choice, "auto");
+});
+
 test("openai: baseUrlCandidates keeps the configured URL first, then toggles /v1", () => {
   assert.deepEqual(baseUrlCandidates("https://gw.example/v1"), ["https://gw.example/v1", "https://gw.example"]);
   assert.deepEqual(baseUrlCandidates("https://gw.example/v1/"), ["https://gw.example/v1/", "https://gw.example"]);
@@ -296,22 +332,47 @@ test("resolveConfig: an unset provider gets an anthropic fallback only when the 
   });
 });
 
-test("resolveConfig: nothing configured → the LLM Incubator gateway, with the anthropic fallback on the same host", () => {
+test("resolveConfig: nothing configured → the Databricks AI Gateway, routed by model", () => {
   withEnv({ GRAFT_API_KEY: "k" }, () => {
     const c = resolveConfig();
-    assert.equal(c.provider, "llm-incubator");
-    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
-    assert.equal(c.model, "gemini-3.8-flash");
-    assert.deepEqual(c.providerFallback, { provider: "anthropic", model: DEFAULT_MODELS.anthropic });
+    assert.equal(c.provider, "anthropic");
+    assert.equal(c.baseUrl, `${DATABRICKS_BASE_URL}/ai-gateway/anthropic`);
+    assert.equal(c.model, DATABRICKS_DEFAULT_MODEL);
+    assert.equal(c.bearerAuth, true, "a Databricks token is a Bearer token");
+    assert.equal(c.providerFallback, undefined);
+    assert.deepEqual(c.databricks, { root: DATABRICKS_BASE_URL, route: "anthropic" });
   });
   withEnv({ GRAFT_API_KEY: "k", GRAFT_PROVIDER: "openai" }, () => {
     const c = resolveConfig();
     assert.equal(c.provider, "openai", "an explicit openai provider is not redirected");
     assert.equal(c.baseUrl, undefined);
   });
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_PROVIDER: "llm-incubator" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.provider, "llm-incubator", "the LLM Incubator gateway stays reachable explicitly");
+    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
+    assert.equal(c.databricks, undefined);
+  });
 });
 
-test("resolveConfig: GRAFT_BASE_URL → ANTHROPIC_BASE_URL → LLM Incubator", () => {
+test("resolveConfig: the old LLM Incubator URL keeps its old handling", () => {
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: `${LLM_INCUBATOR_BASE_URL}/v1`, GRAFT_MODEL: "claude-sonnet-5-5" }, () => {
+    const c = resolveConfig();
+    assert.equal(c.provider, "openai");
+    assert.equal(c.baseUrl, `${LLM_INCUBATOR_BASE_URL}/v1`);
+    assert.equal(c.model, "claude-sonnet-5-5");
+    assert.deepEqual(c.providerFallback, { provider: "anthropic", model: "claude-sonnet-5-5" });
+    assert.equal(c.databricks, undefined);
+    assert.equal(c.modelHeaders, undefined);
+  });
+  withEnv({ ANTHROPIC_AUTH_TOKEN: "tok", ANTHROPIC_BASE_URL: LLM_INCUBATOR_BASE_URL }, () => {
+    const c = resolveConfig();
+    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
+    assert.equal(c.databricks, undefined);
+  });
+});
+
+test("resolveConfig: GRAFT_BASE_URL → ANTHROPIC_BASE_URL → Databricks AI Gateway", () => {
   withEnv({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://graft", ANTHROPIC_BASE_URL: "https://anthropic-gw" }, () => {
     assert.equal(resolveConfig().baseUrl, "https://graft");
   });
@@ -320,11 +381,11 @@ test("resolveConfig: GRAFT_BASE_URL → ANTHROPIC_BASE_URL → LLM Incubator", (
     assert.equal(c.baseUrl, "https://anthropic-gw");
     assert.equal(c.provider, "openai");
   });
-  withEnv({ GRAFT_API_KEY: "k" }, () => assert.equal(resolveConfig().baseUrl, LLM_INCUBATOR_BASE_URL));
+  withEnv({ GRAFT_API_KEY: "k" }, () => assert.equal(resolveConfig().databricks?.root, DATABRICKS_BASE_URL));
 });
 
 test("resolveConfig: GRAFT_API_KEY → ANTHROPIC_AUTH_TOKEN (sent as Bearer on the anthropic wire) → legacy keys", () => {
-  withEnv({ GRAFT_API_KEY: "graft", ANTHROPIC_AUTH_TOKEN: "tok" }, () => {
+  withEnv({ GRAFT_API_KEY: "graft", ANTHROPIC_AUTH_TOKEN: "tok", GRAFT_BASE_URL: "https://gw.example/v1" }, () => {
     const c = resolveConfig();
     assert.equal(c.apiKey, "graft");
     assert.equal(c.bearerAuth, undefined);

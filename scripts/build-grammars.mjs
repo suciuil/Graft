@@ -2,11 +2,11 @@
  * Builds and packs the optional native tree-sitter grammars that live in sibling
  * repositories, so `npm run build` keeps them in step with graft's own code.
  *
- * Graft's depth tier covers 14 languages (C#, Groovy, PL/SQL, C, C++, CSS, HTML,
+ * Graft's depth tier covers 15 languages (C#, Groovy, PL/SQL, C, C++, CMake, CSS, HTML,
  * Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
  * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`, plus a
- * newer Kotlin grammar (`tree-sitter-kotlin-local`) that takes over from the registry
- * one when built. Those
+ * newer Kotlin grammar (`tree-sitter-kotlin-local`, from `../tree-sitter-kotlin-grammar`)
+ * that takes over from the registry one when built. Those
  * are working copies on this machine, not registry packages, and nothing used to
  * rebuild them: editing a grammar left graft parsing with the previously compiled
  * `.node` until someone remembered to run prebuildify by hand.
@@ -960,6 +960,7 @@ const GRAFT_GRAMMARS_FALLBACK = {
   "@tree-sitter-grammars/tree-sitter-xml": ["xml"], "tree-sitter-c": [undefined], "tree-sitter-cpp": [undefined],
   "tree-sitter-json": [undefined], "@tree-sitter-grammars/tree-sitter-yaml": [undefined],
   "@tree-sitter-grammars/tree-sitter-markdown": [undefined], "tree-sitter-scss": [undefined], "tree-sitter-csv": ["csv"],
+  "tree-sitter-cmake": [undefined], "tree-sitter-kotlin-local": [undefined],
 };
 function graftGrammarProps(pkgName) {
   try {

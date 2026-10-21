@@ -66,6 +66,8 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   // too; buildGraph prefers depth for .c/.cpp/.h once the native grammar loads).
   c: { pkg: "tree-sitter-c" },
   cpp: { pkg: "tree-sitter-cpp" },
+  // CMake (CMakeLists.txt, *.cmake): functions, macros, targets, include() edges.
+  cmake: { pkg: "tree-sitter-cmake" },
   // Data/markup: symbol-only custom extractors. markdown's binding default export
   // is the block grammar (its `inline` grammar is a separate property we don't use).
   json: { pkg: "tree-sitter-json" },
@@ -80,6 +82,8 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   // {@link grammarOf} prefers it. The dependency key differs from the package's own
   // name (`tree-sitter-kotlin`) so the two can be installed side by side; without the
   // local build the registry grammar is the fallback and Kotlin stays fully indexed.
+  // Built from the sibling `../tree-sitter-kotlin-grammar` checkout (fwcd/tree-sitter-kotlin);
+  // `../tree-sitter-kotlin` is the unrelated KTreeSitter bindings project.
   kotlin: { pkg: "tree-sitter-kotlin-local" },
 };
 

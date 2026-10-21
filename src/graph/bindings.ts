@@ -280,7 +280,8 @@ export function collectBindings(root: Parser.SyntaxNode, lang: Language): FileBi
     lang === "yaml" ||
     lang === "markdown" ||
     lang === "scss" ||
-    lang === "csv"
+    lang === "csv" ||
+    lang === "cmake"
   ) {
     return bindings;
   }

@@ -42,3 +42,8 @@ test("extension normalization: missing dot and mixed case still match a parser",
   assert.deepEqual(unsupportedExtensions(["vue"]), [], "container extension recognized without a dot too");
   assert.deepEqual(unsupportedExtensions(["Svelte"]), ["Svelte"], "unsupported still flagged, echoed as the user typed it");
 });
+
+test("a file claimed by its whole name (CMakeLists.txt) is judged by that name, not as an extension", { skip: supportedExtensions().includes("CMakeLists.txt") ? false : "cmake grammar not built" }, () => {
+  assert.deepEqual(unsupportedExtensions(["CMakeLists.txt", "cmakelists.txt", ".cmake"]), []);
+  assert.deepEqual(unsupportedExtensions([".txt"]), [".txt"], "claiming CMakeLists.txt does not claim every .txt");
+});

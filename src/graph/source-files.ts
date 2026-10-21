@@ -33,8 +33,9 @@ function normExt(e: string): string {
  * on whatever this returns so an unsupported extension is never a quiet no-op.
  */
 export function unsupportedExtensions(exts: string[]): string[] {
-  const supported = new Set(supportedExtensions());
-  return exts.filter((e) => !supported.has(normExt(e)));
+  const supported = new Set(supportedExtensions().map((e) => e.toLowerCase()));
+  // A whole file name (`CMakeLists.txt`) is matched as written, case-insensitively.
+  return exts.filter((e) => !supported.has(normExt(e)) && !supported.has(e.trim().toLowerCase()));
 }
 
 /**

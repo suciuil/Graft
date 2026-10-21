@@ -136,6 +136,33 @@ function requireWasm(wasm: string): Buffer | null {
   }
 }
 
+/** The breadth-tier languages {@link extractGeneric} also emits import edges for
+ * (C/C++ `#include`, Rust `use crate::…`, PHP `use`). For listings. */
+export const GENERIC_IMPORT_LANGS: ReadonlySet<string> = new Set(["c", "cpp", "rust", "php"]);
+
+/** Whether a wasm grammar ships in the tree-sitter-wasm bundle, without reading it. */
+export function wasmInstalled(wasm: string): boolean {
+  try {
+    require.resolve(`tree-sitter-wasm/${wasm}/tree-sitter-${wasm}.wasm`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the breadth tier can do for one of its languages (or a depth-tier stand-in)
+ * on this install: whether the wasm grammar is there at all, and whether its tags
+ * query captures calls — without one (OCaml, Zig) the node-kind walker yields
+ * symbols only. For listings (`graft languages`); nothing is loaded into a parser.
+ */
+export function genericSupport(name: string): { grammar: boolean; calls: boolean } {
+  const row = rowNamed(name);
+  if (!row) return { grammar: false, calls: false };
+  const query = loadQuery(row);
+  return { grammar: wasmInstalled(row.wasm), calls: query !== null && /@reference\.(?:call|send)\b/.test(query) };
+}
+
 // Sanitize editor-specific query predicates the tree-sitter Query compiler rejects.
 function sanitizeQuery(raw: string): string {
   return raw.replace(/\(#(?:strip!|set!|set-adjacent!|select-adjacent!|make-range!|offset!|gsub!)[^()]*\)/g, "");
@@ -321,7 +348,7 @@ export function extractGeneric(rel: string, source: string, langName: string): E
   }
   // The preprocessor is invisible to tags.scm, but in C/C++ a local `#include "x.h"`
   // IS the dependency graph — capture it as a file→file import. Likewise a Rust
-  // `use crate::…` is an in-crate module dependency.
+  // `use crate::…` is an in-crate module dependency. Keep GENERIC_IMPORT_LANGS in step.
   if (langName === "c" || langName === "cpp") extractIncludes(tree.rootNode as TsNode, rel, rawEdges);
   else if (langName === "rust") extractUses(tree.rootNode as TsNode, rel, rawEdges);
   else if (langName === "php") extractPhpUses(tree.rootNode as TsNode, rel, rawEdges);

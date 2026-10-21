@@ -43,7 +43,8 @@ export type Language =
   | "yaml"
   | "markdown"
   | "scss"
-  | "csv";
+  | "csv"
+  | "cmake";
 
 /** The active SQL dialect, or null when no SQL grammar is built. Only Oracle
  * PL/SQL is wired today, so this is "plsql" exactly when that grammar loads. */
@@ -143,14 +144,38 @@ const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label
   { ext: ".md", grammar: "markdown", label: "markdown" },
   { ext: ".scss", grammar: "scss", label: "scss" },
   { ext: ".csv", grammar: "csv", label: "csv" },
+  // CMake: `*.cmake` modules, and the build files themselves, which are claimed by
+  // their exact NAME (an entry without a leading dot matches a basename, see entryFor)
+  // so no other `.txt` file is ever taken for CMake.
+  { ext: ".cmake", grammar: "cmake", label: "cmake" },
+  { ext: "CMakeLists.txt", grammar: "cmake", label: "cmake" },
 ];
+
+/** Whether `lowerPath` is claimed by an extension-table entry: a suffix match for an
+ * extension (`.ts`), a case-insensitive basename match for a file name
+ * (`CMakeLists.txt`), on either path separator. */
+function claims(lowerPath: string, ext: string): boolean {
+  if (ext.startsWith(".")) return lowerPath.endsWith(ext);
+  const name = ext.toLowerCase();
+  return lowerPath === name || lowerPath.endsWith(`/${name}`) || lowerPath.endsWith(`\\${name}`);
+}
 
 function entryFor(path: string): { ext: string; grammar: Language; label: string } | undefined {
   const p = path.toLowerCase();
-  const core = EXTENSIONS.find((e) => p.endsWith(e.ext));
+  const core = EXTENSIONS.find((e) => claims(p, e.ext));
   if (core) return core;
-  const opt = OPTIONAL_EXTENSIONS.find((e) => p.endsWith(e.ext));
+  const opt = OPTIONAL_EXTENSIONS.find((e) => claims(p, e.ext));
   return opt && grammarAvailable(opt.grammar) ? opt : undefined;
+}
+
+/** The depth tier's whole extension table — core entries, then the optional ones
+ * whether or not their grammar is built — for listings (`graft languages`) that have
+ * to say what an optional grammar would add. Extraction never reads this. */
+export function depthRegistry(): ReadonlyArray<{ ext: string; grammar: Language; label: string; optional: boolean }> {
+  return [
+    ...EXTENSIONS.map((e) => ({ ...e, optional: false })),
+    ...OPTIONAL_EXTENSIONS.map((e) => ({ ...e, optional: true })),
+  ];
 }
 
 /** Every file extension a depth-tier (hand-written) extractor claims — the core
@@ -488,6 +513,7 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   markdown: {},
   scss: {},
   csv: {},
+  cmake: {},
 };
 
 /**
@@ -538,6 +564,8 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   markdown: new Set<string>(),
   scss: new Set<string>(),
   csv: new Set<string>(),
+  // CMake: every command is a `normal_command`; extractCmake emits its call edges.
+  cmake: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -633,6 +661,7 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   if (lang === "markdown") return extractMarkdown(rel, source, root);
   if (lang === "scss") return extractScss(rel, source, root);
   if (lang === "csv") return extractCsv(rel, source, root);
+  if (lang === "cmake") return extractCmake(rel, source, root);
   if (lang === "razor") return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   const bindings = collectBindings(root, lang);
   const importedSymbols = collectImportedSymbols(root, lang);
@@ -3459,6 +3488,158 @@ function extractScss(rel: string, source: string, root: Parser.SyntaxNode): Extr
     for (const child of node.namedChildren) visit(child, parentNext);
   };
   visit(root, rel);
+  return { nodes, rawEdges };
+}
+
+/** CMake commands that define a build target, named by their first argument. */
+const CMAKE_TARGET_COMMANDS = new Set(["add_library", "add_executable", "add_custom_target"]);
+/** CMake commands whose arguments after the first name other targets it depends on. */
+const CMAKE_TARGET_DEP_COMMANDS = new Set(["target_link_libraries", "add_dependencies"]);
+/** Keywords inside those argument lists — never target names. */
+const CMAKE_LINK_KEYWORDS = new Set([
+  "PRIVATE", "PUBLIC", "INTERFACE", "LINK_PRIVATE", "LINK_PUBLIC", "LINK_INTERFACE_LIBRARIES",
+  "debug", "optimized", "general",
+]);
+/** Commands that pull in another CMake file: include(<file|module>), add_subdirectory(<dir>).
+ * Resolved by resolveCmakeImport (resolve.ts). */
+const CMAKE_IMPORT_COMMANDS = new Set(["include", "add_subdirectory"]);
+const CMAKE_SIGNATURE_MAX = 160;
+
+/** A CMake argument's value: an unquoted word as written, a quoted string without its
+ * quotes, a bracket argument's content. */
+function cmakeArgValue(arg: Parser.SyntaxNode): string {
+  const inner = arg.namedChildren[0];
+  if (!inner) return arg.text;
+  if (inner.type === "quoted_argument") return inner.text.replace(/^"|"$/g, "");
+  if (inner.type === "bracket_argument") {
+    return inner.namedChildren.find((c) => c.type === "bracket_argument_content")?.text ?? "";
+  }
+  return inner.text;
+}
+
+/** The `argument` nodes of a command (`normal_command`, `function_command`, …). */
+function cmakeArgs(command: Parser.SyntaxNode): Parser.SyntaxNode[] {
+  const list = command.namedChildren.find((c) => c.type === "argument_list");
+  return list ? list.namedChildren.filter((c) => c.type === "argument") : [];
+}
+
+/** A literal name, or null when it is built from a variable (`${PROJECT_NAME}`) and so
+ * cannot be known without evaluating the script. */
+function cmakeLiteral(value: string): string | null {
+  const v = value.trim();
+  return v && !v.includes("${") && !v.includes("$<") ? v : null;
+}
+
+/**
+ * CMake (CMakeLists.txt, *.cmake). A CMake script is a flat list of commands, so it
+ * gets its own walker instead of the definition/call walk:
+ * - `function()` / `macro()` definitions become `function` nodes spanning to their
+ *   `endfunction()` / `endmacro()`;
+ * - `add_library` / `add_executable` / `add_custom_target` become `target` nodes;
+ * - every other command invocation is a `calls` edge, from the enclosing function or
+ *   macro (else the file), so a call to a project function resolves and a builtin
+ *   (`set`, `message`, …) finds nothing and drops;
+ * - `target_link_libraries` / `add_dependencies` name the targets a target depends on:
+ *   `references` edges from the target (when it is defined in this file) to each one;
+ * - `include()` and `add_subdirectory()` are `imports` edges, resolved to the in-repo
+ *   file in resolve.ts;
+ * - `option()` becomes a `variable` node: the project's own build switches.
+ * CMake command names are case-insensitive, so function names and calls are keyed in
+ * lower case (`MACRO(My_Helper)` is called as `my_helper()`); signatures keep the source.
+ */
+function extractCmake(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  // Targets defined in this file, by name: the source of their dependency edges.
+  const targets = new Map<string, string>();
+
+  const mint = (name: string, kind: Kind, node: Parser.SyntaxNode, header: Parser.SyntaxNode, parentId: string): string => {
+    const id = mintId(`${rel}#${name}`, minted);
+    const sig = header.text.replace(/\s+/g, " ").trim();
+    nodes.push({
+      id,
+      name,
+      kind,
+      path: rel,
+      span: `L${node.startPosition.row + 1}-L${node.endPosition.row + 1}`,
+      signature: sig.length > CMAKE_SIGNATURE_MAX ? `${sig.slice(0, CMAKE_SIGNATURE_MAX - 1)}…` : sig,
+      exported: true, // CMake functions, macros and targets are global once defined
+      origin: "ast",
+      body_hash: contentHash(node.text),
+      body_text: searchBody(node.text),
+      summary_state: "pending",
+      summary: null,
+      crux: null,
+    });
+    rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+    return id;
+  };
+
+  const command = (node: Parser.SyntaxNode, parentId: string): void => {
+    const nameNode = node.namedChildren.find((c) => c.type === "identifier");
+    if (!nameNode) return;
+    const cmd = nameNode.text.toLowerCase();
+    const values = cmakeArgs(node).map(cmakeArgValue);
+
+    if (CMAKE_TARGET_COMMANDS.has(cmd)) {
+      const name = cmakeLiteral(values[0] ?? "");
+      if (name) {
+        const id = mint(name, "target", node, node, parentId);
+        if (!targets.has(name)) targets.set(name, id);
+        // `add_library(ns::core ALIAS core)`: the alias stands for the real target.
+        if (values[1] === "ALIAS" && values[2]) {
+          const real = cmakeLiteral(values[2]);
+          if (real) rawEdges.push({ source: id, relation: "references", name: real, file: rel });
+        }
+      }
+      return;
+    }
+    if (CMAKE_TARGET_DEP_COMMANDS.has(cmd)) {
+      const owner = cmakeLiteral(values[0] ?? "");
+      const from = (owner && targets.get(owner)) ?? parentId;
+      for (const v of values.slice(1)) {
+        const dep = cmakeLiteral(v);
+        // Flags (`-lm`), paths and generator expressions are not targets.
+        if (!dep || CMAKE_LINK_KEYWORDS.has(dep) || /^-|[/\\]/.test(dep)) continue;
+        rawEdges.push({ source: from, relation: "references", name: dep, file: rel });
+      }
+      return;
+    }
+    if (CMAKE_IMPORT_COMMANDS.has(cmd)) {
+      const arg = values[0]?.trim().replace(/[/\\]+$/, "");
+      // add_subdirectory(src) runs src/CMakeLists.txt: name that file, so the import
+      // resolves like any other path.
+      const spec = arg && (cmd === "add_subdirectory" ? `${arg}/CMakeLists.txt` : arg);
+      if (spec) rawEdges.push({ source: rel, relation: "imports", specifier: spec, file: rel });
+      return;
+    }
+    if (cmd === "option") {
+      const name = cmakeLiteral(values[0] ?? "");
+      if (name) mint(name, "variable", node, node, parentId);
+      return;
+    }
+    rawEdges.push({ source: parentId, relation: "calls", name: cmd, file: rel });
+  };
+
+  const visit = (node: Parser.SyntaxNode, parentId: string): void => {
+    if (node.type === "function_def" || node.type === "macro_def") {
+      const header = node.namedChildren.find((c) => c.type === "function_command" || c.type === "macro_command");
+      const name = header ? cmakeLiteral(cmakeArgValue(cmakeArgs(header)[0] ?? header)) : null;
+      if (header && name && cmakeArgs(header).length > 0) {
+        const id = mint(name.toLowerCase(), "function", node, header, parentId);
+        for (const child of node.namedChildren) if (child.type === "body") visit(child, id);
+        return;
+      }
+    }
+    if (node.type === "normal_command") {
+      command(node, parentId);
+      return;
+    }
+    for (const child of node.namedChildren) visit(child, parentId);
+  };
+  visit(root, rel);
+  nodes[0].body_text = fileResidual(source, nodes.slice(1));
   return { nodes, rawEdges };
 }
 

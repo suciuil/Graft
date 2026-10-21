@@ -369,7 +369,7 @@ export function deepNoteFor(
  * of date — 1,553 of 5,353 nodes: 687 changed, 866 new; …". */
 export function deepDueReason(s: SummaryStaleness): string {
   const n = (x: number) => x.toLocaleString("en-US");
-  const cost = "an LLM pass that needs an API key and costs tokens; file:line answers stay current either way";
+  const cost = "an LLM pass that needs an API key and costs tokens";
   if (s.summarized === 0) return `no summaries yet — none of the ${n(s.total)} nodes has a prose summary; it writes them in ${cost}`;
   return (
     `${Math.round(outdatedPercent(s))}% of summaries out of date — ${n(s.stale + s.unsummarized)} of ${n(s.total)} nodes: ` +

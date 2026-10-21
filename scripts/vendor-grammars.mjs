@@ -1,13 +1,13 @@
 /**
- * Materialises the 14 optional grammars into `vendor/<grammarKey>/prebuilds/<platform>-<arch>/`,
+ * Materialises the optional grammars (15 languages, plus the newer Kotlin grammar) into `vendor/<grammarKey>/prebuilds/<platform>-<arch>/`,
  * the layout `loadOptionalGrammar` (src/graph/extract.ts) falls back to when normal
  * package resolution comes up empty.
  *
  * This is what lets a plain `npm i -g @nanonets/graft` carry those grammars. They are
  * declared as `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`
  * — sibling working copies that exist only on the machine they were cloned onto — so
- * anywhere else npm skips all 14 without even erroring, and graft quietly loses C#,
- * Groovy, PL/SQL, C, C++, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS and CSV.
+ * anywhere else npm skips all 15 without even erroring, and graft quietly loses C#,
+ * Groovy, PL/SQL, C, C++, CMake, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS and CSV.
  * A bare prebuilt `.node` needs nothing around it (`require()` it and hand the result
  * to `parser.setLanguage()`), so the binding travels in the package itself.
  *
@@ -97,8 +97,8 @@ try {
         return false;
       }
     };
-    // Absent from optionalDependencies is a deliberate opt-out (e.g. kotlin, whose
-    // registry grammar stays the fallback), not a broken setup.
+    // Absent from optionalDependencies is a deliberate opt-out (a grammar whose sibling
+    // repo this machine does not build), not a broken setup.
     if (spec === undefined) {
       optedOut.push(key);
       continue;

@@ -808,11 +808,11 @@ test("graft staleness prints the report, or JSON, and rejects a bad --top", asyn
 test("deepDueReason: 'no summaries yet' before any deep build, else the rounded share — each with its scope and cost", () => {
   assert.equal(
     deepDueReason(counts(0, 7, 7, 0)),
-    "no summaries yet — none of the 7 nodes has a prose summary; it writes them in an LLM pass that needs an API key and costs tokens; file:line answers stay current either way",
+    "no summaries yet — none of the 7 nodes has a prose summary; it writes them in an LLM pass that needs an API key and costs tokens",
   );
   assert.equal(
     deepDueReason(counts(687, 866, 5353)),
-    "29% of summaries out of date — 1,553 of 5,353 nodes: 687 changed, 866 new; it refreshes their prose summaries in an LLM pass that needs an API key and costs tokens; file:line answers stay current either way",
+    "29% of summaries out of date — 1,553 of 5,353 nodes: 687 changed, 866 new; it refreshes their prose summaries in an LLM pass that needs an API key and costs tokens",
   );
   assert.doesNotMatch(deepDueReason(counts(687, 866, 5353)), /[()]/, "the tally wraps the reason in parentheses already");
 });

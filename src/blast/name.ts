@@ -286,7 +286,7 @@ export async function nameReport(
     const { createChatModel } = await import("../ai/llm/factory.js");
     namer = new ChatNamer(createChatModel({
       provider: cfg.provider, apiKey: cfg.apiKey, model: cfg.model, modelFallbacks: cfg.modelFallbacks,
-      baseUrl: cfg.baseUrl, headers: cfg.headers, providerFallback: cfg.providerFallback, bearerAuth: cfg.bearerAuth,
+      baseUrl: cfg.baseUrl, headers: cfg.headers, modelHeaders: cfg.modelHeaders, providerFallback: cfg.providerFallback, bearerAuth: cfg.bearerAuth,
     }));
   }
 

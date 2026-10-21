@@ -18,6 +18,7 @@ import { Graft } from "./engine.js";
 import { resolveConfig, type EngineConfig } from "./ai/providers.js";
 import { printLlmFailureHints } from "./ai/llm-hints.js";
 import { runSettingCommand, terminalPrompter, userEnvStore, type SettingDeps, type SettingOptions } from "./ai/llm-settings.js";
+import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
@@ -243,7 +244,7 @@ program
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter | llm-incubator (env GRAFT_PROVIDER)")
   .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN)")
-  .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL)")
+  .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL; default: the Databricks AI Gateway)")
   // graft's own help (installGraftHelp, below) carries examples on every command.
   .addHelpText("after", TRAIL ? helpExamples(brand(), false) : "");
 // -v/--version still works; it is just not listed among the global options.
@@ -258,14 +259,17 @@ interface GlobalOpts {
   agentModel?: string;
 }
 
+/** Key and model picked for this run by an interactive step (the Databricks model choice of `build --deep`). */
+let llmOverride: Pick<EngineConfig, "apiKey" | "model"> = {};
+
 /** Config drawn from the global CLI flags (env + defaults fill the rest). */
 function cliConfig(): EngineConfig {
   const o = program.opts<GlobalOpts>();
   return {
     contextDir: o.dir,
     provider: o.provider as ProviderKind | undefined,
-    model: o.model,
-    apiKey: o.apiKey,
+    model: llmOverride.model ?? o.model,
+    apiKey: llmOverride.apiKey ?? o.apiKey,
     baseUrl: o.baseUrl,
   };
 }
@@ -701,6 +705,25 @@ grouped(program.command("build"), GROUP.setup)
     if (Object.keys(buildConfigPatch).length > 0) {
       patchBuildConfig(resolve(dir), buildConfigPatch);
     }
+    // Databricks gateway: check the key, then use the model already set when the
+    // gateway serves it; only otherwise ask which of its models to use.
+    let deepSkip: string | undefined;
+    if (opts.deep) {
+      const choice = await chooseDatabricksDeepModel({
+        config: cliConfig(),
+        env: process.env,
+        out: (l) => console.log(l),
+        err: (l) => console.error(l),
+        prompt: process.stdin.isTTY && process.stdout.isTTY ? terminalPrompter() : undefined,
+        store: userEnvStore(),
+      });
+      if ("cancelled" in choice) {
+        console.log("Cancelled — nothing was built.");
+        process.exit(130);
+      }
+      if ("skip" in choice) deepSkip = choice.skip;
+      else llmOverride = { apiKey: choice.config.apiKey, model: choice.config.model };
+    }
     const engine = engineFrom();
     const fmt = (o: Record<string, number>) =>
       Object.entries(o)
@@ -711,6 +734,13 @@ grouped(program.command("build"), GROUP.setup)
     // --deep needs a key; without one, degrade to the $0 structural build.
     let deep = opts.deep;
     const resolved = resolveConfig(cliConfig());
+    if (deep && deepSkip) {
+      deep = false;
+      console.error(
+        `⚠ ${deepSkip} — falling back to the structural build (no LLM summaries).\n` +
+          `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.`,
+      );
+    }
     if (deep && !resolved.apiKey) {
       deep = false;
       console.error(
@@ -1660,6 +1690,22 @@ grouped(program.command("map"), GROUP.find)
       return;
     }
     process.stdout.write(formatRepoMap(map));
+  });
+
+grouped(program.command("languages"), GROUP.setup)
+  .description(
+    "List every programming language graft indexes and its level of support on this install (full, broad, symbols, structural, …), " +
+      "with what each level extracts ($0, no repo needed)",
+  )
+  .option("--json", "output the languages as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const { formatLanguageSupport, languageSupport } = await import("./graph/languages.js");
+    const rows = languageSupport(readPackageName(import.meta.url));
+    if (opts.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return;
+    }
+    process.stdout.write(formatLanguageSupport(rows, brand()));
   });
 
 // `trail note`: what a session worked out, saved for the next person. Listed

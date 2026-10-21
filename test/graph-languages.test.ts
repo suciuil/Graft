@@ -34,6 +34,14 @@ const INDEXED = [
   "a.php",
 ];
 
+test("a file name entry claims only that name: CMakeLists.txt, never other .txt files", { skip: languageOf("CMakeLists.txt") ? false : "cmake grammar not built" }, () => {
+  for (const f of ["CMakeLists.txt", "src/CMakeLists.txt", "src\\cmakelists.TXT", "cmake/Helpers.cmake"]) {
+    assert.equal(languageOf(f), "cmake", f);
+    assert.equal(languageLabelOf(f), "cmake", f);
+  }
+  for (const f of ["notes.txt", "MyCMakeLists.txt", "CMakeLists.txt.bak"]) assert.equal(languageOf(f), null, f);
+});
+
 test("a file is labelled exactly when it is indexed", () => {
   // The guard that keeps #36 from coming back: both readings come off one table, so
   // adding an extension cannot teach the extractor about it and leave the banner

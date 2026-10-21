@@ -226,6 +226,16 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft init", "graft init --agents copilot claude", "graft init --dry-run"],
     globals: ["dir"],
   },
+  languages: {
+    description:
+      "List every programming language graft indexes, the level of support each gets on this install, and what " +
+      "that level extracts: symbols, calls, imports, inheritance, typed member calls, and the language server " +
+      "`graft build --lsp` would use. Levels, best first: full (a hand-written extractor), broad (generic " +
+      "tree-sitter tags: symbols and calls), symbols (symbols only), structural (data and markup: keys, elements, " +
+      "headings), file-only, and skipped (an optional grammar that is not built). A level below what the language " +
+      "can get says why and how to raise it. Free: no repo, no API key, no LLM call.",
+    examples: ["graft languages", "graft languages --json"],
+  },
   map: {
     description:
       "Get oriented in a repo: its main directories, the central files and symbols in each, and the hotspots, " +

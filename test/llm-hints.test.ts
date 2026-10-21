@@ -121,7 +121,8 @@ test("hints: unreachable names GRAFT_BASE_URL and where the URL came from", asyn
 
 test("hints: unreachable default endpoint says GRAFT_BASE_URL is not set", async () => {
   const lines = (await llmFailureHints(["Connection error."], { config: { apiKey: "k" }, env: {}, platform: "linux" })).join("\n");
-  assert.match(lines, /GRAFT_BASE_URL is not set, so graft used the llm-incubator default/);
+  assert.match(lines, /GRAFT_BASE_URL is not set, so graft used the Databricks AI Gateway default/);
+  assert.match(lines, /dbc-b40437c6-87d6\.cloud\.databricks\.com\/ai-gateway\/anthropic could not be reached/);
 });
 
 test("hints: rejected key names GRAFT_API_KEY and never echoes the key", async () => {
