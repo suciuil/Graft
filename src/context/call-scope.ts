@@ -60,6 +60,12 @@ export interface CallScope {
    * tally is the one line agents reliably relay; a separate note gets dropped.
    */
   deepDue: string | null;
+  /**
+   * Set when the agent instructions `init` installed in this call's repo differ
+   * from the ones this graft version installs: a short reason naming the files.
+   * Carried by the savings tally, like {@link deepDue}.
+   */
+  initDue: string | null;
 }
 
 function freshScope(): CallScope {
@@ -72,6 +78,7 @@ function freshScope(): CallScope {
     agentModel: null,
     hostModel: null,
     deepDue: null,
+    initDue: null,
   };
 }
 

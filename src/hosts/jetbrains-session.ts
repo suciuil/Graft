@@ -1,5 +1,5 @@
 /**
- * The model GitHub Copilot for JetBrains IDEs (IntelliJ IDEA, PyCharm, …) is
+ * The model GitHub Copilot for JetBrains IDEs (IntelliJ IDEA, PyCharm, â€¦) is
  * running right now, read from the plugin's own agent-session store.
  *
  * The JetBrains counterpart of `vscode-session.ts`: Copilot there also drives
@@ -10,7 +10,7 @@
  *   %LOCALAPPDATA%/github-copilot/<ide>/chat-agent-sessions/<id>/
  *     copilot-agent-sessions-nitrite.db
  *
- * where `<ide>` is the product code (`ic`, `iu`, `py`, …). Each turn is a
+ * where `<ide>` is the product code (`ic`, `iu`, `py`, â€¦). Each turn is a
  * Java-serialized document carrying `sessionId`, `createdAt`, `_modified`, the
  * picker value under `request.modelInformation.model` (`auto`, `gpt-4.1`) and
  * what actually answered under `response.modelName` (`Claude Haiku 4.5`). The
@@ -18,20 +18,33 @@
  *
  * ## What it does not claim
  *
- * The store records no project path, so — unlike VS Code — a session cannot be
+ * The store records no project path, so â€” unlike VS Code â€” a session cannot be
  * matched to the repo. What stands in for that: the reader only runs inside a
  * JetBrains terminal, only considers turns touched within
  * {@link MAX_SESSION_AGE_MS}, and when live sessions disagree it answers only
  * if exactly one was written within the current turn. Otherwise null: tokens,
  * no dollars.
  *
- * The file is opened read-only while the IDE holds it; MVStore pages are
+ * The file is read without writing to it while the IDE holds it; MVStore pages are
  * scanned for the serialized fields rather than decoded. A compressed or
  * re-shaped store yields nothing, never a wrong figure.
+ *
+ * ## The lock
+ *
+ * While the IDE is open, MVStore holds a byte-range lock over the whole store.
+ * On Windows those locks are mandatory: every ordinary read fails with EBUSY,
+ * so this reader answered null for the entire life of every IntelliJ session
+ * and Copilot there never saw a dollar figure. Windows does not enforce
+ * byte-range locks on memory-mapped views, and Node cannot map a file, so a
+ * locked store is read through a mapped view by a short PowerShell step (see
+ * {@link readLockedStore}). That costs a process start, so what it extracts is
+ * cached against the store's size and mtime: one read per Copilot turn, not
+ * per graft call.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { homedir, platform } from 'node:os';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, platform, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { MAX_SESSION_AGE_MS } from './kilo-session.js';
 
 const DB_FILE = 'copilot-agent-sessions-nitrite.db';
@@ -122,7 +135,7 @@ export interface JetBrainsTurn {
  * Every agent turn in a session store that names a model.
  *
  * The resolved `modelName` wins over the picker value; the picker value is used
- * only while nothing has resolved yet, and never when it is `auto` — a router,
+ * only while nothing has resolved yet, and never when it is `auto` â€” a router,
  * not a model. MVStore keeps superseded copies of a document until it compacts,
  * so the same turn may appear more than once; callers take the newest.
  */
@@ -185,6 +198,110 @@ function recentStores(root: string, now: number, maxAge: number): string[] {
   return out;
 }
 
+/** Keep only each session's newest turn â€” all the caller ever uses, and what
+ * keeps the cache small (MVStore keeps superseded copies of every turn). */
+function newestPerSession(turns: JetBrainsTurn[]): JetBrainsTurn[] {
+  const latest = new Map<string, JetBrainsTurn>();
+  for (const t of turns) {
+    const seen = latest.get(t.session);
+    if (!seen || t.touched > seen.touched) latest.set(t.session, t);
+  }
+  return [...latest.values()];
+}
+
+/** Copies a file through a read-only mapped view, which Windows does not subject
+ * to byte-range locks. Paths come in through the environment, never the script
+ * text, so no path can be read as PowerShell. */
+const MAPPED_COPY = `$ErrorActionPreference = 'Stop'
+$fs = [IO.File]::Open($env:GRAFT_JB_SRC, 'Open', 'Read', 'ReadWrite,Delete')
+try {
+  $acc = [IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read
+  $mm = [IO.MemoryMappedFiles.MemoryMappedFile]::CreateFromFile($fs, [NullString]::Value, 0, $acc, [IO.HandleInheritability]::None, $true)
+  $view = $mm.CreateViewStream(0, 0, $acc)
+  $out = [IO.File]::Create($env:GRAFT_JB_DST)
+  try { $view.CopyTo($out) } finally { $out.Close(); $view.Dispose(); $mm.Dispose() }
+} finally { $fs.Close() }`;
+
+/**
+ * The bytes of a store the IDE holds locked, read through a memory-mapped view,
+ * or null when that fails too. Windows only. The view is page-rounded, so the
+ * copy may end in zero padding, which the scanner ignores.
+ */
+export function readLockedStore(db: string): Buffer | null {
+  const dst = join(tmpdir(), `graft-jb-${process.pid}-${Date.now()}.db`);
+  try {
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(MAPPED_COPY, 'utf16le').toString('base64')],
+      { env: { ...process.env, GRAFT_JB_SRC: db, GRAFT_JB_DST: dst }, stdio: 'ignore', timeout: 15000, windowsHide: true },
+    );
+    return readFileSync(dst);
+  } catch {
+    return null;
+  } finally {
+    rmSync(dst, { force: true });
+  }
+}
+
+interface CachedStore {
+  size: number;
+  mtimeMs: number;
+  turns: JetBrainsTurn[];
+}
+
+function defaultCacheFile(): string {
+  return join(tmpdir(), 'graft-jetbrains-turns.json');
+}
+
+function readCache(file: string): Record<string, CachedStore> {
+  try {
+    const v = JSON.parse(readFileSync(file, 'utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The turns in one store. A plain read when the store is free; when the IDE
+ * holds it locked (Windows, IDE open â€” i.e. exactly when this matters), a mapped
+ * read, cached until the store changes. A failed mapped read is cached as "no
+ * turns" too, so a machine where it cannot work pays for it once per turn.
+ */
+function storeTurns(
+  db: string,
+  os: string,
+  readStore: (db: string) => Buffer,
+  readLocked: (db: string) => Buffer | null,
+  cacheFile: string,
+): JetBrainsTurn[] {
+  try {
+    return turnsFrom(readStore(db));
+  } catch (err) {
+    if (os !== 'win32' || (err as NodeJS.ErrnoException | null)?.code !== 'EBUSY') return [];
+  }
+  let size: number;
+  let mtimeMs: number;
+  try {
+    ({ size, mtimeMs } = statSync(db));
+  } catch {
+    return [];
+  }
+  const cache = readCache(cacheFile);
+  const hit = cache[db];
+  if (hit && hit.size === size && hit.mtimeMs === mtimeMs && Array.isArray(hit.turns)) return hit.turns;
+  const buf = readLocked(db);
+  const turns = buf ? newestPerSession(turnsFrom(buf)) : [];
+  cache[db] = { size, mtimeMs, turns };
+  try {
+    mkdirSync(dirname(cacheFile), { recursive: true });
+    writeFileSync(cacheFile, JSON.stringify(cache));
+  } catch {
+    // An uncached answer is still an answer.
+  }
+  return turns;
+}
+
 /**
  * The model Copilot for JetBrains is running, or null when nothing says so.
  *
@@ -193,23 +310,31 @@ function recentStores(root: string, now: number, maxAge: number): string[] {
  */
 export function jetbrainsSessionModel(
   _repo: string,
-  opts: { home?: string; env?: NodeJS.ProcessEnv; now?: number; maxAgeMs?: number; os?: string } = {},
+  opts: {
+    home?: string;
+    env?: NodeJS.ProcessEnv;
+    now?: number;
+    maxAgeMs?: number;
+    os?: string;
+    /** Plain and locked-store reads; injectable for tests. */
+    readStore?: (db: string) => Buffer;
+    readLocked?: (db: string) => Buffer | null;
+    cacheFile?: string;
+  } = {},
 ): string | null {
   const home = opts.home ?? homedir();
   const env = opts.env ?? process.env;
   const now = opts.now ?? Date.now();
   const maxAge = opts.maxAgeMs ?? MAX_SESSION_AGE_MS;
+  const os = opts.os ?? platform();
+  const readStore = opts.readStore ?? ((db: string) => readFileSync(db));
+  const readLocked = opts.readLocked ?? readLockedStore;
+  const cacheFile = opts.cacheFile ?? defaultCacheFile();
 
   // Newest turn per session, across every store.
   const latest = new Map<string, JetBrainsTurn>();
-  for (const db of recentStores(copilotRoot(home, env, opts.os ?? platform()), now, maxAge)) {
-    let buf: Buffer;
-    try {
-      buf = readFileSync(db);
-    } catch {
-      continue;
-    }
-    for (const turn of turnsFrom(buf)) {
+  for (const db of recentStores(copilotRoot(home, env, os), now, maxAge)) {
+    for (const turn of storeTurns(db, os, readStore, readLocked, cacheFile)) {
       if (now - turn.touched > maxAge) continue;
       const seen = latest.get(turn.session);
       if (!seen || turn.touched > seen.touched) latest.set(turn.session, turn);
@@ -219,7 +344,11 @@ export function jetbrainsSessionModel(
   const live = [...latest.values()].sort((a, b) => b.touched - a.touched);
   if (live.length === 0) return null;
   const newest = live[0];
-  if (live.every((t) => t.model.toLowerCase() === newest.model.toLowerCase())) return newest.model;
+  // The same model is recorded as the picker id in one turn and the display
+  // name in another (`gemini-3.8-flash` / `Gemini 3.8 Flash`); `price.ts` folds
+  // both to one id, so they must not count as a disagreement here either.
+  const same = (m: string) => m.toLowerCase().replace(/[\s_]+/g, '-');
+  if (live.every((t) => same(t.model) === same(newest.model))) return newest.model;
   const active = live.filter((t) => now - t.touched <= ACTIVE_TURN_MS);
   return active.length === 1 ? active[0].model : null;
 }

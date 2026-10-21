@@ -173,7 +173,7 @@ function builtRepo(): string {
   return d;
 }
 
-test("trail --help groups the commands, and lists the workspace ones only once signing in is on", () => {
+test("trail --help groups the commands, and never lists the workspace ones: Trail cloud is permanently off", () => {
   const home = scratchHome();
   const r = run("trail", ["--help"], home);
   assert.equal(r.status, 0);
@@ -182,9 +182,28 @@ test("trail --help groups the commands, and lists the workspace ones only once s
   // Still run, just not listed: the brain's rules, corrections on skills, and signing in.
   for (const c of ["viz", "mcp", "stats", "watch", "connect", "trail", "push", "pull", "learn", "skills", "workspace", "login", "logout"])
     assert.doesNotMatch(r.out, new RegExp(`^  ${c} `, "m"), c);
+  // TRAIL_CLOUD=1 used to list them; it no longer turns anything on.
   const on = run("trail", ["--help"], home, process.cwd(), { TRAIL_CLOUD: "1" });
-  assert.ok(on.out.includes("Workspace"));
-  for (const c of ["workspace", "login", "logout"]) assert.match(on.out, new RegExp(`^  ${c} `, "m"), c);
+  assert.ok(!on.out.includes("Workspace"));
+  for (const c of ["workspace", "login", "logout"]) assert.doesNotMatch(on.out, new RegExp(`^  ${c} `, "m"), c);
+});
+
+test("trail login refuses, with TRAIL_CLOUD=1 and a cloud.json in place, and writes nothing", () => {
+  const home = scratchHome();
+  const trailHome = join(home, ".trail");
+  mkdirSync(trailHome, { recursive: true });
+  const cloudJson = JSON.stringify({ url: "http://127.0.0.1:9", token: "trl_x", user: { name: "", email: "" }, workspace: { id: "w", name: "Acme", slug: "acme", url: "", invite_url: "" }, repos: [], linkedAt: 0 });
+  writeFileSync(join(trailHome, "cloud.json"), cloudJson);
+  const env = { TRAIL_CLOUD: "1", TRAIL_HOME: trailHome, TRAIL_URL: "http://127.0.0.1:9" };
+  const r = run("trail", ["login", "--server", "http://127.0.0.1:9"], home, process.cwd(), env);
+  assert.equal(r.status, 1);
+  assert.match(r.err, /Trail cloud is permanently disabled/);
+  assert.equal(existsSync(join(trailHome, "cloud-nudge.json")), false, "no sign-in link was minted");
+  const ws = run("trail", ["workspace"], home, process.cwd(), env);
+  assert.match(ws.out, /Trail cloud is permanently disabled/);
+  const add = run("trail", ["workspace", "add"], home, process.cwd(), env);
+  assert.equal(add.status, 1);
+  assert.match(add.err, /Trail cloud is permanently disabled/);
 });
 
 test("graft --help keeps its flat list, including check, without the trail group", () => {
@@ -222,7 +241,7 @@ test("trail check is the team check, not the freshness check", () => {
   assert.match(r.err, /not a git repository/);
 });
 
-test("trail status puts the code map on one screen, and the workspace only once signing in is on", () => {
+test("trail status puts the code map on one screen, and never a workspace row: Trail cloud is permanently off", () => {
   const home = scratchHome();
   const d = builtRepo();
   run("trail", ["build", d], home);
@@ -231,7 +250,7 @@ test("trail status puts the code map on one screen, and the workspace only once 
   assert.match(r.out, /^code map {4}✓ \d+ nodes · in sync with the code$/m);
   assert.doesNotMatch(r.out, /^workspace/m);
   const on = run("trail", ["status", d], home, process.cwd(), { TRAIL_CLOUD: "1" });
-  assert.match(on.out, /^workspace {3}not connected · Claude offers a link once there are learnings to share$/m);
+  assert.doesNotMatch(on.out, /^workspace/m);
   const json = JSON.parse(run("trail", ["status", d, "--json"], home).out);
   assert.equal(json.workspace, null);
 });

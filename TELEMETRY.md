@@ -12,8 +12,8 @@ as a hard allowlist — unknown events and unknown properties are dropped before
 anything is written, let alone sent. The code and this file are kept in
 lockstep, and because the repo is open source you can verify that yourself.
 
-This page covers anonymous usage stats only. A Trail workspace you choose to
-connect is separate, and sends more: see
+This page covers anonymous usage stats only. The Trail workspace (Trail cloud)
+is separate, and is permanently disabled too: see
 [What stays on your machine](README.md#what-stays-on-your-machine).
 
 **Telemetry is permanently disabled in this version.** Nothing is recorded or

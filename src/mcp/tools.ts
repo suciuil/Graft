@@ -11,7 +11,8 @@ import { deepDueFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setDeepDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
+import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
+import { initDueReason } from '../hosts/drift.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
 import { kiloModelRows } from '../hosts/models.js';
@@ -333,6 +334,7 @@ async function callToolScoped(
     let note: string | null = null;
     let deep: string | null = null;
     setDeepDue(null);
+    setInitDue(initDueReason(root, { children: ws?.children }));
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
         ? await ensureFreshChildren(root, ws.children, { contextDir: dirOverride })

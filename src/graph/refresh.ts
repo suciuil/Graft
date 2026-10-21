@@ -364,10 +364,17 @@ export function deepNoteFor(
   return deepDueFor(root, opts)?.note ?? null;
 }
 
-/** The short reason a deep build is due, for the savings tally to carry:
- * "no summaries yet" or "29% of summaries out of date". */
+/** The reason a deep build is due, for the savings tally to carry, with its
+ * scope: how many nodes, and what the build costs — e.g. "29% of summaries out
+ * of date — 1,553 of 5,353 nodes: 687 changed, 866 new; …". */
 export function deepDueReason(s: SummaryStaleness): string {
-  return s.summarized === 0 ? "no summaries yet" : `${Math.round(outdatedPercent(s))}% of summaries out of date`;
+  const n = (x: number) => x.toLocaleString("en-US");
+  const cost = "an LLM pass that needs an API key and costs tokens; file:line answers stay current either way";
+  if (s.summarized === 0) return `no summaries yet — none of the ${n(s.total)} nodes has a prose summary; it writes them in ${cost}`;
+  return (
+    `${Math.round(outdatedPercent(s))}% of summaries out of date — ${n(s.stale + s.unsummarized)} of ${n(s.total)} nodes: ` +
+    `${n(s.stale)} changed, ${n(s.unsummarized)} new; it refreshes their prose summaries in ${cost}`
+  );
 }
 
 /** {@link deepNoteFor}'s note plus its short reason, or null when no deep build

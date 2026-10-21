@@ -17,6 +17,7 @@ import {
   setMcpSurface,
   setModelTable,
   setDeepDue,
+  setInitDue,
 } from '../src/context/savings.js';
 import { NO_MODEL, pricingFor, type AgentModel } from '../src/context/price.js';
 import { hasSavingsTally } from '../src/claude/tally.js';
@@ -66,6 +67,7 @@ function clearPricing(): void {
   setModelTable(null);
   setMcpSurface(false);
   setDeepDue(null);
+  setInitDue(null);
 }
 
 function fileNode(path: string, chars?: number): NodeV1 {
@@ -191,16 +193,16 @@ test('a due deep build gets its own ⚠️ line under the tally, the block agent
   setPricing(pricingFor(certain('claude-opus-5')));
   setDeepDue('no summaries yet');
   const f = footer();
-  const [tally, warning] = f.slice(f.indexOf('\u{1F331}')).split('\n');
+  const [tally, warning] = f.slice(f.indexOf('\u{1F331}')).split('  \n');
   assert.match(tally, /\(~\$X for claude-opus-5\) this turn$/, 'the savings line itself is unchanged');
-  assert.equal(warning, "\u26A0\uFE0F 'graft build --deep' recommended (no summaries yet).");
+  assert.equal(warning, "\u26A0\uFE0F Run the 'graft build --deep' command — recommended (no summaries yet).");
   assertUnquotedTally(f);
   assert.ok(hasSavingsTally(tally.replace('~N', '~1,200')), 'still counted as a reported tally');
 
   setPricing(pricingFor(NO_MODEL));
   assert.match(
     footer(),
-    /🌱 graft saved ~N tokens by this turn\n⚠️ 'graft prices update' recommended \([^\n]*\)\n⚠️ 'graft build --deep' recommended \(no summaries yet\)\./,
+    /🌱 graft saved ~N tokens by this turn  \n⚠️ Run the 'graft prices update' command — recommended \([^\n]*\)  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet\)\./,
   );
 
   setDeepDue(null);
@@ -215,29 +217,29 @@ test('a saving graft cannot price suggests `graft prices update` under the tally
   setPricing(pricingFor(certain('claude-opus-6')));
   setDeepDue('no summaries yet');
   const f = footer();
-  const [tally, prices, deep] = f.slice(f.indexOf('\u{1F331}')).split('\n');
+  const [tally, prices, deep] = f.slice(f.indexOf('\u{1F331}')).split('  \n');
   assert.equal(tally, '🌱 graft saved ~N tokens by this turn');
   assert.equal(
     prices,
-    "⚠️ 'graft prices update' recommended (no known price for the model used: it fetches model prices from " +
+    "⚠️ Run the 'graft prices update' command — recommended (no known price for the model used: it fetches model prices from " +
       'LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)',
   );
-  assert.equal(deep, "⚠️ 'graft build --deep' recommended (no summaries yet).", 'the deep line stays last');
+  assert.equal(deep, "⚠️ Run the 'graft build --deep' command — recommended (no summaries yet).", 'the deep line stays last');
   assertUnquotedTally(f);
 
   setDeepDue(null);
   setPricing(pricingFor(NO_MODEL));
-  assert.match(footer(), /by this turn\n⚠️ 'graft prices update' recommended \([^)]*\)\.$/, 'also when nothing named the model');
+  assert.match(footer(), /by this turn  \n⚠️ Run the 'graft prices update' command — recommended \([^)]*\)\.$/, 'also when nothing named the model');
   clearPricing();
 });
 
 test('the line depends only on whether a price is known, not on the stored catalog', () => {
   // Shown with a catalog stored (it simply does not list the model)...
   setPricing(pricingFor(certain('claude-opus-6')));
-  assert.match(footer(), /⚠️ 'graft prices update' recommended/);
+  assert.match(footer(), /⚠️ Run the 'graft prices update' command — recommended/);
   // ...and with none at all.
   process.env.GRAFT_PRICES_FILE = join(tmpdir(), 'graft-no-such-prices-file.json');
-  assert.match(footer(), /⚠️ 'graft prices update' recommended/);
+  assert.match(footer(), /⚠️ Run the 'graft prices update' command — recommended/);
   process.env.GRAFT_PRICES_FILE = pricesFile;
   clearPricing();
 });
@@ -324,7 +326,7 @@ test('a host that lists its models gets a per-model table instead of nothing', (
   // (no price is known here). It used to end ```" — a quote that closed graft's
   // own example and was then copied verbatim into the user's reply. Nor does a
   // full stop dangle off the fence: it closes the last line instead.
-  assert.match(f, /\+\n```\n⚠️ 'graft prices update' recommended \([^\n]*\)\.$/);
+  assert.match(f, /\+\n```  \n⚠️ Run the 'graft prices update' command — recommended \([^\n]*\)\.$/);
   // And the agent is told where to put it.
   assert.match(f, /collapsed\/expandable section/);
   clearPricing();
@@ -422,3 +424,22 @@ test('setRepoRoot is still accepted and changes nothing about pricing', () => {
   clearPricing();
 });
 
+
+test("outdated agent instructions get a 'graft init' line, between the prices and deep-build lines", () => {
+  setPricing(pricingFor(certain('claude-opus-6')));
+  setInitDue('the agent instructions in AGENTS.md are not the ones this graft version installs');
+  setDeepDue('no summaries yet');
+  const f = footer();
+  const [tally, prices, init, deep] = f.slice(f.indexOf('\u{1F331}')).split('  \n');
+  assert.equal(tally, '🌱 graft saved ~N tokens by this turn');
+  assert.match(prices, /^⚠️ Run the 'graft prices update' command — recommended/);
+  assert.equal(init, "⚠️ Run the 'graft init' command — recommended (the agent instructions in AGENTS.md are not the ones this graft version installs)");
+  assert.equal(deep, "⚠️ Run the 'graft build --deep' command — recommended (no summaries yet).");
+
+  setDeepDue(null);
+  setPricing(pricingFor(certain('claude-opus-5')));
+  assert.match(footer(), /this turn  \n⚠️ Run the 'graft init' command — recommended \([^)]*\)\.$/, 'on its own when nothing else is due');
+  setInitDue(null);
+  assert.doesNotMatch(footer(), /graft init/, 'current instructions, nothing said');
+  clearPricing();
+});

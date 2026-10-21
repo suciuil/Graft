@@ -225,6 +225,16 @@ export function writeIndex(outDir: string, files: CardFileInfo[]): void {
     "as the `graft` CLI everywhere else. Edges — who calls what — live only in the",
     "graph, not in these files: `graft callers <symbol>` is the only way to read them.",
     "",
+    // Chat modes with file tools but no terminal (Copilot's Ask mode) open this
+    // file first and, finding only commands here, went on to browse the source
+    // tree instead. This tells them how to use the graph with what they have.
+    "No terminal (e.g. GitHub Copilot's Ask mode)? Browse instead: list `graft/` —",
+    "each top-level `.md` file is a concept node — and for code, list the folders",
+    "under `graft/` rather than the source tree (e.g. `graft/src/…`, not `src/…`):",
+    "they mirror it with one card per file, listing its symbols with line spans.",
+    "To use graft properly, switch to Agent mode (or another mode that can run",
+    "commands), and tell the user so at the end of your reply.",
+    "",
   ].map((l) => inBrand(l));
 
   const concepts = readNodes(outDir).sort((a, b) => a.slug.localeCompare(b.slug));

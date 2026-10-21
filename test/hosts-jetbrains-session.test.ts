@@ -8,9 +8,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inJetBrainsTerminal, jetbrainsSessionModel, turnsFrom } from '../src/hosts/jetbrains-session.js';
+import { inJetBrainsTerminal, jetbrainsSessionModel, readLockedStore, turnsFrom } from '../src/hosts/jetbrains-session.js';
 import { hostModelFor } from '../src/hosts/host-model.js';
 import { tmpRepo } from './helpers.js';
 
@@ -128,6 +128,69 @@ test('disagreeing live sessions resolve only to the one mid-turn', () => {
   assert.equal(jetbrainsSessionModel('repo', { home, env: envFor(home), now: NOW, os: 'win32' }), 'GPT-5.4');
   // Neither mid-turn: no price rather than a guess.
   assert.equal(jetbrainsSessionModel('repo', { home, env: envFor(home), now: NOW + 600_000, os: 'win32' }), null);
+});
+
+test('the picker id and the display name of one model are not a disagreement', () => {
+  // Observed in IntelliJ: one session recorded `gemini-3.8-flash`, the next
+  // `Gemini 3.8 Flash`, and the reader gave up on what is plainly one model.
+  const home = tmpRepo('jb-spelling');
+  store(home, Buffer.concat([
+    turn('cccccccc-0000-4000-8000-000000000003', { resolved: 'Gemini 3.8 Flash', created: NOW - 3_600_000 }),
+    turn('cccccccc-0000-4000-8000-000000000004', { picked: 'gemini-3.8-flash', created: NOW - 600_000 }),
+  ]));
+  assert.equal(jetbrainsSessionModel('repo', { home, env: envFor(home), now: NOW, os: 'win32' }), 'gemini-3.8-flash');
+});
+
+// ── the IDE's lock ────────────────────────────────────────────────────────
+
+function busy(): never {
+  throw Object.assign(new Error('EBUSY: resource busy or locked, read'), { code: 'EBUSY' });
+}
+
+test('a store the IDE holds locked is read through the mapped fallback, once per change', () => {
+  const home = tmpRepo('jb-locked');
+  const body = turn('eeeeeeee-0000-4000-8000-000000000001', { resolved: 'Gemini 3.8 Flash', created: NOW - 60_000 });
+  store(home, body);
+  const db = join(home, 'AppData', 'Local', 'github-copilot', 'ic', 'chat-agent-sessions', 'abc', 'copilot-agent-sessions-nitrite.db');
+  const cacheFile = join(tmpRepo('jb-cache'), 'turns.json');
+  let mapped = 0;
+  const opts = {
+    home, env: envFor(home), now: NOW, os: 'win32', cacheFile,
+    readStore: busy,
+    readLocked: (p: string) => { mapped++; return readFileSync(p); },
+  };
+  assert.equal(jetbrainsSessionModel('repo', opts), 'Gemini 3.8 Flash');
+  assert.equal(jetbrainsSessionModel('repo', opts), 'Gemini 3.8 Flash');
+  assert.equal(mapped, 1, 'the second call is answered from the cache');
+
+  // A new turn changes the store, so it is read again.
+  writeFileSync(db, Buffer.concat([readFileSync(db), turn('eeeeeeee-0000-4000-8000-000000000001', { resolved: 'GPT-6.1 Sol', created: NOW - 30_000 })]));
+  assert.equal(jetbrainsSessionModel('repo', opts), 'GPT-6.1 Sol');
+  assert.equal(mapped, 2);
+});
+
+test('a mapped read that fails is cached as no answer, and only Windows tries it', () => {
+  const home = tmpRepo('jb-locked-fail');
+  store(home, turn('eeeeeeee-0000-4000-8000-000000000002', { resolved: 'Gemini 3.8 Flash', created: NOW - 60_000 }));
+  const cacheFile = join(tmpRepo('jb-cache'), 'turns.json');
+  let mapped = 0;
+  const readLocked = () => { mapped++; return null; };
+  const base = { home, env: envFor(home), now: NOW, cacheFile, readStore: busy, readLocked };
+  assert.equal(jetbrainsSessionModel('repo', { ...base, os: 'win32' }), null);
+  assert.equal(jetbrainsSessionModel('repo', { ...base, os: 'win32' }), null);
+  assert.equal(mapped, 1);
+  assert.equal(jetbrainsSessionModel('repo', { ...base, os: 'linux', cacheFile: join(tmpRepo('jb-cache'), 'x.json') }), null);
+  assert.equal(mapped, 1, 'advisory locks elsewhere never block a read, so nothing to map');
+});
+
+test('readLockedStore copies a file through a mapped view', { skip: process.platform !== 'win32' }, () => {
+  const p = join(tmpRepo('jb-map'), 'store.db');
+  const bytes = Buffer.concat([Buffer.from('H:2,block:4\n'), turn('eeeeeeee-0000-4000-8000-000000000003', { resolved: 'GPT-4.1', created: NOW })]);
+  writeFileSync(p, bytes);
+  const out = readLockedStore(p);
+  assert.ok(out, 'powershell mapped the file');
+  assert.deepEqual(out!.subarray(0, bytes.length), bytes);
+  assert.equal(turnsFrom(out!)[0].model, 'GPT-4.1');
 });
 
 test('stores of every JetBrains product are read', () => {

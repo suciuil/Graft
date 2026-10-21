@@ -11,11 +11,111 @@
   the "anonymous usage stats" row, no first-run notice is printed, and the npm
   postinstall hook records no `install` event and starts no background flush.
   `graft telemetry status` says it is permanently disabled; events queued by an
-  older version are never sent.
-- The deep-build line under the savings tally now puts the command in single
-  quotes: `⚠️ 'graft build --deep' recommended (…)`.
+  older version are never sent. `graft telemetry` is no longer listed by
+  `graft --help` (there is nothing to configure); it still runs, and
+  `graft telemetry --help` still explains it.
+- **Trail cloud (the Trail workspace) is permanently disabled.** Nothing is
+  sent to Trail and it cannot be turned on: `TRAIL_CLOUD=1`, `TRAIL_URL` /
+  `GRAFT_BRAIN_URL` and a `~/.trail/cloud.json` (left by an older version or
+  written by hand) are all ignored. No sign-in link is offered, no background
+  `_trail-claim` / `_trail-sync` child is started, no learnings, activity or
+  repo list are uploaded, no use is written to `~/.trail/outbox.jsonl`, and no
+  workspace token is stored. `trail login` and `trail workspace add` refuse with
+  an error, `trail workspace` says it is disabled, the workspace commands stay
+  out of `trail --help`, and `trail status` shows no workspace row.
+- The `graft init` picker: **enter now also selects the highlighted agent**
+  before confirming. Moving to an agent and pressing enter used to confirm a
+  selection without it, so init wired everything except the agent you were on,
+  and the picker was gone. An agent you unticked yourself (space or `a`) stays
+  unticked, enter on the usage-stats row never opts you in, and the learnings
+  picker in `trail init` is unchanged.
+- The recommendation lines under the savings tally now spell out the action and
+  put the command in single quotes, e.g.
+  `⚠️ Run the 'graft build --deep' command — recommended (…)`, and likewise for
+  `graft prices update` and `graft init`.
+- **Every recommendation line now says why it is shown and what it covers.**
+  The `graft init` line lists every instruction file that differs (no more
+  "and 1 more"), the graft version whose text it differs from, which sections
+  changed (e.g. `“Verify before you assert”`, `the introduction`), and the
+  agents a re-run refreshes. The `graft build --deep` line gives the node
+  counts behind its percentage (changed and new) and says it is an LLM pass
+  that needs an API key and costs tokens.
+- Every agent's instructions now cover the case where it cannot run commands,
+  such as GitHub Copilot's Ask mode (no terminal) or a read-only or planning
+  mode. This covers Copilot, Kilo Code, Cursor, Gemini CLI, Kiro, Windsurf,
+  `AGENTS.md` hosts, and the Claude Code / AdaL / Grok skill. Instead of
+  skipping graft, the agent uses graft's MCP tools where the host has them
+  (Kilo Code, or Claude Code with the server registered). Otherwise it reads
+  the graph with its file tools: it lists `graft/` for the concept nodes, and
+  browses `graft/src/…` instead of `src/…`, because each source file's card there
+  lists its symbols with line spans. It is told not to fall back to listing
+  source folders or reading READMEs. It must not write a `🌱 graft saved` line
+  in that mode (Copilot in IntelliJ was seen inventing one). Whenever it could not
+  run graft commands, it must end its reply with a fixed line telling the user to
+  switch to Agent mode to use graft properly. That line is required even if it
+  read no graft files, so the user always learns why graft was not used.
+  `graft/INDEX.md`, the file such agents open first, now says the same in a short
+  "No terminal?" paragraph. Re-run `graft init` to install the instructions, and
+  `graft build` to regenerate `INDEX.md`.
+- These recommendation lines now each start on a new line
+  directly under the savings tally, with no blank line between them. Each line
+  above a warning ends in a markdown line break (two trailing spaces), and the
+  agent instructions say to keep it. Markdown chat views such as GitHub Copilot
+  in IntelliJ merge a plain single newline into the previous line, so the
+  warnings ran on after the tally instead of appearing on their own lines.
+
+### Fixed
+
+- **Following the `⚠️ Run the 'graft init' command` nudge could remove agents'
+  instructions instead of updating them.** `init` retracts every agent it is not
+  given, and its picker started with only Claude Code ticked, so accepting it
+  deleted graft's block from `AGENTS.md`, `.github/copilot-instructions.md` and
+  the other wired agents' files. Agents only a teammate's machine has (an
+  `AGENTS.md` wired elsewhere, with no `~/.codex` here) were not even shown. The
+  picker now starts with every agent already wired in the repo ticked and
+  shown, and `--yes` keeps them as well.
+- **Dollar savings in GitHub Copilot for IntelliJ IDEA (and other JetBrains
+  IDEs) on Windows.** While the IDE is open it holds a lock over Copilot's whole
+  agent-session store, so every read failed and the model was never found:
+  savings showed in tokens only, even for a model VS Code priced. A locked store
+  is now read through a memory-mapped view, which Windows does not lock, by a
+  short PowerShell step. What it finds is cached in the temp folder until the
+  store changes, so this costs one read per Copilot turn, not one per graft call.
+- The same reader no longer gives up when one session records the model as its
+  id (`gemini-3.8-flash`) and another as its display name (`Gemini 3.8 Flash`).
 
 ### Added
+
+- **`graft init` follows VS Code workspaces.** When the init directory holds a
+  `.code-workspace` file, init asks whether to wire and build each folder the
+  workspace lists (resolved relative to the file, JSONC comments allowed)
+  instead of the directory itself, because those folders are the roots agents
+  open. It asks even when there is only one workspace file. Folders that don't
+  exist are skipped with a warning. With several workspace files, init asks
+  which one to use, or none (wire the whole directory as before). Without a
+  terminal, or with `--yes`, it never assumes a workspace: it wires the
+  directory and says how to pick one. `--workspace <file>` chooses one
+  explicitly; `--no-workspace` ignores them.
+
+- **`graft config`: list and change `.graft/config.json` without editing JSON.**
+  `graft config list` shows every setting with its value, whether that is the
+  default, what it does and the command that changes it.
+  `graft config exclude-dirs add|remove|list|clear` and
+  `graft config include-dirs add|remove|list|clear` edit those lists one entry
+  at a time (`graft build --exclude-dir` / `--include-dir` replace the whole
+  list), with the same validation as the build flags.
+  `graft config follow-submodules on|off` and
+  `graft config follow-nested-repos on|off` show or set those switches. Every
+  command takes `--repo <dir>`. `graft config <setting> --help` explains the
+  setting: what it means and what an entry may look like, i.e. a name at any
+  depth, a root-relative path with its subtree, or a glob (`*` within a path
+  segment, `?` one character, `**` across segments). It also covers which
+  directories can be included, and that absolute paths and `..` are rejected
+  and matching is case-sensitive. A command group's help now opens with that
+  explanation and lists the commands nested under it, and
+  `graft help <group> <command>` reaches nested commands. The note in
+  `.graft/config.json` and `graft build --help` point to these commands, and
+  `--exclude-dir`'s help now mentions globs.
 
 - **`graft prices update` / `graft prices status`: dollar savings for models graft
   does not list.** `update` downloads LiteLLM's public model price catalog with
@@ -27,7 +127,14 @@
   session's measured billing and the built-in table still take precedence. The
   stored catalog is used until the next update replaces it, and a failed update
   keeps the previous copy.
-- **A `⚠️ 'graft prices update' recommended (…)` line under the savings tally**
+- **A `⚠️ Run the 'graft init' command — recommended (…)` line under the savings tally** when the
+  agent instructions `graft init` installed in the repo (host instruction files
+  and the Claude Code skill) differ from what the running graft version would
+  write, i.e. graft was updated but `init` was not re-run there. It names the
+  files and sits between the price-update and deep-build lines. Content is
+  compared, not version numbers, so an update that leaves the instructions
+  unchanged prompts nothing; only files `init` wrote are checked.
+- **A `⚠️ Run the 'graft prices update' command — recommended (…)` line under the savings tally**
   whenever a saving is reported in tokens alone because graft knows no price for
   the model. It sits between the tally and the deep-build line.
 

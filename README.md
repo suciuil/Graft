@@ -313,7 +313,7 @@ Coming soon: a Trail workspace, for your team's view across repos. A team page w
 - **Repo learnings.** Files in your repo, shared through git like any other file.
 - **Your past sessions.** `trail init` reads your own messages from Claude Code's transcripts for the repo, on your machine. Your own Claude Code does the reading, with Claude Sonnet under your login, so your messages go only to Anthropic, and it counts toward your Claude usage. None of it goes to Trail.
 - **Your PR reviews.** When `gh` is installed and signed in, `trail init` reads the review comments on the repo's last 50 merged PRs with it, under your GitHub login. Anything that looks like a secret is taken out, and your own Claude Code reads them the same way. None of it goes to Trail.
-- **If you connect a Trail workspace.** No learning goes to Trail until you do. Once connected, the learnings in the repos you picked go to Trail, including those on teammates' pushed branches. So does a record of each search and check that used them: the search text, the files, and whose learnings were shown. That is how the team page counts reuse.
+- **Trail workspace: none.** Trail cloud is permanently disabled in this version. Nothing is uploaded to Trail and it cannot be turned on: `TRAIL_CLOUD=1`, `TRAIL_URL` and a `~/.trail/cloud.json` are all ignored, no sign-in link is offered, and `trail login` refuses. Learnings reach your team through git only.
 - **Anonymous usage stats.** Permanently disabled: nothing is recorded or sent, and it cannot be turned on. [`TELEMETRY.md`](TELEMETRY.md) has the details.
 
 ---
@@ -539,7 +539,7 @@ _Summary, sources, links, and your text ship today in markdown nodes. The crux s
 
 - **On your machine, no key, no network:** the structural code graph. `trail build` (wiring graph + per-file cards), `trail build --check`, `trail ask`, learnings and `trail check` are deterministic. They never call a model.
 - **Through your provider key:** the LLM-written parts. `trail build --deep` adds the concept nodes (file summaries + node synthesis) and the per-symbol summaries and cruxes. The graft map is vendor-neutral: set `GRAFT_PROVIDER` (`openai` for any OpenAI-compatible endpoint, `anthropic` for the native API, or `litellm` / `orcarouter` for a gateway that speaks the OpenAI-compatible format), your `GRAFT_API_KEY`, `GRAFT_MODEL`, and, for the `openai` wire format, `GRAFT_BASE_URL` to point at OpenRouter, Fireworks, Groq, a LiteLLM proxy, a local server, or OpenAI itself. Or pass `--provider/--model/--api-key/--base-url` on the command line, or save them once for every new terminal with `trail api url`, `trail api key` (asks for the key with hidden input) and `trail model` (lists the models the endpoint serves, mid-tier first, and lets you pick one). Those three store user environment variables (Windows: `HKCU\Environment`; macOS/Linux: `~/.graft/env.sh`, sourced from your shell profile), check the endpoint after saving, and print the current value and where it comes from when run without one; `--unset` removes a saved value. When `build --deep` fails because the endpoint is unreachable, the key is rejected, or the model is unknown, it says which of them to run. (`OPENROUTER_API_KEY` still works as a deprecated fallback, and `ORCAROUTER_API_KEY` as a second one.) On a corporate network whose gateway or TLS-inspecting proxy is signed by a company root, graft trusts the operating system's certificate store in addition to Node's bundled roots, so no `NODE_EXTRA_CA_CERTS` is needed wherever IT has deployed that root, including for MCP servers and hooks that agents start; set `GRAFT_SYSTEM_CA=0` to turn this off.
-- **Through Trail, only if you connect a workspace:** the learnings in the repos you picked, and the searches and checks that used them. See [What stays on your machine](#what-stays-on-your-machine).
+- **Through Trail: nothing.** Trail cloud (the workspace) is permanently disabled and cannot be turned on. See [What stays on your machine](#what-stays-on-your-machine).
 - **Anonymous usage stats: none.** Telemetry is permanently disabled and cannot be turned on; nothing is recorded or sent ([`TELEMETRY.md`](TELEMETRY.md)).
 
 Settings keep their `GRAFT_` names. See [`.env.example`](.env.example) for the full list (model, base URL, graph directory).
@@ -564,6 +564,7 @@ With no TTY to prompt on (CI, a Dockerfile, a piped shell), `init` writes **noth
 
 Agents without a statusline (Kilo Code over MCP, GitHub Copilot over the CLI) still hear when the LLM layer has drifted or was never built. Each query auto-refreshes the structural graph, which marks the per-symbol summaries of edited code `stale` and leaves new code `pending` (never summarized). Once more than 10% of summaries are out of date (changed plus never-summarized code; configurable with `trail deep-threshold <percent>`, per repo or for all repos with `--global`), every MCP tool result (at its end) and every CLI query (on stderr) carries a one-line `[trail] … trail build --deep is recommended` note, for the agent to pass on to you. A repo only ever built by `trail init` / `trail build` has no summaries at all, so it gets the note on every query until you run `trail build --deep`, or opt out with `trail deep-threshold 100` (add `--global` for every repo). To check a repo on demand instead of waiting for the note, `trail staleness [dir]` prints the out-of-date share, the threshold it is judged against, the verdict, and the files holding the most out-of-date summaries.
 
+The same goes for the agent instructions `init` writes. Upgrading changes the CLI at once, but the instruction files in a repo only change when `init` runs there again. So every query compares the instruction files it finds in the repo (`AGENTS.md`, `.github/copilot-instructions.md`, `.cursor/rules/…`, the Claude Code skill, and so on) with what the installed version would write. When any differ, the savings tally the agent relays gets a `⚠️ Run the 'trail init' command — recommended (…)` line that states the scope: every file that differs, the version whose text it differs from, which sections changed, and which agents a re-run refreshes. Re-run `trail init` in that repo to install the latest instructions: the picker starts with every agent already wired there ticked (and `--yes` keeps them too), so accepting it refreshes those files rather than removing the agents left unticked. Only files `init` wrote are checked: a missing file, or a shared file without the managed block, is never reported.
 | Flag | Effect |
 |---|---|
 | `--agents <ids...>` | wire only these, no prompt; ids: `agents`, `adal`, `cursor`, `gemini`, `grok`, `hermes`, `antigravity`, `copilot`, `kilo`, `kiro`, `windsurf`, `claude` |
@@ -576,6 +577,14 @@ Agents without a statusline (Kilo Code over MCP, GitHub Copilot over the CLI) st
 | `--no-hooks` | skip hook installation for agents other than Claude Code |
 | `--no-statusline` | skip writing Claude Code `statusLine` (same as `GRAFT_NO_STATUSLINE=1`) |
 | `--no-global` | skip writes outside this repo (the `~/.codex/` entries below) |
+| `--workspace <file>` | wire the folders listed in this VS Code `.code-workspace` file |
+| `--no-workspace` | ignore `.code-workspace` files and wire the directory itself |
+
+#### VS Code workspaces
+
+If the directory `init` runs in contains a `.code-workspace` file, `init` asks whether to wire and build **each folder that workspace lists** (`1`) or to run as before (`0`, which wires the whole directory). Each folder is resolved relative to the workspace file, and a folder that is itself a parent of several git repos fans out to them as usual. Agents in a multi-root workspace open those folders as their roots, so that is where the instruction files need to be. Folders that don't exist are skipped with a warning.
+
+With several `.code-workspace` files, `init` lists them all and asks which one to use, or `0` for none. Without a terminal, or with `--yes`, it never assumes a workspace: it wires the directory as before and prints how to pick one with `--workspace <file>`.
 
 #### Writes outside the repo
 
@@ -699,6 +708,19 @@ trail deep-threshold 25 --global     # set the default for every repo, in ~/.gra
 trail deep-threshold --reset [dir]   # drop this repo's value: falls back to the global one, else 10
 trail deep-threshold --reset --global  # drop the global value: back to the built-in 10
 
+# this repo's settings (.graft/config.json) — `trail config <setting> --help` explains each one and its syntax
+trail config list                    # every setting: value, default, what it does, and how each excludeDirs entry matches
+trail config exclude-dirs list       # directories left out of the graph (excludeDirs)
+trail config exclude-dirs add themes src/legacy "src/*-old" "**/generated"
+                                     # a NAME (any depth), a root-relative PATH (+ its subtree) or a GLOB:
+                                     # * within a segment, ? one char, ** across segments; no absolute paths, no ..
+trail config exclude-dirs remove src/legacy   # or `clear` to empty the list
+trail config include-dirs add build vendor    # index built-in skipped dirs anyway (bare names; dot-dirs never)
+trail config include-dirs remove vendor       # also `list` and `clear`
+trail config follow-submodules on|off         # omit the value to show it; same as build --[no-]follow-submodules
+trail config follow-nested-repos on|off       # same as build --[no-]follow-nested-repos
+                                     # every command takes --repo <dir>; a change applies at the next build or query refresh
+
 trail prices update                  # fetch LiteLLM's public model price catalog (one anonymous GET) into ~/.graft/prices.json,
                                      # so savings for models the built-in table does not list are priced in dollars (kept until the next update)
 trail prices status [model]          # whether a local catalog is stored and how old it is; with a model, the price used for it
@@ -711,7 +733,6 @@ trail uninstall [dir]                # remove every file and config entry it wro
 trail uninstall -y                   # actually remove (without -y it prints what it would remove and exits)
 trail uninstall --keep-cache         # wiring only; leave graft/ and the .gitignore entry
 trail uninstall --no-global          # leave out-of-repo files alone (~/.claude, ~/.claude.json, ~/.codex, ~/.gemini)
-trail telemetry [status|debug]                   # anonymous usage stats: permanently off; debug shows the (empty) queue
 
 # CI
 trail blast [dir]                    # blast radius of a diff: what depends on the lines this change touched (no LLM, no key)
@@ -726,6 +747,7 @@ trail blast --depth all --format json  # the full transitive closure, machine-re
 trail viz [dir]                      # see the graph: serves an interactive viewer on localhost
 trail viz --export site/ --title "PR #12"  # one self-contained index.html for CI, GitHub Pages, or a build artifact
 trail mcp [dir]                      # run the MCP server by hand
+trail telemetry [status|debug]       # anonymous usage stats: permanently off; debug shows the (empty) queue
 
 # global
 trail --dir <path>                   # use a context dir other than <repo>/graft

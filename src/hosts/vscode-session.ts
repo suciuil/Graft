@@ -96,7 +96,7 @@ function urlToPath(url: unknown): string | null {
  * workspace this was tested against has two comment blocks in `settings`).
  * String-aware, so a `//` inside a path value survives.
  */
-function stripComments(text: string): string {
+export function stripComments(text: string): string {
   let out = '';
   let i = 0;
   while (i < text.length) {

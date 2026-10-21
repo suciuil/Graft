@@ -130,6 +130,17 @@ export interface PickerState {
   aborted: boolean;
   /** Agents graft cannot find on this machine are folded into one line until `m`. */
   showHidden?: boolean;
+  /**
+   * Enter also ticks the highlighted agent. Without it, a user who moved to an
+   * agent and pressed enter — the universal "pick this" gesture — confirmed a
+   * selection that did not include it, and init wired everything but the one
+   * they were looking at. Off for pickers whose rows start ticked (learnings),
+   * where enter on a row means "done", not "keep this".
+   */
+  enterPicks?: boolean;
+  /** Rows the user toggled with space or `a`: enter never re-ticks one of
+   *  those, so an agent they deliberately unticked stays unticked. */
+  touched?: ReadonlySet<string>;
 }
 
 /** The rows on screen: undetected agents only once `m` has unfolded them. */
@@ -158,7 +169,13 @@ export function initialPickerState(
     summary: compactWrites(p.writes, repo, home),
     hasGlobal: p.writes.some((w) => w.scope === 'global'),
   }));
-  const checked = new Set(plan.some((p) => p.id === 'claude') ? ['claude'] : []);
+  // Claude Code, plus every agent a previous init wired here: init retracts what
+  // is not picked, so a re-run (the one the "Run 'graft init'" nudge asks for)
+  // must start from the current wiring, or enter would remove it.
+  const checked = new Set([
+    ...(plan.some((p) => p.id === 'claude') ? ['claude'] : []),
+    ...plan.filter((p) => p.wired).map((p) => p.id),
+  ]);
   if (opts.offerTelemetry) {
     rows.push({
       id: TELEMETRY_ROW_ID,
@@ -170,7 +187,7 @@ export function initialPickerState(
     });
     if (opts.telemetryChecked) checked.add(TELEMETRY_ROW_ID);
   }
-  return { rows, cursor: 0, checked, done: false, aborted: false };
+  return { rows, cursor: 0, checked, done: false, aborted: false, enterPicks: true };
 }
 
 export type PickerKey = 'up' | 'down' | 'space' | 'all' | 'more' | 'enter' | 'abort';
@@ -232,7 +249,7 @@ export function reducePicker(state: PickerState, key: PickerKey): PickerState {
       const next = new Set(state.checked);
       const id = visible[state.cursor]!.id;
       if (next.has(id)) next.delete(id); else next.add(id);
-      return { ...state, checked: next };
+      return { ...state, checked: next, touched: new Set([...(state.touched ?? []), id]) };
     }
     case 'all': {
       // The agents on screen only: `a` must never select one the user cannot
@@ -246,7 +263,7 @@ export function reducePicker(state: PickerState, key: PickerKey): PickerState {
         if (allOn) next.delete(r.id);
         else next.add(r.id);
       }
-      return { ...state, checked: next };
+      return { ...state, checked: next, touched: new Set([...(state.touched ?? []), ...hosts.map((r) => r.id)]) };
     }
     case 'more': {
       if (!state.rows.some((r) => r.kind === 'host' && !r.detected)) return state;
@@ -261,8 +278,14 @@ export function reducePicker(state: PickerState, key: PickerKey): PickerState {
       if (!toggled.showHidden) for (const r of state.rows) if (r.kind === 'host' && !r.detected) checked.delete(r.id);
       return { ...toggled, cursor: idx >= 0 ? idx : 0, checked };
     }
-    case 'enter':
-      return { ...state, done: true };
+    case 'enter': {
+      const row = visible[state.cursor];
+      // Agents only: enter on the consent row must never opt anyone in.
+      if (!state.enterPicks || !row || row.kind !== 'host' || state.checked.has(row.id) || state.touched?.has(row.id)) {
+        return { ...state, done: true };
+      }
+      return { ...state, checked: new Set([...state.checked, row.id]), done: true };
+    }
     case 'abort':
       return { ...state, aborted: true };
   }
@@ -309,7 +332,7 @@ export function renderPicker(state: PickerState, tty = true, opts: { title?: str
     lines.push(`${here ? '›' : ' '} ${box} ${name}${tag}${gap}   ${summary}`);
   }
   if (!ruled) foldLine();
-  const keys = ['↑↓ move', 'space toggle', 'a all', ...(hidden.length ? ['m more'] : []), 'enter confirm', 'esc cancel'];
+  const keys = ['↑↓ move', 'space toggle', 'a all', ...(hidden.length ? ['m more'] : []), state.enterPicks ? 'enter select highlighted + confirm' : 'enter confirm', 'esc cancel'];
   lines.push('', dim(keys.join(' · ')));
   return lines.join('\n');
 }

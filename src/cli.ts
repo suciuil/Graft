@@ -47,6 +47,24 @@ import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
 import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
 import { normalizeExcludeEntry } from "./ingest/fs.js";
+import {
+  CONFIG_APPLY_NOTE,
+  addDirEntries,
+  clearDirEntries,
+  describeExcludeEntry,
+  dirProblem,
+  excludeDirProblem,
+  formatConfigList,
+  includeDirProblem,
+  includeEntryNote,
+  parseOnOff,
+  readDirList,
+  readFlag,
+  removeDirEntries,
+  writeFlag,
+  type DirListKey,
+  type FlagKey,
+} from "./config-cli.js";
 import { discoverWorkspaceChildren } from "./graph/scopes.js";
 import {
   runWorkspaceAsk,
@@ -60,6 +78,7 @@ import { formatInitEpilogue } from "./cli-epilogue.js";
 import { planInit, selectedWrites } from "./hosts/plan.js";
 import { planRetract, runRetract, changed, type Retraction } from "./hosts/retract.js";
 import { compactWrites, formatNonInteractiveHelp, formatPlan, pickLearnings, runPicker } from "./cli-picker.js";
+import { describeCodeWorkspaces, findCodeWorkspaces, promptCodeWorkspace, readCodeWorkspaceFolders } from "./hosts/code-workspace.js";
 import { buildGraphWithProgress } from "./claude/build-progress.js";
 import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, runUpgrade } from "./cli-meta.js";
@@ -88,14 +107,15 @@ import { beginReviewRead, finishReviewRead, type ReviewFinding } from "./notes/p
 import { currentBranch, noteAuthor, teammatesOn } from "./notes/git-facts.js";
 import { confirm, fold, getSkill, learn, listSkills, publish, skillForAgent, skillName, skillStatus, type LearnResult } from "./skills/skills.js";
 import { clearPending, cloudLines, loginLink, sessionKey, waitForConnect } from "./cloud/nudge.js";
-import { addRepo, clearCloud, cloudEnabled, fetchMe, fetchTeam, isError, readCloud, writeCloud, type Cloud } from "./cloud/workspace.js";
+import { addRepo, clearCloud, CLOUD_DISABLED, cloudEnabled, fetchMe, fetchTeam, isError, readCloud, writeCloud, type Cloud } from "./cloud/workspace.js";
 import { inWorkspace, maybeSyncInBackground, recordActivity, runSyncChild, syncRepo } from "./cloud/workspace-sync.js";
 import type { CheckResult } from "./check/types.js";
 import { checkLocally } from "./check/local-check.js";
 import { formatOverlap, maybeRefreshBranches, overlapsWith, pushedWhen, readBranchCache, refreshBranches } from "./notes/branches.js";
 import { ensureRepoTrail, LEARNINGS_DIR } from "./notes/repo-trail.js";
 import type { AskResult } from "./ask/ask.js";
-import { claimedSavings, setDeepDue, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
+import { claimedSavings, setDeepDue, setInitDue, setModelTable, setPricing, setRepoRoot } from "./context/savings.js";
+import { initDueReason } from "./hosts/drift.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readStamp, readUpdateCache, refreshUpdateCache, wiredHostIds, wiringOpts, writeStamp } from "./upkeep.js";
 import { shouldMoveToTrail } from "./upkeep-run.js";
 import {
@@ -303,6 +323,7 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
   const deep = deepDueFor(root, { contextDir: globalDir, children: ws?.children });
   if (deep) console.error(deep.note);
   setDeepDue(deep?.reason ?? null);
+  setInitDue(initDueReason(root, { children: ws?.children }));
 }
 
 /** Attached to every query command: `--no-refresh` answers from the graph exactly
@@ -456,7 +477,9 @@ program
     await runFlush();
   });
 
-grouped(program.command("telemetry"), GROUP.setup)
+// Hidden from the help list: telemetry is permanently off, so there is nothing to
+// configure. The command still runs, and `graft telemetry --help` still explains it.
+grouped(program.command("telemetry", { hidden: true }), GROUP.setup)
   .description("Show the anonymous usage stats status — permanently off in this version; `debug` shows that nothing is queued")
   .argument("[action]", "status (default) | enable | disable | debug", "status")
   .action((action: string) => {
@@ -553,16 +576,18 @@ grouped(program.command("build"), GROUP.setup)
   )
   .option(
     "--include-dir <name>",
-    "override SKIP_DIRS for this repo's walks — repeatable (e.g. --include-dir build --include-dir tools); " +
-      "persisted, so a later build (and the hooks/refresh path) include it without the flag; dot-dirs are never overridable",
+    "index a directory the built-in skip list leaves out (node_modules, dist, build, _build, out, target, vendor, coverage, " +
+      "__pycache__, venv) — a bare name, repeatable (e.g. --include-dir build --include-dir vendor); dot-dirs are never " +
+      "overridable. Persisted, REPLACING the saved list; `graft config include-dirs add` adds to it instead",
     (val: string, prev: string[]) => [...prev, val],
     [] as string[],
   )
   .option(
     "--exclude-dir <name>",
     "skip a directory — repeatable. A bare NAME (themes) skips it at any depth; a root-relative PATH " +
-      "(src/themes) skips only that one and its subtree. Persisted like --include-dir, and wins over it; " +
-      "edit .graft/config.json's excludeDirs to manage a long list",
+      "(src/themes) skips only that one and its subtree; a GLOB (src/*-old, **/generated) matches root-relative " +
+      "paths. Persisted like --include-dir, REPLACING the saved list, and wins over it; " +
+      "`graft config exclude-dirs add|remove|list` manages the list one entry at a time",
     (val: string, prev: string[]) => [...prev, val],
     [] as string[],
   )
@@ -624,38 +649,25 @@ grouped(program.command("build"), GROUP.setup)
       // else up front instead of silently persisting a value that can never
       // match a real directory name.
       for (const name of opts.includeDir) {
-        if (name.startsWith(".")) {
-          console.error(`✗ --include-dir "${name}": dot-directories are never overridable`);
-          process.exit(1);
-        }
-        if (name.includes("/") || name.includes("\\")) {
-          console.error(`✗ --include-dir "${name}": expected a bare directory name, not a path`);
+        const problem = includeDirProblem(name);
+        if (problem) {
+          console.error(`✗ --include-dir "${name}": ${problem}`);
           process.exit(1);
         }
       }
       buildConfigPatch.includeDirs = opts.includeDir;
     }
     if (opts.excludeDir && opts.excludeDir.length > 0) {
-      // Two accepted shapes, unlike --include-dir's bare names only: a NAME
+      // Accepted shapes, unlike --include-dir's bare names only: a NAME
       // (`themes`) excludes that segment at any depth, a root-relative PATH
-      // (`src/themes`) excludes exactly one directory and its subtree. Dot-names
-      // are accepted rather than rejected — they are already skipped, so naming
-      // one is redundant, not a mistake.
+      // (`src/themes`) excludes exactly one directory and its subtree, and a
+      // GLOB matches root-relative paths. Dot-names are accepted rather than
+      // rejected — they are already skipped, so naming one is redundant, not a
+      // mistake.
       for (const name of opts.excludeDir) {
-        const value = normalizeExcludeEntry(name);
-        if (!value) {
-          console.error(`✗ --exclude-dir "${name}": empty after normalising — expected a directory name or a root-relative path`);
-          process.exit(1);
-        }
-        // An absolute path cannot be compared against a root-relative one, and
-        // `..` would reach outside the repo being indexed. Both are user error
-        // rather than something to silently never match.
-        if (/^[a-zA-Z]:/.test(value) || name.startsWith("/") || name.startsWith("\\")) {
-          console.error(`✗ --exclude-dir "${name}": expected a path relative to the repo root, not an absolute one`);
-          process.exit(1);
-        }
-        if (value.split("/").includes("..")) {
-          console.error(`✗ --exclude-dir "${name}": ".." cannot appear — the path must stay inside the repo`);
+        const problem = excludeDirProblem(name);
+        if (problem) {
+          console.error(`✗ --exclude-dir "${name}": ${problem}`);
           process.exit(1);
         }
       }
@@ -1077,6 +1089,128 @@ program
       );
     }
   });
+
+// `graft config`: list and edit `.graft/config.json` one setting at a time. The
+// prose — what each setting means and what an entry may look like — is in
+// cli-help-graft.ts, shown by `graft config <setting> --help`.
+const REPO_OPT = ["--repo <dir>", "repository root (default: nearest ancestor with a graft/ index, else the current directory)"] as const;
+const configRepo = (opts: { repo?: string }) => queryRoot(opts.repo);
+
+const configCommand = grouped(program.command("config"), GROUP.setup).description(
+  "List and change this repo's settings in .graft/config.json: excludeDirs, includeDirs, followSubmodules, followNestedRepos",
+);
+
+configCommand
+  .command("list")
+  .description("Show every setting in .graft/config.json with its value, its default and what it does")
+  .option(...REPO_OPT)
+  .action((opts: { repo?: string }) => {
+    console.log(formatConfigList(configRepo(opts)));
+  });
+
+function dirListCommands(name: string, key: DirListKey, what: string): void {
+  const group = configCommand.command(name).alias(key).description(`List, add or remove ${what} (${key})`);
+  const show = (repo: string) => {
+    const list = readDirList(repo, key);
+    if (list.length === 0) {
+      console.log(`${key}: none`);
+      return;
+    }
+    console.log(`${key}:`);
+    for (const e of list) {
+      const note = key === "excludeDirs" ? describeExcludeEntry(e) : includeEntryNote(e);
+      console.log(`  ${e}${note ? `  — ${note}` : ""}`);
+    }
+  };
+  group
+    .command("list")
+    .description(`Show the ${key} entries, each with how it matches`)
+    .option(...REPO_OPT)
+    .action((opts: { repo?: string }) => show(configRepo(opts)));
+  group
+    .command("add")
+    .description(`Add entries to ${key}; ones already there are left as they are`)
+    .argument("<entries...>", key === "excludeDirs" ? "names, root-relative paths or globs" : "bare directory names")
+    .option(...REPO_OPT)
+    .action((entries: string[], opts: { repo?: string }) => {
+      for (const e of entries) {
+        const problem = dirProblem(key, e);
+        if (problem) {
+          console.error(`✗ ${cmd(`graft config ${name} add`)} "${e}": ${problem}`);
+          process.exit(1);
+        }
+      }
+      const repo = configRepo(opts);
+      const { added, present } = addDirEntries(repo, key, entries);
+      for (const e of added) {
+        const note = key === "excludeDirs" ? describeExcludeEntry(e) : includeEntryNote(e);
+        console.log(`✓ added ${e}${note ? `  — ${note}` : ""}`);
+      }
+      for (const e of present) console.log(`· ${e} is already in ${key}`);
+      if (added.length) console.log(CONFIG_APPLY_NOTE());
+    });
+  group
+    .command("remove")
+    .alias("rm")
+    .description(`Remove entries from ${key}, written as \`list\` shows them`)
+    .argument("<entries...>", "entries to remove")
+    .option(...REPO_OPT)
+    .action((entries: string[], opts: { repo?: string }) => {
+      const repo = configRepo(opts);
+      const { removed, missing } = removeDirEntries(repo, key, entries);
+      for (const e of removed) console.log(`✓ removed ${e}`);
+      for (const e of missing) console.error(`· ${e} is not in ${key} — \`${cmd(`graft config ${name} list`)}\` shows what is`);
+      if (removed.length) console.log(CONFIG_APPLY_NOTE());
+      if (missing.length && !removed.length) process.exitCode = 1;
+    });
+  group
+    .command("clear")
+    .description(`Remove every ${key} entry`)
+    .option(...REPO_OPT)
+    .action((opts: { repo?: string }) => {
+      const cleared = clearDirEntries(configRepo(opts), key);
+      if (!cleared.length) {
+        console.log(`${key} was already empty`);
+        return;
+      }
+      console.log(`✓ removed ${cleared.length} entr${cleared.length === 1 ? "y" : "ies"}: ${cleared.join(", ")}`);
+      console.log(CONFIG_APPLY_NOTE());
+    });
+}
+dirListCommands("exclude-dirs", "excludeDirs", "the directories left out of the graph");
+dirListCommands("include-dirs", "includeDirs", "the built-in skipped directories indexed anyway");
+
+function flagCommand(name: string, key: FlagKey, what: string): void {
+  configCommand
+    .command(name)
+    .alias(key)
+    .description(`Show or set ${key}: ${what}`)
+    .argument("[value]", "on or off (also true/false, yes/no); omit to show the current value")
+    .option(...REPO_OPT)
+    .action((value: string | undefined, opts: { repo?: string }) => {
+      const repo = configRepo(opts);
+      if (value !== undefined) {
+        const on = parseOnOff(value);
+        if (on === null) {
+          console.error(`✗ ${cmd(`graft config ${name}`)}: "${value}" is not on or off`);
+          process.exit(1);
+        }
+        const before = readFlag(repo, key).value;
+        writeFlag(repo, key, on);
+        console.log(`✓ ${key}: ${on ? "on" : "off"}${before === on ? " (unchanged)" : ""}`);
+        if (before !== on) console.log(CONFIG_APPLY_NOTE());
+        return;
+      }
+      const { value: current, set } = readFlag(repo, key);
+      console.log(`${key}: ${current ? "on" : "off"}${set ? "" : " (default)"}`);
+    });
+}
+flagCommand("follow-submodules", "followSubmodules", "index initialized Git submodules into this repo's graph");
+flagCommand(
+  "follow-nested-repos",
+  "followNestedRepos",
+  "index nested Git clones this repo's index does not track into one graph",
+);
 
 /** What the `api url` / `api key` / `model` commands read and write through. */
 function settingDeps(): SettingDeps {
@@ -1707,6 +1841,8 @@ grouped(program.command("init"), GROUP.setup)
   .option("--dry-run", "print every file init would touch, then exit without writing")
   .option("-y, --yes", "skip the picker and wire every detected agent (the pre-0.8 default)")
   .option("--no-global", "skip writes outside this repo (the ~/.codex/ config + hooks)")
+  .option("--workspace <file>", "wire the folders of this VS Code .code-workspace file (default: the one in [dir], asking when there are several)")
+  .option("--no-workspace", "ignore .code-workspace files and wire [dir] itself")
   .option("--verbose", "print every file written, the graph build's own output and the closing banner")
   .action(async (dir: string, opts: InitOptions) => {
     await runInitCommand(dir, opts);
@@ -1834,7 +1970,69 @@ function printLines(lines: string[]): void {
 }
 
 /** `graft init`'s flags, as commander hands them over. */
-interface InitOptions { build?: boolean; agents?: string[]; allAgents?: boolean; listAgents?: boolean; mcp?: boolean; hooks?: boolean; statusline?: boolean; dryRun?: boolean; yes?: boolean; global?: boolean; verbose?: boolean }
+interface InitOptions { build?: boolean; agents?: string[]; allAgents?: boolean; listAgents?: boolean; mcp?: boolean; hooks?: boolean; statusline?: boolean; dryRun?: boolean; yes?: boolean; global?: boolean; verbose?: boolean; workspace?: string | false }
+
+/**
+ * Which VS Code workspace `init` wires, if any: `--workspace <file>`, else the
+ * only `.code-workspace` in `repo`, else — with several — the user's pick on a
+ * terminal. `null` means none (wire `repo` itself, as before); `undefined`
+ * means the user cancelled. Exits on an unusable `--workspace` file.
+ */
+async function chooseCodeWorkspace(
+  repo: string,
+  opts: InitOptions,
+): Promise<{ file: string; folders: string[] } | null | undefined> {
+  if (opts.workspace === false) return null;
+  let file: string | null;
+  if (typeof opts.workspace === "string") {
+    file = resolve(repo, opts.workspace);
+    if (!existsSync(file)) {
+      console.error(`✗ --workspace: ${file} not found`);
+      process.exit(1);
+    }
+  } else {
+    const found = findCodeWorkspaces(repo);
+    if (found.length === 0) return null;
+    // Even a single workspace is asked about: wiring its folders instead of
+    // this directory is a different outcome, so it's never assumed.
+    if (process.stdin.isTTY && process.stderr.isTTY && !opts.yes) {
+      const picked = await promptCodeWorkspace(describeCodeWorkspaces(found), repo);
+      if (picked === undefined) return undefined;
+      file = picked;
+    } else {
+      const what = found.length === 1 ? "a VS Code workspace" : `${found.length} VS Code workspaces`;
+      console.error(
+        `· found ${what} here (${found.map((f) => basename(f)).join(", ")}) — wiring this folder itself; pass --workspace <file> to wire its folders`,
+      );
+      return null;
+    }
+  }
+  if (file === null) return null;
+
+  let read;
+  try {
+    read = readCodeWorkspaceFolders(file);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    if (typeof opts.workspace === "string") {
+      console.error(`✗ --workspace: can't read ${file} (${why})`);
+      process.exit(1);
+    }
+    console.error(`⚠ can't read ${basename(file)} (${why}) — wiring this folder itself`);
+    return null;
+  }
+  for (const m of read.missing) console.error(`⚠ ${basename(file)}: folder ${m} not found — skipped`);
+  for (const u of read.unsupported) console.error(`⚠ ${basename(file)}: ${u} is not a local folder — skipped`);
+  if (read.folders.length === 0) {
+    if (typeof opts.workspace === "string") {
+      console.error(`✗ --workspace: ${file} lists no existing folders`);
+      process.exit(1);
+    }
+    console.error(`⚠ ${basename(file)} lists no existing folders — wiring this folder itself`);
+    return null;
+  }
+  return { file, folders: read.folders };
+}
 
 /** Repo-relative with forward slashes, for printing. */
 function shown(repo: string, path: string): string {
@@ -1857,6 +2055,14 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
         console.error(`✗ unknown agent id(s): ${unknown.join(", ")} — valid: ${validIds.join(", ")}`);
         process.exit(1);
       }
+    }
+
+    // A VS Code workspace file here means its folders are what agents open as
+    // roots, so they — not this directory — get the wiring and the graphs.
+    const codeWs = await chooseCodeWorkspace(repo, opts);
+    if (codeWs === undefined) {
+      console.error("· cancelled — nothing written");
+      return null;
     }
 
     // Which agents to wire, decided before anything is written. Explicit flags
@@ -1905,14 +2111,35 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
     // opens at a repo root, not at the parent, and reads `.claude/` from there —
     // wiring only the parent leaves each child with no skill, hooks, or MCP.
     // The parent's own wiring stays (queries there federate across children).
-    const children = isWorkspaceBuildRoot(repo, program.opts<GlobalOpts>().dir)
-      ? discoverWorkspaceChildren(repo)
-      : [];
-    // Parent FIRST: its build is the workspace build, which builds every child's
+    // With a VS Code workspace, each of its folders is such a root in turn.
+    const globalDir = program.opts<GlobalOpts>().dir;
+    const roots = codeWs ? codeWs.folders : [repo];
+    const overrideFor = (root: string) => (root === repo ? globalDir : undefined);
+    const childrenOf = new Map<string, string[]>(
+      roots.map((root) => [root, isWorkspaceBuildRoot(root, overrideFor(root)) ? discoverWorkspaceChildren(root) : []]),
+    );
+    const children = childrenOf.get(repo) ?? [];
+    // Each root FIRST: its build is the workspace build, which builds every child's
     // graph, so each child's own `buildGraphIfMissing` then finds one and no-ops.
-    const targets = [repo, ...children.map((c) => join(repo, c))];
+    const targets = [
+      ...new Map(
+        roots
+          .flatMap((root) => [root, ...childrenOf.get(root)!.map((c) => join(root, c))])
+          .map((t) => [process.platform === "win32" ? t.toLowerCase() : t, t] as const),
+      ).values(),
+    ];
+    const label = (target: string) => relative(repo, target).split("\\").join("/") || ".";
 
     if (opts.dryRun) {
+      if (codeWs) {
+        console.error(`· VS Code workspace ${basename(codeWs.file)}: ${roots.length} folder(s) — ${roots.map(label).join(", ")}`);
+        for (const target of targets) {
+          console.error(`\n— ${label(target)}/\n` + formatPlan(planInit(target, { home }), ids, target, home));
+          const cfg = missingBuildConfigPath(target);
+          if (cfg) console.error(`\n  would write ${cfg} (repo build settings)`);
+        }
+        return null;
+      }
       console.error(formatPlan(plan, ids, repo, home));
       // wireTarget scaffolds this before touching any agent, so a dry run that
       // listed only agent files would under-report what init writes.
@@ -1955,38 +2182,48 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
     const reviewRead = TRAIL && wantClaude ? beginReviewRead(repo) : null;
     if (reviewRead) console.error("· reading review comments on this repo's merged PRs for what reviewers keep flagging");
 
-    if (children.length)
-      console.error(`· workspace: wiring ${repo} and ${children.length} child repo(s) — ${children.join(", ")}`);
+    if (codeWs)
+      console.error(`· VS Code workspace ${basename(codeWs.file)}: wiring ${roots.length} folder(s) — ${roots.map(label).join(", ")}`);
+    for (const root of roots) {
+      const kids = childrenOf.get(root)!;
+      if (kids.length) console.error(`· workspace: wiring ${root} and ${kids.length} child repo(s) — ${kids.join(", ")}`);
+    }
 
     // Today's output, file by file, behind --verbose. Everything else gets one
     // line per step: the graph, then one per agent.
     const verbose = opts.verbose === true;
     const reports: WireReport[] = [];
     for (const target of targets) {
-      if (verbose && target !== repo) console.error(`\n— ${relative(repo, target)}/`);
+      if (verbose && (target !== repo || codeWs)) console.error(`\n— ${label(target)}/`);
       reports.push(wireTarget(target, ids, { home, cliPath, plan, opts, wantClaude, quiet: !verbose }));
     }
 
-    // The graph, built once after the wiring: a workspace parent's build is
-    // the workspace build, so it covers every child.
-    let graphLine: string | null = null;
+    // The graph, built once per root after the wiring: a workspace parent's
+    // build is the workspace build, so it covers every child.
+    const graphLines: string[] = [];
     if (!verbose) {
-      const res = await buildGraphWithProgress(repo, { build: opts.build, cliPath });
-      for (const m of res.messages) console.error(m);
-      const existing = res.built ? null : loadGraphCached(contextDirFor(repo, children.length ? undefined : program.opts<GlobalOpts>().dir));
-      const fmt = (x: number) => x.toLocaleString("en-US");
-      if (res.graph) {
-        graphLine = `✓ graph built · ${fmt(res.graph.nodes)} nodes, ${fmt(res.graph.edges)} edges${res.graph.files ? ` from ${fmt(res.graph.files)} file${res.graph.files === 1 ? "" : "s"}` : ""}`;
-      } else if (res.built) {
-        graphLine = "✓ graph built";
-      } else if (res.failed) {
-        graphLine = `⚠ the graph build failed — run ${cmd("graft build")} to see why`;
-      } else if (existing) {
-        graphLine = `✓ graph ready · ${fmt(existing.meta.nodeCount)} nodes, ${fmt(existing.meta.edgeCount)} edges`;
-      } else if (hasGraftIndex(repo)) {
-        graphLine = "✓ graph ready";
-      } else {
-        graphLine = `· skipped the graph build — run ${cmd("graft build")}`;
+      for (const root of roots) {
+        const kids = childrenOf.get(root)!;
+        const where = codeWs ? ` · ${label(root)}` : "";
+        const res = await buildGraphWithProgress(root, { build: opts.build, cliPath });
+        for (const m of res.messages) console.error(m);
+        const existing = res.built ? null : loadGraphCached(contextDirFor(root, kids.length ? undefined : overrideFor(root)));
+        const fmt = (x: number) => x.toLocaleString("en-US");
+        let graphLine: string;
+        if (res.graph) {
+          graphLine = `✓ graph built · ${fmt(res.graph.nodes)} nodes, ${fmt(res.graph.edges)} edges${res.graph.files ? ` from ${fmt(res.graph.files)} file${res.graph.files === 1 ? "" : "s"}` : ""}${where}`;
+        } else if (res.built) {
+          graphLine = `✓ graph built${where}`;
+        } else if (res.failed) {
+          graphLine = `⚠ the graph build failed${where} — run ${cmd("graft build")} to see why`;
+        } else if (existing) {
+          graphLine = `✓ graph ready · ${fmt(existing.meta.nodeCount)} nodes, ${fmt(existing.meta.edgeCount)} edges${where}`;
+        } else if (hasGraftIndex(root)) {
+          graphLine = `✓ graph ready${where}`;
+        } else {
+          graphLine = `· skipped the graph build${where} — run ${cmd("graft build")}`;
+        }
+        graphLines.push(graphLine);
       }
     }
 
@@ -1997,7 +2234,7 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
       for (const w of reports.flatMap((r) => r.warnings)) console.error(w);
       const writesFor = (id: string) =>
         (plan.find((p) => p.id === id)?.writes ?? []).filter((w) => opts.global !== false || w.scope !== "global");
-      if (graphLine) console.error(graphLine);
+      if (graphLines.length) console.error(graphLines.join("\n"));
       const width = Math.max(...ids.map((id) => id.length));
       for (const id of ids) {
         const summary = compactWrites(writesFor(id), repo, home);
@@ -2100,24 +2337,29 @@ async function runInitCommand(dir: string, opts: InitOptions): Promise<{ ids: st
       console.error(`· restart your agents so a new session picks up ${brand()}`);
       if (TRAIL && !tops.includes(".trail/")) tops.push(".trail/");
       // Only what git sees as new or changed: a teammate's init over committed files has nothing to commit.
-      const changedTops = tops.filter((t) => {
-        const r = spawnSync("git", ["status", "--porcelain", "--", t], { cwd: repo, encoding: "utf8" });
-        return r.status !== 0 || r.stdout.trim().length > 0;
-      });
-      tops.splice(0, tops.length, ...changedTops);
-      if (tops.length)
-        console.error(
-          TRAIL
-            ? `· commit ${tops.slice(0, 5).join(" and ")}${tops.length > 5 ? ` +${tops.length - 5} more` : ""} once — after that, teammates' Claude reads your learnings even before they install trail`
-            : `· commit ${tops.slice(0, 5).join(" ")}${tops.length > 5 ? ` +${tops.length - 5} more` : ""} to share it — graft/ stays local and git-ignored`,
-        );
+      for (const root of codeWs ? roots : [repo]) {
+        const changedTops = tops.filter((t) => {
+          const r = spawnSync("git", ["status", "--porcelain", "--", t], { cwd: root, encoding: "utf8" });
+          return r.status !== 0 || r.stdout.trim().length > 0;
+        });
+        const where = codeWs ? ` in ${label(root)}` : "";
+        if (changedTops.length)
+          console.error(
+            TRAIL
+              ? `· commit ${changedTops.slice(0, 5).join(" and ")}${changedTops.length > 5 ? ` +${changedTops.length - 5} more` : ""}${where} once — after that, teammates' Claude reads your learnings even before they install trail`
+              : `· commit ${changedTops.slice(0, 5).join(" ")}${changedTops.length > 5 ? ` +${changedTops.length - 5} more` : ""}${where} to share it — graft/ stays local and git-ignored`,
+          );
+      }
     }
 
     // One epilogue for the whole run. A workspace parent holds no nodes of its
     // own, so the totals come from the children — the graph the user actually got.
-    const globalDir = program.opts<GlobalOpts>().dir;
-    const graphs = (children.length ? children.map((c) => join(repo, c)) : [repo])
-      .map((d) => loadGraphCached(contextDirFor(d, children.length ? undefined : globalDir)))
+    const graphs = roots
+      .flatMap((root) => {
+        const kids = childrenOf.get(root)!;
+        return kids.length ? kids.map((c) => ({ d: join(root, c), o: undefined })) : [{ d: root, o: overrideFor(root) }];
+      })
+      .map(({ d, o }) => loadGraphCached(contextDirFor(d, o)))
       .filter((g): g is NonNullable<typeof g> => g !== null);
     if (verbose) console.error(
       "\n" +
@@ -2346,6 +2588,13 @@ function loginCommand(name = "login"): Command {
     .argument("[dir]", "the repo you're in, ticked first in the picker", ".")
     .option("--server <url>", "a self-hosted Trail, e.g. https://trail.acme.internal (default: Trail cloud)")
     .action(async (dir: string, opts: { server?: string }) => {
+      // Trail cloud is permanently off: refuse, like `telemetry enable`, before
+      // anything is remembered, opened or sent.
+      if (!cloudEnabled()) {
+        console.error(`✗ ${CLOUD_DISABLED}`);
+        process.exitCode = 1;
+        return;
+      }
       const repo = resolve(dir);
       const server = opts.server?.trim().replace(/\/+$/, "");
       if (server) {
@@ -2404,8 +2653,7 @@ function workspaceCommand(name = "workspace"): Command {
       const repo = resolve(dir);
       const cloud = readCloud();
       if (!cloud) {
-        console.log("· not connected to a workspace");
-        console.log(`· Claude offers a link once this repo has learnings, or run ${cmd("graft login")}`);
+        console.log(`· ${CLOUD_DISABLED}`);
         return;
       }
       const me = await fetchMe(cloud);
@@ -2440,7 +2688,7 @@ function workspaceCommand(name = "workspace"): Command {
       const repo = resolve(dir);
       const cloud = readCloud();
       if (!cloud) {
-        console.error(`✗ not connected to a workspace · run ${cmd("graft login")}`);
+        console.error(`✗ ${CLOUD_DISABLED}`);
         process.exitCode = 1;
         return;
       }
@@ -2837,6 +3085,11 @@ for (const name of ["/h", "/help"]) {
     });
 }
 if (!TRAIL) installGraftHelp(program);
+
+// Commander's implicit `help <command>` only looks one level down, so
+// `graft help config exclude-dirs` would print `config`'s help. The hidden `/help`
+// above walks the whole path; hand a multi-word `help` to it.
+if (process.argv[2] === "help" && process.argv.length > 4) process.argv.splice(2, 1, "/help");
 
 // Only global options and no command (`graft --model x`): say what is missing
 // rather than dumping the whole help as an error.

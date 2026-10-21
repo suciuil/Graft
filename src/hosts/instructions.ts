@@ -7,7 +7,7 @@
  * with only `trail` installed is never told to run `graft`.
  */
 import type { Brand } from '../brand.js';
-import { trailSpelling } from '../claude/skill-template.js';
+import { NO_TERMINAL_FALLBACK, trailSpelling } from '../claude/skill-template.js';
 
 function inName(text: string, name: Brand): string {
   return name === 'trail' ? trailSpelling(text) : text;
@@ -34,6 +34,8 @@ Invoke it as plain \`graft\` from the repo root — it is a CLI on your PATH, on
 every OS including Windows. There is no binary checked into the repo: never
 \`.\\graft.exe\`, \`./graft\`, or \`node graft.js\`. If \`graft\` is not found, fall
 back to \`npx -y @nanonets/graft <args>\`.
+
+${NO_TERMINAL_FALLBACK}
 
 - Run \`graft ask "<your question>" --source\` → ranked nodes with the relevant
   code spans inlined (each hit's ≤8-line crux by default; \`--full\` for whole
@@ -120,16 +122,27 @@ Every graft output ends with an example tally. Close your reply with that line,
 substituting the summed tokens and dollars — its wording already says exactly
 what may and may not be claimed about the price. Write it as a plain line: no
 surrounding quotation marks, and drop any trailing full stop that merely closed
-graft's own sentence.
+graft's own sentence. The figures come only from graft output you received this
+turn: when no graft command or tool ran, there is no tally, and you must never
+write one.
 When a \`graft build --deep\` is due, graft prints a \`[graft] … recommended\`
-note and the example tally gets a second line, "⚠️ 'graft build --deep'
-recommended (…)". Keep that line under the tally when you close your reply — it
+note and the example tally gets a second line, "⚠️ Run the 'graft build --deep'
+command — recommended (…)". Keep that line under the tally when you close your reply, each
+warning directly on the line below the previous one, with no blank line between
+them; end each line that has a warning under it with two spaces (a markdown line
+break), as graft's example does, so it is not folded into one line. Keep the
+wording too, so the user sees exactly which command to run — it
 is how the user learns the prose summaries are out of date. Do not run \`graft
 build --deep\` yourself unless asked: it is an LLM pass that needs an API key
 and costs tokens.
 When a saving could not be priced because graft knows no price for the model,
-the tally also gets a "⚠️ 'graft prices update' recommended (…)" line. Keep it
+the tally also gets a "⚠️ Run the 'graft prices update' command — recommended (…)" line. Keep it
 under the tally too; do not run \`graft prices update\` yourself unless asked.
+When the agent instructions in this repo are not the ones the installed graft
+version writes (graft was updated since \`graft init\` last ran here), the tally
+also gets a "⚠️ Run the 'graft init' command — recommended (…)" line. Keep it under the tally the
+same way; do not run \`graft init\` yourself unless asked — it rewrites files
+the user commits.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
 no API key, $0).`;
 }

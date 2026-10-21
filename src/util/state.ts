@@ -167,7 +167,8 @@ const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold'>> = 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as
  * an unknown key and preserved by {@link patchBuildConfig}, which spreads it. */
 const BUILD_CONFIG_NOTE =
-  "graft repository settings — see `graft build --help`. excludeDirs takes a NAME (themes), " +
+  "graft repository settings — `graft config list` shows them and what they do; `graft config --help` lists the " +
+  "commands that change them. excludeDirs takes a NAME (themes), " +
   "a root-relative PATH (src/themes), or a glob (src/themes*, src/themes/*, *src/themes). " +
   "To have saved tokens priced in $, pass --agent-model <your model id> on graft calls: " +
   "a model named per call cannot go stale the way a value pinned in this file would.";

@@ -19,6 +19,7 @@ import { kiloConfigTargets } from './kilo.js';
 import { claudeTargets } from '../claude/init.js';
 import { brand, type Brand } from '../brand.js';
 import { claudeGlobalTargets } from './claude-global.js';
+import { readStamp, wiredHostIds } from '../upkeep.js';
 
 /** Where a write lands. 'global' = outside the repo, affects every project. */
 export type WriteScope = 'repo' | 'global';
@@ -40,6 +41,10 @@ export interface HostPlan {
   id: string;
   name: string;
   detected: boolean;
+  /** A previous init wired this host here (its files are on disk, or the wiring
+   * stamp lists it). Re-running init must keep it: init retracts every host it
+   * is not given, so leaving it unticked would remove its instructions. */
+  wired?: boolean;
   writes: PlannedWrite[];
 }
 
@@ -71,17 +76,22 @@ export function planInit(repo: string, opts: { home?: string; ids?: string[] } =
   const home = opts.home ?? homedir();
   const probe = probeFor(home, repo);
   const detected = new Set(detectHosts(probe).map((h) => h.id));
+  // Detection asks "which editors does this machine have"; a repo committed by a
+  // teammate can be wired for an agent this machine lacks (AGENTS.md is detected
+  // only from ~/.codex and friends), and that wiring must still count.
+  const wired = new Set([...wiredHostIds(repo), ...(readStamp(repo)?.hosts ?? [])]);
   const name = hostWiringName(repo, brand());
 
   const plans: HostPlan[] = [
     // Repo writes plus the user-level copy under `~/.claude` — the picker and
     // `--dry-run` render 'global' writes in their own section, so a user sees
     // what lands outside the repo before agreeing to it.
-    { id: 'claude', name: 'Claude Code', detected: true, writes: [...claudeTargets(repo, brand()), ...claudeGlobalTargets(home, brand())] },
+    { id: 'claude', name: 'Claude Code', detected: true, wired: wired.has('claude'), writes: [...claudeTargets(repo, brand()), ...claudeGlobalTargets(home, brand())] },
     ...HOSTS.map((host) => ({
       id: host.id,
       name: host.name,
-      detected: detected.has(host.id),
+      detected: detected.has(host.id) || wired.has(host.id),
+      wired: wired.has(host.id),
       writes: [
         instructionTarget(repo, host, name),
         ...mcpTargets(repo, [host.id], { home, name }),

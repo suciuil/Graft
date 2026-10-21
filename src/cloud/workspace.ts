@@ -2,6 +2,14 @@
  * The Trail workspace this machine is connected to, and the calls that talk
  * to it (trail-cloud's `/api/cli/…`).
  *
+ * Trail cloud is PERMANENTLY OFF in this version: {@link cloudEnabled} is
+ * always false, {@link readCloud} ignores any `~/.trail/cloud.json`,
+ * {@link writeCloud} stores nothing, and every call below answers with
+ * {@link CLOUD_DISABLED} without touching the network. `TRAIL_CLOUD=1`,
+ * `TRAIL_URL`, `GRAFT_BRAIN_URL` and a hand-written `cloud.json` change none
+ * of that. The rest of this module describes the design the disabled code was
+ * written against.
+ *
  * One connection per machine, not per repo: a person signs in once, through
  * the link their agent offers, and picks which of their repos the workspace
  * gets. It lives in `~/.trail/cloud.json` next to their notes, never in a
@@ -15,7 +23,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { trailHome } from "../notes/home.js";
-import { readJson, writeJsonAtomic } from "../util/state.js";
 
 /** Trail's own front end and API. TRAIL_URL (or the older GRAFT_BRAIN_URL) moves it, for a local or self-hosted Trail. */
 const DEFAULT_TRAIL_URL = "https://app.trailhq.com";
@@ -48,27 +55,31 @@ function cloudPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(trailHome(env), "cloud.json");
 }
 
-/** The connection, or null when this machine hasn't connected a workspace. */
-export function readCloud(env: NodeJS.ProcessEnv = process.env): Cloud | null {
-  const c = readJson<Cloud>(cloudPath(env));
-  return c?.token && c.workspace?.slug ? c : null;
+/** Why every workspace call fails, and what `trail login` says. */
+export const CLOUD_DISABLED = "Trail cloud is permanently disabled in this version; nothing is sent to a Trail workspace";
+
+/** Always null: Trail cloud is permanently off, so a `cloud.json` (left by an
+ * older trail, or written by hand) is never read. The parameter is kept for
+ * existing callers. */
+export function readCloud(_env: NodeJS.ProcessEnv = process.env): Cloud | null {
+  return null;
 }
 
 /**
  * Whether the workspace side of trail is on: the sign-in link at the end of a
- * reply, and `login`, `logout` and `workspace`. Committing `.trail/` already
- * shares learnings with a team, so it stays off until signing in gives more
- * than that. TRAIL_CLOUD=1 turns it on; a machine already connected keeps it.
+ * reply, and `login`, `logout` and `workspace`. Always false: Trail cloud is
+ * permanently off, whatever TRAIL_CLOUD says and whatever is in `cloud.json`.
  */
-export function cloudEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.TRAIL_CLOUD === "1" || readCloud(env) !== null;
+export function cloudEnabled(_env: NodeJS.ProcessEnv = process.env): boolean {
+  return false;
 }
 
 /** Owner-only: the file holds the workspace token. */
 export const SECRET_FILE_MODE = 0o600;
 
-export function writeCloud(c: Cloud, env: NodeJS.ProcessEnv = process.env): void {
-  writeJsonAtomic(cloudPath(env), c, false, SECRET_FILE_MODE);
+/** Never stores a connection: Trail cloud is permanently off. */
+export function writeCloud(_c: Cloud, _env: NodeJS.ProcessEnv = process.env): void {
+  /* nothing: no workspace token is ever kept */
 }
 
 export function clearCloud(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -94,39 +105,19 @@ export function isError(x: unknown): x is ApiError {
   return typeof x === "object" && x !== null && typeof (x as ApiError).error === "string";
 }
 
+/**
+ * The one place a workspace request would leave this machine. Trail cloud is
+ * permanently off, so it never does: every call answers {@link CLOUD_DISABLED}
+ * and no `fetch` (the default or an injected one) is ever made.
+ */
 async function call<T>(
-  base: string,
-  method: "GET" | "POST" | "PUT",
-  path: string,
-  body: unknown,
-  opts: { token?: string; timeoutMs?: number; fetchImpl?: Fetch } = {},
+  _base: string,
+  _method: "GET" | "POST" | "PUT",
+  _path: string,
+  _body: unknown,
+  _opts: { token?: string; timeoutMs?: number; fetchImpl?: Fetch } = {},
 ): Promise<{ status: number; body: T } | ApiError> {
-  const f = opts.fetchImpl ?? fetch;
-  try {
-    const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
-    if (opts.token) headers.authorization = `Bearer ${opts.token}`;
-    const res = await f(`${base}${path}`, {
-      method,
-      headers,
-      body: method === "GET" ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
-    });
-    const text = await res.text();
-    let json: unknown = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      /* not JSON */
-    }
-    if (!res.ok) {
-      const msg = (json as { error?: unknown } | null)?.error;
-      return { error: typeof msg === "string" ? msg : `Trail answered ${res.status}`, status: res.status };
-    }
-    return { status: res.status, body: json as T };
-  } catch (err) {
-    const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-    return { error: timedOut ? "Trail didn't answer in time" : "couldn't reach Trail" };
-  }
+  return { error: CLOUD_DISABLED };
 }
 
 async function authed<T>(c: Cloud, method: "GET" | "POST" | "PUT", path: string, body: unknown, opts: { timeoutMs?: number; fetchImpl?: Fetch } = {}): Promise<T | ApiError> {
