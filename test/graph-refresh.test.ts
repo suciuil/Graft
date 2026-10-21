@@ -805,9 +805,16 @@ test("graft staleness prints the report, or JSON, and rejects a bad --top", asyn
   assert.match(bad.stderr, /--top "lots" is not a whole number/);
 });
 
-test("deepDueReason: 'no summaries yet' before any deep build, else the rounded share", () => {
-  assert.equal(deepDueReason(counts(0, 7, 7, 0)), "no summaries yet");
-  assert.equal(deepDueReason(counts(687, 866, 5353)), "29% of summaries out of date");
+test("deepDueReason: 'no summaries yet' before any deep build, else the rounded share — each with its scope and cost", () => {
+  assert.equal(
+    deepDueReason(counts(0, 7, 7, 0)),
+    "no summaries yet — none of the 7 nodes has a prose summary; it writes them in an LLM pass that needs an API key and costs tokens; file:line answers stay current either way",
+  );
+  assert.equal(
+    deepDueReason(counts(687, 866, 5353)),
+    "29% of summaries out of date — 1,553 of 5,353 nodes: 687 changed, 866 new; it refreshes their prose summaries in an LLM pass that needs an API key and costs tokens; file:line answers stay current either way",
+  );
+  assert.doesNotMatch(deepDueReason(counts(687, 866, 5353)), /[()]/, "the tally wraps the reason in parentheses already");
 });
 
 test("deepDueFor pairs the note with its reason, and is null whenever the note is", async () => {
@@ -816,7 +823,7 @@ test("deepDueFor pairs the note with its reason, and is null whenever the note i
   await buildGraph(d);
   const due = deepDueFor(d, { home });
   assert.equal(due?.note, deepNoteFor(d, { home }));
-  assert.equal(due?.reason, "no summaries yet");
+  assert.match(due?.reason ?? "", /^no summaries yet — none of the \d+ nodes has a prose summary/);
   patchBuildConfig(d, { deepStaleThreshold: 100 });
   assert.equal(deepDueFor(d, { home }), null);
 });
@@ -828,7 +835,7 @@ test("over MCP the savings tally carries the deep-build recommendation, until it
     // (and so a tally) printed at all.
     writeFileSync(join(d, "src", "big.ts"), "// padding line for the savings baseline\n".repeat(1500) + MUL);
     await buildGraph(d);
-    const tallyOf = (text: string) => text.slice(text.indexOf("\u{1F331}")).split("\n").slice(0, 3).join("\n");
+    const tallyOf = (text: string) => text.slice(text.indexOf("\u{1F331}")).split("\n").slice(0, 5).join("\n");
 
     const due = await callTool(d, "graft_find_code", { query: "mul" });
     assert.ok(due.text.includes("\u{1F331}"), `fixture: a saving was claimed\n${due.text}`);
@@ -836,7 +843,7 @@ test("over MCP the savings tally carries the deep-build recommendation, until it
     // and the deep-build line.
     assert.match(
       tallyOf(due.text),
-      /this turn\n⚠️ 'graft prices update' recommended \(no known price for the model used[^\n]*\n⚠️ 'graft build --deep' recommended \(no summaries yet\)/,
+      /this turn  \n⚠️ Run the 'graft prices update' command — recommended \(no known price for the model used[^\n]*  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet — /,
     );
 
     patchBuildConfig(d, { deepStaleThreshold: 100 });

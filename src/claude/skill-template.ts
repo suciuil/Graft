@@ -13,6 +13,52 @@ export function skillTemplate(brand: Brand = "graft"): string {
 }
 
 /**
+ * What to do when the agent cannot run commands: a chat mode with no terminal
+ * (GitHub Copilot's Ask mode was observed answering without graft at all). Shared
+ * by the skill and every host's instruction file so no agent is left out. MCP
+ * tools come first because hosts that reach graft over MCP (Kilo Code, or Claude
+ * Code with the server registered) keep the full query surface without a shell;
+ * the plain files are the last resort.
+ */
+export const NO_TERMINAL_FALLBACK = `Decide whether you can run commands from the tools you actually have, never
+from a guess about which chat mode you are in: if any tool runs a shell command
+(a terminal, bash, PowerShell, a run-in-terminal tool), you CAN run commands, so
+run graft with it. The fallback below is only for when no such tool exists, or a
+graft call through it actually failed.
+
+If you cannot run commands at all (a chat mode with no terminal, such as GitHub
+Copilot's Ask mode, or a read-only or planning mode), do not treat graft as
+unavailable, and do not fall back to listing source folders or reading READMEs.
+If this host exposes graft's MCP tools (\`graft_find_code\`, \`graft_find_all\`,
+\`graft_file_api\`, \`graft_trace_calls\`, \`graft_repo_map\`), use them: they answer
+the same queries as the commands. Otherwise read the graph as plain files with
+your file tools (read a file, list a folder):
+
+- List the \`graft/\` folder. Each top-level \`.md\` file is a concept node named
+  after the system it explains, with prose and the \`file:line\` spans it covers.
+  Open the ones the question is about. \`graft/INDEX.md\` may list only some of
+  them, so list the folder rather than relying on the index.
+- For code, browse \`graft/\` instead of the source tree. Every source file has a
+  card at the same path under \`graft/\` with the extension swapped for \`.md\`
+  (\`src/app/user.ts\` → \`graft/src/app/user.md\`; a repo-root file whose name
+  clashes with a concept node is under \`graft/_root/\`). A card lists each
+  symbol with its line span and signature, so list \`graft/src/…\`, not
+  \`src/…\`, and open a source file only at a span a card names.
+
+Cite the \`file:line\` spans the nodes and cards give. The files carry no ranking
+and none of the call edges behind \`graft callers\`, so say so when the answer
+needed them. Do not write a \`🌱 graft saved\` line in this mode: no graft command
+ran, so nothing was measured and any figure would be invented.
+
+Whenever you could not run graft commands (no tool runs them, or the graft call
+failed; never merely because you did not try), end your reply with this line,
+verbatim, as its last line. It is required whether or not you read graft's
+files, and even when the question did not need graft, because it is the only way
+the user learns that graft was not working properly here and how to fix it:
+
+ℹ️ To use graft properly, switch to Agent mode (or another mode that can run commands): graft could not run here, so it was used only partly or not at all.`;
+
+/**
  * When Claude Code loads the trail skill. It reads only the description up
  * front and opens the body when the description fits the moment, so the
  * description names every moment a trail command belongs to, not just code
@@ -181,6 +227,8 @@ every OS including Windows. There is no binary checked into the repo: never
 \`.\\graft.exe\`, \`./graft\`, or \`node graft.js\`. If \`graft\` is not found, fall
 back to \`npx -y @nanonets/graft <args>\`.
 
+${NO_TERMINAL_FALLBACK}
+
 ## The tools
 
 ### 1 · \`graft ask "<question>" --source\`: locate + understand (the default)
@@ -319,7 +367,8 @@ tally summing those numbers across every graft call you made, e.g.
 \`🌱 graft saved ~12,400 tokens this turn (3 calls)\`. A call with no such line
 (tiny files, where the pointers cost as much as the source) saved nothing, so
 skip it. This is the per-turn figure; the statusline carries the running
-session total.
+session total. When no graft command or tool ran this turn there is no tally:
+never write one from memory, from an earlier turn, or as an estimate.
 
 Each line also ends with an example tally, closing the sentence and ending in
 \`this turn\`. Use its **wording** verbatim, with \`~$X\` replaced by the summed
@@ -334,16 +383,25 @@ worse than none.
 
 When a \`graft build --deep\` is due (summaries missing, or more of them out of
 date than the repo's deep-threshold), the example tally gets a second line,
-\`⚠️ 'graft build --deep' recommended (29% of summaries out of date)\`. Keep that
-line, on its own line under the tally: it is the only place the user learns
+\`⚠️ Run the 'graft build --deep' command — recommended (29% of summaries out of date — …)\`. Keep that
+line directly under the tally, with no blank line between them, and end the tally
+line with two spaces (a markdown line break, as in graft's example) so a markdown
+chat view does not fold the two into one line: it is the only place the user learns
 that the prose summaries lag the code. Don't run \`graft build --deep\` yourself
 unless asked — it is an LLM pass that needs an API key and costs tokens.
 
 When a saving could not be priced because graft knows no price for the model,
-the example tally also gets a \`⚠️ 'graft prices update' recommended (…)\` line.
+the example tally also gets a \`⚠️ Run the 'graft prices update' command — recommended (…)\` line.
 Keep it under the tally too: \`graft prices update\` fetches LiteLLM's public
 price catalog once and stores it locally, so later savings are priced in dollars.
 Don't run it yourself unless asked.
+
+When the agent instructions in this repo are not the ones the installed graft
+version writes (graft was updated since \`graft init\` last ran here), the example
+tally also gets a \`⚠️ Run the 'graft init' command — recommended (…)\` line. Keep it under the tally
+the same way, so the user learns to re-run \`graft init\` and get the latest
+instructions. Don't run it yourself unless asked — it rewrites files the user
+commits.
 
 Pass \`--agent-model <your own model id>\` on your graft calls when you know it
 (e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices the

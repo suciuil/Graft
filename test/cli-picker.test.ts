@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { planInit } from '../src/hosts/plan.js';
+import { runHostsInit } from '../src/hosts/init.js';
 import {
   KEY_CTRL_C,
   KEY_DOWN,
@@ -98,6 +99,18 @@ test('claude starts checked, nothing else does', () => {
   assert.equal(state.rows[0].id, 'claude');
 });
 
+test('a re-run starts with the agents already wired here checked and shown, even ones this machine lacks', () => {
+  // A teammate wired Copilot and Kilo; this machine has neither installed. init
+  // retracts every agent it is not given, so enter must keep them, not remove them.
+  const repo = fresh(); const home = fresh();
+  runHostsInit(repo, { home, agents: ['copilot', 'kilo'], mcp: false, hooks: false, global: false });
+  const plan = planInit(repo, { home });
+  assert.ok(plan.find((p) => p.id === 'kilo')!.detected, 'a wired agent counts as detected');
+  const state = reducePicker(initialPickerState(plan, repo, home), 'enter');
+  assert.ok(state.done);
+  assert.deepEqual(pickedIds(state).sort(), ['claude', 'copilot', 'kilo']);
+});
+
 test('enter with no toggling wires claude only', () => {
   const repo = fresh(); const home = fullHome();
   const state = drive(repo, home, ['enter']);
@@ -115,6 +128,47 @@ test('down then space adds the second host', () => {
   const repo = fresh(); const home = fullHome();
   const state = drive(repo, home, ['down', 'space', 'enter']);
   assert.deepEqual(pickedIds(state), ['claude', 'agents']);
+});
+
+test('enter on a highlighted, unticked agent selects it and confirms', () => {
+  const repo = fresh(); const home = fullHome();
+  const state = drive(repo, home, ['down', 'enter']);
+  assert.ok(state.done);
+  assert.deepEqual(pickedIds(state), ['claude', 'agents']);
+});
+
+test('enter on an undetected agent shown with m selects it too', () => {
+  const repo = fresh(); const home = fresh(); // nothing installed
+  let state = initialPickerState(planInit(repo, { home }), repo, home);
+  state = reducePicker(state, 'more');
+  const cursor = visibleRows(state).findIndex((r) => r.id === 'cursor');
+  for (let i = 0; i < cursor; i++) state = reducePicker(state, 'down');
+  state = reducePicker(state, 'enter');
+  assert.ok(pickedIds(state).includes('cursor'));
+});
+
+test('enter never re-ticks an agent the user unticked', () => {
+  const repo = fresh(); const home = fullHome();
+  assert.deepEqual(pickedIds(drive(repo, home, ['space', 'enter'])), [], 'claude unticked stays unticked');
+  assert.deepEqual(pickedIds(drive(repo, home, ['all', 'all', 'down', 'enter'])), [], 'nor one `a` turned off');
+});
+
+test('enter on the consent row never opts in', () => {
+  const repo = fresh(); const home = fullHome();
+  let state = initialPickerState(planInit(repo, { home }), repo, home, { offerTelemetry: true });
+  state = reducePicker(state, 'up');
+  assert.equal(visibleRows(state)[state.cursor].id, TELEMETRY_ROW_ID);
+  state = reducePicker(state, 'enter');
+  assert.ok(state.done);
+  assert.equal(pickedTelemetry(state), false);
+});
+
+test('enter in the learnings picker only confirms', () => {
+  let state = learningsPickerState([{ title: 'a', forTeam: true, sessions: 2 }, { title: 'b', forTeam: false, sessions: 3 }]);
+  state = reducePicker(state, 'space');
+  state = reducePicker(state, 'enter');
+  assert.deepEqual(keptLearnings(state), [1]);
+  assert.match(renderPicker(state, false), /enter confirm/);
 });
 
 /** Rows on screen before `m`: the agents graft found, and nothing else. */
@@ -199,7 +253,7 @@ test('renderPicker marks the cursor and folds undetected hosts into one line', (
   assert.match(text, /› \[x\] claude/);
   assert.doesNotMatch(text, /\[ \] cursor/, 'an agent graft cannot find is folded away');
   assert.match(text, /\+ \d+ not detected \(.*cursor.*\) · m to show/);
-  assert.match(text, /space toggle · a all · m more · enter confirm/);
+  assert.match(text, /space toggle · a all · m more · enter select highlighted \+ confirm/);
   // Only the detected rows get a checkbox until `m`.
   assert.equal(text.split('\n').filter((l) => /\[[ x]\]/.test(l)).length, visibleRows(state).length);
 

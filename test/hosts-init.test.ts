@@ -251,3 +251,21 @@ test('CLI: --dry-run respects an explicit --agents list', () => {
   assert.doesNotMatch(out, /AGENTS\.md/);
   assert.doesNotMatch(out, /affects ALL repos/);
 });
+
+test('every agent is told what to do without a terminal: MCP tools first, then the graph as files', async () => {
+  const { HOSTS } = await import('../src/hosts/registry.js');
+  const { skillTemplate } = await import('../src/claude/skill-template.js');
+  const texts = [...HOSTS.map((h) => [h.id, h.content('graft')] as const), ['claude', skillTemplate('graft')] as const];
+  for (const [id, text] of texts) {
+    assert.match(text, /cannot run commands at all \(a chat mode with no terminal, such as GitHub\s+Copilot's Ask mode/, id);
+    assert.match(text, /exposes graft's MCP tools/, id);
+    assert.match(text, /List the `graft\/` folder\. Each top-level `\.md` file is a concept node/, id);
+    assert.match(text, /`src\/app\/user\.ts` → `graft\/src\/app\/user\.md`/, id);
+    assert.match(text, /list `graft\/src\/…`, not\s+`src\/…`/, id);
+    assert.match(text, /Do not write a `🌱 graft saved` line in this mode/, id);
+    assert.match(text, /end your reply with this line,\s+verbatim, as its last line\. It is required whether or not you read graft's\s+files/, id);
+    assert.match(text, /ℹ️ To use graft properly, switch to Agent mode \(or another mode that can run commands\): graft could not run here, so it was used only partly or not at all\./, id);
+  }
+  for (const h of HOSTS) assert.match(h.content('trail'), /cannot run commands at all/, `${h.id} under trail`);
+  assert.match(skillTemplate('trail'), /cannot run commands at all/, 'claude under trail');
+});

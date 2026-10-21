@@ -130,11 +130,36 @@ export function setDeepDue(reason: string | null): void {
   callScope().deepDue = reason && reason.trim() ? reason.trim() : null;
 }
 
+/**
+ * Separator before each warning line in the tally: a markdown hard line break
+ * (two trailing spaces, then the newline). A bare newline is folded into the
+ * previous line by chat hosts that render markdown (GitHub Copilot in IntelliJ),
+ * so the warnings ran on after the savings figure; a blank line fixed that but
+ * spaced the block out. The hard break keeps each line directly under the last,
+ * and in a plain terminal it is just a newline.
+ */
+const WARNING_BREAK = '  \n';
+
 /** The tally's deep-build line — on its own line, under the savings — or "" when
  * no deep build is due. */
 function deepLine(): string {
   const reason = callScope().deepDue;
-  return reason ? `\n\u26A0\uFE0F '${cmd('graft build --deep')}' recommended (${reason})` : '';
+  return reason ? `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft build --deep')}' command \u2014 recommended (${reason})` : '';
+}
+
+/**
+ * Record that this call's repo holds agent instructions from another graft
+ * version, with a short reason, or null when they are current. Rides in the
+ * example tally for the same reason as {@link setDeepDue}.
+ */
+export function setInitDue(reason: string | null): void {
+  callScope().initDue = reason && reason.trim() ? reason.trim() : null;
+}
+
+/** The tally's re-init line, or "" when the installed instructions are current. */
+function initLine(): string {
+  const reason = callScope().initDue;
+  return reason ? `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft init')}' command \u2014 recommended (${reason})` : '';
 }
 
 /**
@@ -148,7 +173,7 @@ function deepLine(): string {
 function pricesLine(rate: InputRate | null): string {
   if (rate !== null) return '';
   return (
-    `\n\u26A0\uFE0F '${cmd('graft prices update')}' recommended (no known price for the model used: it fetches ` +
+    `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft prices update')}' command \u2014 recommended (no known price for the model used: it fetches ` +
     'model prices from LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)'
   );
 }
@@ -252,7 +277,7 @@ function modelTableBlock(savedTokens: number): string {
  * nothing for it to copy by mistake.
  */
 function tallyExample(savedTokens: number, rate: InputRate | null): string {
-  return savingsTally(savedTokens, rate) + pricesLine(rate) + deepLine();
+  return savingsTally(savedTokens, rate) + pricesLine(rate) + initLine() + deepLine();
 }
 
 function savingsTally(savedTokens: number, rate: InputRate | null): string {

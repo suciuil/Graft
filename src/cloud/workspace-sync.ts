@@ -16,6 +16,10 @@
  *
  * Commands never wait on any of this: when something changed, a detached
  * `_trail-sync` child does it.
+ *
+ * Trail cloud is PERMANENTLY OFF in this version (see `cloudEnabled`): no use
+ * is written to the outbox, nothing is uploaded, and no `_trail-sync` child is
+ * spawned, even when a caller hands in a connection of its own.
  */
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -27,7 +31,7 @@ import { knownRepos, repoName, repoPlace, trailHome } from "../notes/home.js";
 import { LEARNINGS_DIR, learningFiles, readLearningFile } from "../notes/repo-trail.js";
 import { parseNote } from "../notes/notes.js";
 import { cacheDir, readJson, writeJsonAtomic } from "../util/state.js";
-import { isError, postActivity, readCloud, uploadLearnings, type ActivityEvent, type ApiError, type Cloud, type UploadedLearning } from "./workspace.js";
+import { CLOUD_DISABLED, cloudEnabled, isError, postActivity, readCloud, uploadLearnings, type ActivityEvent, type ApiError, type Cloud, type UploadedLearning } from "./workspace.js";
 
 /** A failed sync is retried after this long, not on every command. */
 const RETRY_MS = 5 * 60 * 1000;
@@ -104,6 +108,7 @@ export async function syncRepo(
   cloud: Cloud,
   opts: { fetch?: boolean; fetchImpl?: typeof fetch } = {},
 ): Promise<{ repo: string; learnings: number; added: number } | ApiError> {
+  if (!cloudEnabled()) return { error: CLOUD_DISABLED };
   const place = repoPlace(checkout);
   if (!cloud.repos.includes(place.key)) return { error: "this repo isn't in your workspace" };
   if (opts.fetch !== false) refreshBranches(place.checkout);
@@ -149,6 +154,7 @@ function sendable(e: ActivityEvent, cloud: Cloud): boolean {
  * connected, or another repo, and nothing is written. Never throws.
  */
 export function recordActivity(e: ActivityEvent, cloud: Cloud | null = readCloud()): void {
+  if (!cloudEnabled()) return;
   if (!cloud || !cloud.repos.includes(e.repo)) return;
   try {
     const p = outboxPath();
@@ -189,6 +195,7 @@ function outboxHasEvents(): boolean {
  * (left by an older trail), is dropped, never sent.
  */
 export async function flushActivity(cloud: Cloud, fetchImpl?: typeof fetch): Promise<number> {
+  if (!cloudEnabled()) return 0;
   const p = outboxPath();
   if (!outboxHasEvents()) return 0;
   const sending = `${p}.${process.pid}.sending`;
@@ -240,6 +247,7 @@ export function syncIsDue(checkout: string, now = Date.now()): boolean {
  * there are uses waiting to go. Never waits, never throws.
  */
 export function maybeSyncInBackground(dir: string, now = Date.now()): boolean {
+  if (!cloudEnabled()) return false;
   try {
     const cloud = readCloud();
     if (!cloud) return false;
@@ -259,6 +267,7 @@ export function maybeSyncInBackground(dir: string, now = Date.now()): boolean {
 
 /** `_trail-sync`: what the background child does. */
 export async function runSyncChild(dir: string): Promise<void> {
+  if (!cloudEnabled()) return;
   const cloud = readCloud();
   if (!cloud) return;
   const checkout = repoPlace(dir).checkout;

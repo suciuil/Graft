@@ -3,14 +3,13 @@
  *
  * Two clones of one repo share a remote. What one person commits on a pushed
  * branch reaches the other's `ask` before it merges, and the files that
- * branch changes show as overlap. A connected machine uploads every learning
- * in a workspace repo's `.trail/`, branches included, and sends the uses it
- * recorded.
+ * branch changes show as overlap. Trail cloud is permanently off, so nothing
+ * of it is ever uploaded or recorded to send, even with a connection in hand.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BRAND_ENV } from "../src/brand.js";
@@ -180,59 +179,42 @@ test("not connected, a use is never written down: no outbox, cloud features on o
   assert.equal(existsSync(outbox()), false);
 });
 
-test("connected, only the workspace's repos are written down, and sent once", async () => {
+test("Trail cloud is permanently off: a connection handed in records no use and sends nothing", async () => {
   const { cloud, sent, fetchImpl } = cloudFor(["github.com/acme/retry"]);
   cloud.linkedAt = Date.now() - 1000;
-  writeCloud(cloud);
+  process.env.TRAIL_CLOUD = "1";
   try {
-    recordActivity(use("github.com/acme/retry", "search"));
-    recordActivity(use("github.com/acme/other", "search"));
-    recordActivity(use("github.com/acme/retry", "check"));
-    assert.equal(readFileSync(outbox(), "utf8").trim().split("\n").length, 2, "the other repo's search stays on this machine");
-    assert.equal(await flushActivity(cloud, fetchImpl), 2);
-    assert.equal(sent[0]!.path, "/api/cli/activity");
-    assert.deepEqual(sent[0]!.body.events.map((e: any) => [e.repo, e.kind]), [["github.com/acme/retry", "search"], ["github.com/acme/retry", "check"]]);
-    assert.equal(existsSync(outbox()), false, "sent, so gone");
-    assert.equal(await flushActivity(cloud, fetchImpl), 0, "nothing twice");
+    recordActivity(use("github.com/acme/retry", "search"), cloud);
+    recordActivity(use("github.com/acme/retry", "check"), cloud);
+    assert.equal(existsSync(outbox()), false, "nothing written down to send later");
+    assert.equal(await flushActivity(cloud, fetchImpl), 0);
+    assert.equal(sent.length, 0);
   } finally {
-    clearCloud();
+    delete process.env.TRAIL_CLOUD;
   }
 });
 
-test("what an older trail queued before connecting, or for another repo, is dropped at send, not sent", async () => {
+test("what an older trail left in the outbox is never sent", async () => {
   const { cloud, sent, fetchImpl } = cloudFor(["github.com/acme/retry"]);
-  cloud.linkedAt = Date.parse("2026-10-10T12:00:00Z");
-  const lines = [
-    use("github.com/acme/retry", "search", "2026-10-10T11:59:59Z"),
-    use("github.com/acme/secret", "search", "2026-10-10T12:30:00Z"),
-    use("github.com/acme/retry", "check", "2026-10-10T12:30:00Z"),
-  ];
-  writeFileSync(outbox(), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  assert.equal(await flushActivity(cloud, fetchImpl), 1);
-  assert.deepEqual(sent[0]!.body.events.map((e: any) => [e.repo, e.kind, e.at]), [["github.com/acme/retry", "check", "2026-10-10T12:30:00Z"]]);
-  assert.equal(existsSync(outbox()), false, "the rest is gone too");
-});
-
-test("a failed send keeps the uses for next time", async () => {
-  const { cloud } = cloudFor(["github.com/acme/retry"]);
-  recordActivity(use("github.com/acme/retry", "search"), cloud);
-  const down = (async () => {
-    throw new Error("offline");
-  }) as typeof fetch;
-  assert.equal(await flushActivity(cloud, down), 0);
-  assert.equal(readFileSync(outbox(), "utf8").trim().split("\n").length, 1);
+  writeFileSync(outbox(), JSON.stringify(use("github.com/acme/retry", "search")) + "\n");
+  assert.equal(await flushActivity(cloud, fetchImpl), 0);
+  assert.equal(sent.length, 0);
   rmSync(outbox(), { force: true });
-  mkdirSync(process.env.TRAIL_HOME!, { recursive: true });
 });
 
-// Windows has no owner-only file mode to check; the folder's ACL is what guards it there.
-test("the workspace token is written readable by its owner only", { skip: process.platform === "win32" }, async () => {
-  const { statSync } = await import("node:fs");
-  const { writeCloud } = await import("../src/cloud/workspace.js");
+test("a workspace repo's learnings are never uploaded", async () => {
+  const { anirudh } = team();
+  writeNote(anirudh, { title: "x", body: BODY, author: "Anirudh", date: "2026-10-09" });
+  const { cloud, sent, fetchImpl } = cloudFor(["github.com/acme/retry"]);
+  const res = await syncRepo(anirudh, cloud, { fetch: false, fetchImpl });
+  assert.ok("error" in res && /permanently disabled/.test(res.error));
+  assert.equal(sent.length, 0);
+});
+
+test("no workspace token is ever written to disk", () => {
   const { cloud } = cloudFor([]);
   writeCloud(cloud);
-  const mode = statSync(join(process.env.TRAIL_HOME!, "cloud.json")).mode & 0o777;
-  assert.equal(mode, 0o600);
+  assert.equal(existsSync(join(process.env.TRAIL_HOME!, "cloud.json")), false);
 });
 
 test("a learning on an unmerged branch shows its first lines and where to read it, never its whole text", async () => {

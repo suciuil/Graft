@@ -16,6 +16,10 @@
  *
  * Connected, a repo with learnings that isn't in the workspace gets one
  * question, ever: add it?
+ *
+ * Trail cloud is PERMANENTLY OFF in this version (see `cloudEnabled`): no link
+ * is offered, no background wait is spawned, and nothing is registered with
+ * Trail, whatever TRAIL_CLOUD says.
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -28,7 +32,7 @@ import { currentTranscript } from "../notes/session-cost.js";
 import { durationBucket } from "../telemetry/contract.js";
 import { track } from "../telemetry/track.js";
 import { readJson, writeJsonAtomic } from "../util/state.js";
-import { claimHandoff, readCloud, registerHandoff, SECRET_FILE_MODE, trailUrl, writeCloud, type ClaimResult, type HandoffRepo } from "./workspace.js";
+import { claimHandoff, cloudEnabled, readCloud, registerHandoff, SECRET_FILE_MODE, trailUrl, writeCloud, type ClaimResult, type HandoffRepo } from "./workspace.js";
 import { dropActivity, syncWorkspaceRepos } from "./workspace-sync.js";
 
 /** What the link says, in turn: one per session, so it never reads the same twice running. */
@@ -137,6 +141,7 @@ export function cloudLines(repo: string, opts: NudgeOptions): string[] {
   try {
     if (brand() !== "trail") return [];
     const env = opts.env ?? process.env;
+    if (!cloudEnabled(env)) return [];
     const now = opts.now ?? Date.now();
     const agent = opts.agent ?? !process.stdout.isTTY;
     const st = readState(env);
@@ -217,6 +222,7 @@ function addRepoLines(repo: string, workspace: string, repos: string[], st: Nudg
 
 /** Start the background wait, unless one is already running. */
 export function startWaiting(env: NodeJS.ProcessEnv = process.env, now = Date.now()): void {
+  if (!cloudEnabled(env)) return;
   const st = readState(env);
   if (st.waitingSince !== undefined && now - st.waitingSince < WAIT_MS) return;
   writeState({ waitingSince: now }, env);
@@ -254,6 +260,7 @@ export interface WaitOptions {
  */
 export async function waitForConnect(opts: WaitOptions = {}): Promise<ClaimResult | null> {
   const env = opts.env ?? process.env;
+  if (!cloudEnabled(env)) return null;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const started = now();
