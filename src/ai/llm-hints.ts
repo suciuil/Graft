@@ -16,6 +16,14 @@ import { baseUrlCandidates } from "./llm/openai.js";
 import { anthropicBaseUrl } from "./llm/anthropic.js";
 import { DEFAULT_LITELLM_BASE_URL } from "./llm/litellm.js";
 import type { ProviderKind } from "./llm/factory.js";
+import {
+  DATABRICKS_KNOWN_MODELS,
+  databricksRoot,
+  isDatabricksGatewayUrl,
+  listDatabricksModels,
+  normalizeDatabricksModel,
+  type DatabricksLister,
+} from "./llm/databricks.js";
 import { cmd } from "../brand.js";
 
 export type LlmProblem = "unreachable" | "auth" | "model";
@@ -154,8 +162,17 @@ async function listAnthropicModels(cfg: ResolvedConfig): Promise<string[]> {
  * fallback wire format too when the provider was defaulted. Throws when neither
  * answers — many gateways do not expose the listing.
  */
-export async function listEndpointModels(cfg: ResolvedConfig): Promise<string[]> {
+export async function listEndpointModels(cfg: ResolvedConfig, databricksLister?: DatabricksLister): Promise<string[]> {
   if (!cfg.apiKey) throw new Error("no API key");
+  if (cfg.databricks) {
+    const listings = await listDatabricksModels(cfg.databricks.root, cfg.apiKey, databricksLister);
+    if (listings.some((l) => l.ids.length > 0)) {
+      // The gateway refuses `GET /models` on some routes (OpenAI, MLflow) even though it serves chat on
+      // them; once one route has accepted the key, offer the known ids for the routes that listed nothing.
+      return listings.flatMap((l) => (l.ids.length > 0 ? l.ids : [...DATABRICKS_KNOWN_MODELS[l.route]]));
+    }
+    throw listings.find((l) => l.error)?.error ?? new Error("the endpoint listed no models");
+  }
   const wires: ProviderKind[] = [cfg.provider];
   if (cfg.providerFallback && cfg.providerFallback.provider !== cfg.provider) wires.push(cfg.providerFallback.provider);
   let lastErr: unknown;
@@ -209,7 +226,13 @@ export function settingSource(kind: SettingKind, config: EngineConfig, cfg: Reso
   const flagValue = kind === "url" ? config.baseUrl : kind === "key" ? config.apiKey : config.model;
   if (flagValue) return { flag: s.flag };
   const resolved = kind === "url" ? cfg.baseUrl : kind === "key" ? cfg.apiKey : cfg.model;
-  const name = s.envs.find((n) => env[n] && env[n] === resolved);
+  const name = s.envs.find(
+    (n) =>
+      env[n] &&
+      (env[n] === resolved ||
+        (kind === "url" && cfg.databricks && isDatabricksGatewayUrl(env[n]) && databricksRoot(env[n]!) === cfg.databricks.root) ||
+        (kind === "model" && cfg.databricks && normalizeDatabricksModel(env[n]!) === resolved)),
+  );
   return name ? { env: name } : {};
 }
 
@@ -267,7 +290,8 @@ export async function llmFailureHints(messages: (string | undefined)[], ctx: Hin
   for (const problem of problems) {
     if (problem === "unreachable") {
       const s = settingSource("url", ctx.config, cfg, env);
-      const where = s.flag || s.env ? fromText(s, "GRAFT_BASE_URL") : `GRAFT_BASE_URL is not set, so graft used the ${cfg.provider} default`;
+      const fallback = cfg.databricks ? "the Databricks AI Gateway" : `the ${cfg.provider}`;
+      const where = s.flag || s.env ? fromText(s, "GRAFT_BASE_URL") : `GRAFT_BASE_URL is not set, so graft used ${fallback} default`;
       lines.push(
         `• The LLM endpoint ${url} could not be reached (${where}).`,
         `  Check the URL, your network/VPN and proxy, then set GRAFT_BASE_URL to a reachable endpoint${dropFlag(s)}`,

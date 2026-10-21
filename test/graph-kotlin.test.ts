@@ -3,7 +3,7 @@
  * grammar, and Kotlin's place in both `--deep` LLM passes.
  *
  * Kotlin has two grammars: the registry `tree-sitter-kotlin` (always installed) and
- * a newer one built from the sibling `../tree-sitter-kotlin` checkout
+ * a newer one built from the sibling `../tree-sitter-kotlin-grammar` checkout
  * (`tree-sitter-kotlin-local`). The local one wins whenever it is built — the
  * registry grammar collapses ordinary class headers (a primary constructor plus a
  * `: Base(…)` clause, a secondary constructor delegating to `this(…)`) into ERROR

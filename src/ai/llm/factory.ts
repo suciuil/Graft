@@ -15,7 +15,11 @@
  * of a bare custom base URL.
  *
  * `llm-incubator` is the same over `openai`, pointed at the LLM Incubator
- * gateway; it is also the default when no provider and no base URL are configured.
+ * gateway when selected explicitly.
+ *
+ * With no provider and no base URL configured, graft uses the Databricks AI
+ * Gateway ({@link DEFAULT_BASE_URL}, see databricks.ts), which serves the
+ * Anthropic and OpenAI wires under per-model routes.
  */
 import type { ChatModel, ChatRequest, ChatResponse } from "./types.js";
 import { OpenAIChatModel, isModelNotFound } from "./openai.js";
@@ -23,9 +27,14 @@ import { AnthropicChatModel } from "./anthropic.js";
 import { LiteLLMChatModel } from "./litellm.js";
 import { OrcaRouterChatModel } from "./orcarouter.js";
 import { isRelayBalanceError } from "./balance-retry.js";
+import { DATABRICKS_BASE_URL } from "./databricks.js";
 
 export type ProviderKind = "openai" | "anthropic" | "litellm" | "orcarouter" | "llm-incubator";
 
+/** The endpoint used when no base URL and no provider are configured. */
+export const DEFAULT_BASE_URL = DATABRICKS_BASE_URL;
+
+/** The LLM Incubator gateway, used only when `--provider llm-incubator` is chosen explicitly. */
 export const LLM_INCUBATOR_BASE_URL = "https://llm-gateway.ve42034x.automotive-wan.com";
 
 export interface ChatModelConfig {
@@ -35,8 +44,10 @@ export interface ChatModelConfig {
   /** Model ids tried in order when the endpoint does not serve `model`. */
   modelFallbacks?: string[];
   baseUrl?: string;
-  /** Extra default headers for OpenAI-compatible endpoints (e.g. OpenRouter `X-Title`). */
+  /** Extra default headers (e.g. OpenRouter `X-Title`, Databricks request tags). */
   headers?: Record<string, string>;
+  /** Anthropic wire: extra headers for one model id (Databricks' provider-service header). */
+  modelHeaders?: (model: string) => Record<string, string> | undefined;
   /** Second wire format to try, same key and base URL, when `provider` is rejected outright. */
   providerFallback?: { provider: ProviderKind; model: string };
   /** Send the key as `Authorization: Bearer` on the Anthropic wire (an ANTHROPIC_AUTH_TOKEN), not `x-api-key`. */
@@ -123,6 +134,8 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         model: cfg.model,
         modelFallbacks: cfg.modelFallbacks,
         baseUrl: cfg.baseUrl,
+        headers: cfg.headers,
+        modelHeaders: cfg.modelHeaders,
       });
     case "openai":
       return new OpenAIChatModel({

@@ -40,7 +40,10 @@ export type Kind =
   | "rule"
   | "element"
   | "view"
-  | "heading";
+  | "heading"
+  // A CMake build target (add_library / add_executable / add_custom_target):
+  // what target_link_libraries and add_dependencies name.
+  | "target";
 
 /** How confident we are an edge is true, best-first. The hand-written AST
  * resolver assigns `extracted`/`inferred`; the opt-in LSP enrichment pass

@@ -4,6 +4,15 @@
 
 ### Changed
 
+- **`graft build --deep` no longer asks for a model on every run.** On the
+  Databricks AI Gateway it used to list every model and ask which to use each
+  time, even with `GRAFT_MODEL` set. It now uses the model already set —
+  `--model`, `GRAFT_MODEL`, or the default (`claude-sonnet-5-5`) — whenever the
+  gateway serves it for your key, and says which one and where it came from
+  (`graft model` picks another). It asks only when that model is not among the
+  ones the gateway lists, or when the default cannot be checked because its
+  route lists nothing.
+
 - **Telemetry is permanently disabled.** Nothing is recorded or sent, and it
   cannot be turned on: the gate always answers "off", whatever the publish-time
   key, a setting saved by an older version, or the environment says.
@@ -85,6 +94,36 @@
   id (`gemini-3.8-flash`) and another as its display name (`Gemini 3.8 Flash`).
 
 ### Added
+
+- **The newer Kotlin grammar is built again.** `tree-sitter-kotlin-local` is back
+  in `optionalDependencies`, now pointing at `../tree-sitter-kotlin-grammar`
+  (fwcd/tree-sitter-kotlin 0.4); `../tree-sitter-kotlin` holds the KTreeSitter
+  bindings, not a grammar. `npm run build:grammars` compiles, packs and vendors it
+  like the other native grammars, so `.kt`/`.kts` parse with it instead of the
+  registry grammar (0.3.8), which stays the fallback.
+
+- **CMake support (depth tier).** `CMakeLists.txt` and `*.cmake` files are
+  indexed through the optional `tree-sitter-cmake` grammar
+  (`file:../tree-sitter-cmake`, built by `npm run build:grammars` like the
+  others): `function()` and `macro()` definitions, `add_library` /
+  `add_executable` / `add_custom_target` as `target` nodes, `option()` switches,
+  call edges between functions and macros (case-insensitive, as CMake is),
+  `target_link_libraries` / `add_dependencies` / `ALIAS` as references between
+  targets, and `include()` / `add_subdirectory()` as imports resolved to the
+  in-repo file (a bare module name to the one `<Name>.cmake` in the repo).
+  `CMakeLists.txt` is claimed by its exact name, so no other `.txt` file is
+  indexed.
+
+- **`graft languages`: which languages graft indexes, and how well.** One row
+  per language with its level of support on this install — `full` (a
+  hand-written extractor), `broad` (generic tree-sitter tags: symbols and
+  calls), `symbols`, `structural` (data and markup), `file-only`, or `skipped`
+  (an optional grammar that isn't built) — plus whether it extracts symbols,
+  calls, imports, inheritance and typed member calls, the language server
+  `graft build --lsp` would use, and its extensions. The level is the one a
+  build really gets: a native parser that won't load shows its WASM stand-in's
+  level and the install that fixes it. `--json` prints the rows. No repo, key
+  or LLM needed.
 
 - **`graft init` follows VS Code workspaces.** When the init directory holds a
   `.code-workspace` file, init asks whether to wire and build each folder the

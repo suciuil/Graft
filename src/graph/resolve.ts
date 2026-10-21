@@ -34,6 +34,10 @@ const PY_CTOR_KINDS: Kind[] = ["class"];
  * implicit-self widening) have found nothing. */
 const SWIFT_EXT = /\.swift$/i;
 const SWIFT_CTOR_KINDS: Kind[] = ["class", "struct", "enum"];
+/** CMake build files: `*.cmake` modules and `CMakeLists.txt` (matched by name). */
+const CMAKE_FILE = /(^|[/\\])cmakelists\.txt$|\.cmake$/i;
+/** What a CMake dependency name (target_link_libraries, add_dependencies) can mean. */
+const CMAKE_TARGET_KINDS: Kind[] = ["target"];
 
 /**
  * Languages whose symbols can genuinely reach each other. A call edge may not
@@ -128,6 +132,10 @@ export function resolveEdges(
   // node ids. A `use App\Models\User` names a PSR-4 class whose file mirrors the namespace
   // tail under some (unknown) source root, so the suffix is the portable key.
   const phpFilesBySuffix = new Map<string, string[]>();
+  // CMake module resolution: `include(Helpers)` names a module by its bare name, found
+  // on CMAKE_MODULE_PATH (usually `cmake/`) — so `Helpers.cmake` anywhere in the repo,
+  // keyed by its lower-cased basename without the extension.
+  const cmakeModules = new Map<string, string[]>();
   const hasGoModules = !!opts.goModules?.length;
   for (const n of nodes) {
     if (n.kind === "file") {
@@ -150,6 +158,7 @@ export function resolveEdges(
         const parts = toPosixPath(n.path).split("/");
         for (let i = 0; i < parts.length; i++) push(phpFilesBySuffix, parts.slice(i).join("/"), n.id);
       }
+      if (/\.cmake$/i.test(n.path)) push(cmakeModules, posix.basename(toPosixPath(n.path)).slice(0, -6).toLowerCase(), n.id);
       {
         const p = toPosixPath(n.path);
         if (p === "lib.rs" || p === "main.rs") rustCrateRoots.push("");
@@ -216,7 +225,9 @@ export function resolveEdges(
                 ? resolveRustUse(e.specifier, e.file, byId, rustCrateRoots)
                 : e.file.endsWith(".php")
                   ? resolvePhpUse(e.specifier, phpFilesBySuffix)
-                  : resolveImport(e.specifier, e.file, byId);
+                  : CMAKE_FILE.test(e.file)
+                    ? resolveCmakeImport(e.specifier, e.file, byId, cmakeModules)
+                    : resolveImport(e.specifier, e.file, byId);
       add(e.source, target, "imports", "extracted");
     } else if (e.relation === "extends" || e.relation === "implements") {
       // `implements` also resolves to a `trait` — PHP models trait composition
@@ -257,6 +268,11 @@ export function resolveEdges(
         if (hit && hit.id !== e.source && anno?.signature?.includes("@interface"))
           add(e.source, hit.id, "references", hit.confidence);
         else add(e.source, e.name, "references", "inferred");
+      } else if (CMAKE_FILE.test(e.file)) {
+        // CMake target_link_libraries / add_dependencies / ALIAS: the name of another
+        // target. An external library (`Threads::Threads`, `m`) finds nothing and drops.
+        const hit = resolveName(e.name, e.file, CMAKE_TARGET_KINDS, perFileName, globalName);
+        if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (byId.get(e.source)?.origin === "generic") {
         // Breadth tier: a bare-name structural reference (extends / implements /
         // object-creation / module alias) the grammar marked but cannot type. Resolve
@@ -539,6 +555,36 @@ function resolveJavaImport(spec: string, filesBySuffix: Map<string, string[]>): 
     if (enclosing) return enclosing;
   }
   return spec;
+}
+
+/**
+ * Resolve a CMake `include()` / `add_subdirectory()` target to an in-repo file node.
+ * extract.ts has already turned `add_subdirectory(src)` into `src/CMakeLists.txt`.
+ *
+ * A path (`cmake/Helpers.cmake`, `src/CMakeLists.txt`) is relative to the including
+ * file's directory, which is CMake's own current source dir for a CMakeLists.txt.
+ * A bare module name (`include(Helpers)`) is looked up on CMAKE_MODULE_PATH, which
+ * graft cannot evaluate: a UNIQUE `Helpers.cmake` in the repo is taken, and anything
+ * else — a CMake-shipped module like `CTest` or `GNUInstallDirs`, or two candidates —
+ * stays the raw name. A path built from a variable (`${CMAKE_CURRENT_LIST_DIR}/x.cmake`)
+ * has its variable prefix dropped first, since every such prefix names a directory the
+ * including file can reach relative to itself.
+ */
+function resolveCmakeImport(
+  spec: string,
+  file: string,
+  byId: Map<string, NodeV1>,
+  modules: Map<string, string[]>,
+): string {
+  const dir = posix.dirname(toPosixPath(file));
+  const path = toPosixPath(spec.replace(/^\$\{CMAKE_CURRENT_(?:LIST|SOURCE)_DIR\}[/\\]?/, ""));
+  if (path.includes("${") || path.includes("$<")) return spec;
+  if (path.includes("/") || /\.cmake$/i.test(path) || /cmakelists\.txt$/i.test(path)) {
+    const joined = posix.normalize(posix.join(dir === "." ? "" : dir, path));
+    return byId.has(joined) ? joined : spec;
+  }
+  const hits = modules.get(path.toLowerCase());
+  return hits && hits.length === 1 ? hits[0] : spec;
 }
 
 /**

@@ -482,11 +482,15 @@ compiler-grade layer, all `$0` and deterministic (no model, no key):
   **TypeScript / JavaScript** (incl. JSX & TSX), **Python**, **Go**, **Java**,
   **Kotlin** (`.kt`/`.kts`: classes, interfaces, enum/annotation classes,
   objects and companions, secondary constructors, typealiases, top-level
-  `val`/`var`; parsed with a locally built `tree-sitter-kotlin` when present,
-  else the registry grammar), **PHP**, **Swift** (classes, structs, enums, actors, protocols;
+  `val`/`var`; parsed with the locally built `tree-sitter-kotlin` 0.4 from
+  `../tree-sitter-kotlin-grammar` when present, else the registry grammar), **PHP**, **Swift** (classes, structs, enums, actors, protocols;
   extension members attach to the extended type), **R** (`.R`/`.r`: plain
   functions, S3/S4/R6 classes and methods, roxygen `@export`,
-  `library()`/`source()` imports), and **Vue** single-file components (their
+  `library()`/`source()` imports), **CMake** (`CMakeLists.txt`, `*.cmake`:
+  `function()`/`macro()` definitions, `add_library`/`add_executable` targets,
+  calls between them, `target_link_libraries` as target references,
+  `include()`/`add_subdirectory()` as imports; needs the optional
+  `tree-sitter-cmake` grammar built), and **Vue** single-file components (their
   `<script>` blocks go through the TypeScript extractor).
 
 - **Broad**: symbols (functions, classes, methods, types, …) plus name-resolved
@@ -507,8 +511,12 @@ compiler-grade layer, all `$0` and deterministic (no model, no key):
   **gopls** (Go), **pyright** (Python), **typescript-language-server** (TS/JS).
   It's best-effort: with no server installed the graph is unchanged.
 
-Twenty-three languages, plus Vue single-file components. A file whose language isn't listed is skipped, not
-indexed. Adding a broad-tier language is a small contribution; see
+Twenty-four languages, plus Vue single-file components. A file whose language isn't listed is skipped, not
+indexed. `graft languages` prints this list as a table for your install: each
+language's level (`full`, `broad`, `symbols`, `structural`, `file-only`, or
+`skipped` when an optional grammar isn't built), whether it gets symbols,
+calls, imports, inheritance and typed member calls, the `--lsp` server, and
+the extensions (`--json` for scripts). Adding a broad-tier language is a small contribution; see
 [CREDITS.md](CREDITS.md) for the folks who added the current set.
 
 ---

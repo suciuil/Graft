@@ -144,6 +144,7 @@ export class Graft {
         modelFallbacks: this.cfg.modelFallbacks,
         baseUrl: this.cfg.baseUrl,
         headers: this.cfg.headers,
+        modelHeaders: this.cfg.modelHeaders,
         providerFallback: this.cfg.providerFallback,
         bearerAuth: this.cfg.bearerAuth,
       }),
