@@ -99,7 +99,9 @@ import {
 } from "./util/state.js";
 import { normalizePathPrefix } from "./util/paths.js";
 import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
-import { aggregateSavings, currentModel, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, setAgentModel, setHostModel } from "./claude/ledger.js";
+import { readRepoRegistry, registerDiscovered, repoRegistryPath } from "./claude/repo-registry.js";
+import { knownFolders } from "./hosts/known-folders.js";
+import { aggregateAllSavings, aggregateSavings, currentModel, formatAllSavingsReport, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, registerExistingLedger, setAgentModel, setHostModel } from "./claude/ledger.js";
 import { listSessionIds, readSession, sessionDir } from "./claude/state.js";
 import { costLabel, listNotes, noteName, notePlace, noteTargets, readingTokens, savedByNote, commitLines, PERSONAL_SAVED_LINE, PR_SPEEDUP, SECTIONS, tokensWorthSaying, sectionLead, shortDate, tokensLabel, writeNote, type Note, mentionedFiles } from "./notes/notes.js";
 import { aboutTerms, currentSessionCost } from "./notes/session-cost.js";
@@ -1424,10 +1426,13 @@ program
 program
   .command("savings")
   .description(
-    "Cumulated savings for this repo, per model — all time, or for one period: `graft savings 2026`, `graft savings 2026-09`, `graft savings 2026-09-08`",
+    "Cumulated savings for this repo (or, with --all, every repo graft has been used in), per model — all time, or for one period: `graft savings 2026`, `graft savings 2026-09`, `graft savings 2026-09-08`",
   )
   .argument("[period]", "yyyy | yyyy-mm | yyyy-mm-dd (default: every day on record)")
   .argument(...DIR_ARG)
+  .option("-a, --all", "every folder graft has recorded savings in on this machine, per repo and per model, in total (listed in ~/.graft/repos.json)")
+  .option("--discover", "with --all: look again for repos with savings from before graft kept the list, in the folders your agents (Claude Code, Kilo, VS Code/Cursor/Windsurf, JetBrains, Codex) have worked in (done automatically the first time)")
+  .option("--no-discover", "with --all: read only the folders already listed; never look for others")
   .option("--json", "output the rolled-up savings as JSON")
   .addHelpText(
     "after",
@@ -1439,13 +1444,22 @@ program
       "  graft savings 2026         that year",
       "  graft savings 2026-09      that month",
       "  graft savings 2026-09-08   that day",
+      "  graft savings --all        every repo graft has been used in, added up",
+      "  graft savings --all 2026   the same, for one period",
       "",
       "Dollars appear per model wherever a rate is known — this repo's own billing when",
       "the host reports it, else the model's list price. A model with no price at all is",
       "reported in saved input tokens alone, never at a guessed rate.",
+      "",
+      "Each repo's savings stay in that repo (graft/.cache/savings.json); --all reads the",
+      "folders listed in ~/.graft/repos.json, which graft notes the first time it records",
+      "a saving in a repo (or `graft savings` is run there). Each repo keeps its own rate.",
+      "The first --all also looks through the folders your agents have worked in (Claude",
+      "Code, Kilo, VS Code/Cursor/Windsurf, JetBrains, Codex) for savings recorded before",
+      "the list existed; `graft savings --all --discover` looks again.",
     ].join("\n"),
   )
-  .action((periodArg: string | undefined, dirArg: string | undefined, opts: { json?: boolean }) => {
+  .action((periodArg: string | undefined, dirArg: string | undefined, opts: { json?: boolean; all?: boolean; discover?: boolean }) => {
     // A lone argument is a period when it looks like a date and the repo
     // otherwise — `graft savings ../api` must not be read as a malformed date,
     // and `graft savings 2026-13` must not be read as a directory.
@@ -1459,8 +1473,40 @@ program
       dirName = period;
       period = undefined;
     }
+    if (opts.all) {
+      if (dirName !== undefined) {
+        console.error(`✗ --all reads every registered repo — drop the directory (${dirName})`);
+        process.exit(1);
+      }
+      // Fold in the repo we're standing in, in case its ledger predates the
+      // registry. No walk-up message: --all is not answering for this folder.
+      const here = nearestGraftRoot(process.cwd(), program.opts<GlobalOpts>().dir).root;
+      registerExistingLedger(here);
+      // Repos where graft recorded savings before the registry existed are
+      // found through the agent hosts' own lists of the folders they have
+      // worked in. Once is enough: every saving since registers its repo
+      // itself. `--discover` scans again; `--no-discover` never scans.
+      const registryFile = repoRegistryPath();
+      const scan = opts.discover === true || (opts.discover !== false && !readRepoRegistry(registryFile).discoveredAt);
+      if (scan) {
+        const added = registerDiscovered(knownFolders().map((f) => f.path), { file: registryFile });
+        if (added.length > 0 && !opts.json) {
+          console.error(`${tag()} found savings from before this version in ${added.length} more repo${added.length === 1 ? "" : "s"} (from your agents' recent folders)`);
+        }
+      }
+      const all = aggregateAllSavings(period, registryFile);
+      if (opts.json) {
+        console.log(JSON.stringify(all, null, 2));
+        return;
+      }
+      console.log(formatAllSavingsReport(all));
+      return;
+    }
     // Local ledger JSON only — no graph, no network, same as `graft stats`.
     const dir = queryRoot(dirName);
+    // A repo used before cross-repo totals existed joins `graft savings --all`
+    // the first time anyone looks at its savings.
+    registerExistingLedger(dir);
     const report = aggregateSavings(readLedger(dir), period);
     if (opts.json) {
       console.log(JSON.stringify(report, null, 2));

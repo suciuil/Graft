@@ -42,6 +42,17 @@ test("a file name entry claims only that name: CMakeLists.txt, never other .txt 
   for (const f of ["notes.txt", "MyCMakeLists.txt", "CMakeLists.txt.bak"]) assert.equal(languageOf(f), null, f);
 });
 
+test("shell and Perl files are claimed by their extensions and start-up file names", { skip: languageOf("a.sh") && languageOf("a.pl") ? false : "bash/perl grammar not built" }, () => {
+  for (const f of ["a.sh", "a.bash", ".bashrc", "home/.bash_profile", "A.SH"]) assert.equal(languageOf(f), "bash", f);
+  for (const f of ["a.pl", "lib/My/App.pm", "t/basic.t"]) assert.equal(languageOf(f), "perl", f);
+  for (const f of ["a.zsh", "a.ksh", "a.txt"]) assert.equal(languageOf(f), null, f);
+});
+
+test("makefiles are claimed by name and fragments by extension; automake files are not", { skip: languageOf("Makefile") ? false : "make grammar not built" }, () => {
+  for (const f of ["Makefile", "makefile", "GNUmakefile", "src/Makefile", "rules.mk", "win.mak"]) assert.equal(languageOf(f), "make", f);
+  for (const f of ["Makefile.am", "Makefile.in", "MyMakefile", "makefile.txt"]) assert.equal(languageOf(f), null, f);
+});
+
 test("a file is labelled exactly when it is indexed", () => {
   // The guard that keeps #36 from coming back: both readings come off one table, so
   // adding an extension cannot teach the extractor about it and leave the banner

@@ -281,7 +281,10 @@ export function collectBindings(root: Parser.SyntaxNode, lang: Language): FileBi
     lang === "markdown" ||
     lang === "scss" ||
     lang === "csv" ||
-    lang === "cmake"
+    lang === "cmake" ||
+    lang === "bash" ||
+    lang === "perl" ||
+    lang === "make"
   ) {
     return bindings;
   }

@@ -38,6 +38,12 @@ const SWIFT_CTOR_KINDS: Kind[] = ["class", "struct", "enum"];
 const CMAKE_FILE = /(^|[/\\])cmakelists\.txt$|\.cmake$/i;
 /** What a CMake dependency name (target_link_libraries, add_dependencies) can mean. */
 const CMAKE_TARGET_KINDS: Kind[] = ["target"];
+/** Shell scripts claimed by the bash grammar (extension or start-up file name). */
+const BASH_FILE = /\.(sh|bash)$|(^|[/\\])\.bash(rc|_profile)$/i;
+/** Perl sources: scripts, modules and tests. */
+const PERL_FILE = /\.(pl|pm|t)$/i;
+/** Makefiles: `Makefile` / `makefile` / `GNUmakefile` by name, fragments by extension. */
+const MAKE_FILE = /(^|[/\\])(gnu)?makefile$|\.(mk|mak)$/i;
 
 /**
  * Languages whose symbols can genuinely reach each other. A call edge may not
@@ -136,6 +142,9 @@ export function resolveEdges(
   // on CMAKE_MODULE_PATH (usually `cmake/`) — so `Helpers.cmake` anywhere in the repo,
   // keyed by its lower-cased basename without the extension.
   const cmakeModules = new Map<string, string[]>();
+  // Perl module resolution: `use My::Util` names `My/Util.pm` under some @INC root
+  // (`lib/` by convention), so every path suffix of a `.pm` file is a key.
+  const perlFilesBySuffix = new Map<string, string[]>();
   const hasGoModules = !!opts.goModules?.length;
   for (const n of nodes) {
     if (n.kind === "file") {
@@ -159,6 +168,10 @@ export function resolveEdges(
         for (let i = 0; i < parts.length; i++) push(phpFilesBySuffix, parts.slice(i).join("/"), n.id);
       }
       if (/\.cmake$/i.test(n.path)) push(cmakeModules, posix.basename(toPosixPath(n.path)).slice(0, -6).toLowerCase(), n.id);
+      if (n.path.endsWith(".pm")) {
+        const parts = toPosixPath(n.path).split("/");
+        for (let i = 0; i < parts.length; i++) push(perlFilesBySuffix, parts.slice(i).join("/"), n.id);
+      }
       {
         const p = toPosixPath(n.path);
         if (p === "lib.rs" || p === "main.rs") rustCrateRoots.push("");
@@ -227,12 +240,20 @@ export function resolveEdges(
                   ? resolvePhpUse(e.specifier, phpFilesBySuffix)
                   : CMAKE_FILE.test(e.file)
                     ? resolveCmakeImport(e.specifier, e.file, byId, cmakeModules)
-                    : resolveImport(e.specifier, e.file, byId);
+                    : BASH_FILE.test(e.file)
+                      ? resolveShellSource(e.specifier, e.file, byId)
+                      : PERL_FILE.test(e.file)
+                        ? resolvePerlModule(e.specifier, perlFilesBySuffix)
+                        : MAKE_FILE.test(e.file)
+                          ? resolveMakeInclude(e.specifier, e.file, byId)
+                          : resolveImport(e.specifier, e.file, byId);
       add(e.source, target, "imports", "extracted");
     } else if (e.relation === "extends" || e.relation === "implements") {
       // `implements` also resolves to a `trait` — PHP models trait composition
       // (`use SomeTrait;`) as an implements edge, and a trait is a valid target.
-      const kinds: Kind[] = e.relation === "implements" ? ["interface", "trait"] : ["class", "interface"];
+      // A Perl class is a package (`use parent 'Base'`, `@ISA`).
+      const kinds: Kind[] =
+        e.relation === "implements" ? ["interface", "trait"] : PERL_FILE.test(e.file) ? ["package"] : ["class", "interface"];
       const hit = resolveName(e.name!, e.file, kinds, perFileName, globalName);
       // an unresolved base is usually an external/imported type — keep the name.
       add(e.source, hit?.id ?? e.name!, e.relation, hit?.confidence ?? "inferred");
@@ -268,6 +289,12 @@ export function resolveEdges(
         if (hit && hit.id !== e.source && anno?.signature?.includes("@interface"))
           add(e.source, hit.id, "references", hit.confidence);
         else add(e.source, e.name, "references", "inferred");
+      } else if (MAKE_FILE.test(e.file)) {
+        // A prerequisite naming another target, or `$(VAR)` naming a variable/define.
+        // A prerequisite that is a source file (`main.c`) or an undefined variable
+        // (`$(CC)`, set by make itself) finds nothing and drops.
+        const hit = resolveName(e.name, e.file, e.kinds ?? ["target"], perFileName, globalName);
+        if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (CMAKE_FILE.test(e.file)) {
         // CMake target_link_libraries / add_dependencies / ALIAS: the name of another
         // target. An external library (`Threads::Threads`, `m`) finds nothing and drops.
@@ -584,6 +611,55 @@ function resolveCmakeImport(
     return byId.has(joined) ? joined : spec;
   }
   const hits = modules.get(path.toLowerCase());
+  return hits && hits.length === 1 ? hits[0] : spec;
+}
+
+/**
+ * Resolve a shell `source f` / `. f` to an in-repo file node. The path is relative to
+ * the shell's working directory, which graft cannot know; the sourcing script's own
+ * directory is by far the common case (and what `$(dirname "$0")/…` spells out), so
+ * that is tried, then the repo root. A path that still holds an expansion (`$HOME/…`,
+ * `${DIR}/…`) after a leading `$(dirname …)`/`$SCRIPT_DIR`-style prefix is dropped
+ * stays the raw string.
+ */
+function resolveShellSource(spec: string, file: string, byId: Map<string, NodeV1>): string {
+  const path = toPosixPath(spec.replace(/^(?:\$\(dirname\s+"?\$(?:0|\{BASH_SOURCE(?:\[0\])?\}|BASH_SOURCE)"?\)|\$\{?(?:SCRIPT_DIR|DIR|HERE)\}?)\//, ""));
+  if (path.includes("$") || path.startsWith("/") || path.startsWith("~")) return spec;
+  const dir = posix.dirname(toPosixPath(file));
+  for (const candidate of [posix.normalize(posix.join(dir === "." ? "" : dir, path)), posix.normalize(path)]) {
+    if (byId.has(candidate)) return candidate;
+  }
+  return spec;
+}
+
+/**
+ * Resolve a make `include x.mk` (or a `$(MAKE) -C dir` → `dir/Makefile`) to an in-repo
+ * file node. GNU make reads an include relative to its working directory, which for a
+ * makefile run in place is the makefile's own directory; that is tried first, then the
+ * repo root. A recursive make also accepts `makefile` / `GNUmakefile` in that directory.
+ * Anything else (a generated `.d` file, an include from outside the repo) stays the
+ * raw name.
+ */
+function resolveMakeInclude(spec: string, file: string, byId: Map<string, NodeV1>): string {
+  const path = toPosixPath(spec);
+  if (path.startsWith("/")) return spec;
+  const dir = posix.dirname(toPosixPath(file));
+  const bases = [posix.normalize(posix.join(dir === "." ? "" : dir, path)), posix.normalize(path)];
+  const alternates = (p: string) =>
+    p.endsWith("/Makefile") ? [p, p.replace(/Makefile$/, "makefile"), p.replace(/Makefile$/, "GNUmakefile")] : [p];
+  for (const base of bases) for (const candidate of alternates(base)) if (byId.has(candidate)) return candidate;
+  return spec;
+}
+
+/**
+ * Resolve a Perl `use My::Util` / `require My::Util` to the in-repo `My/Util.pm`, by a
+ * UNIQUE path-suffix match — the @INC root (`lib/`, `local/lib/perl5`, …) is unknown, so
+ * the suffix is the portable key, as for Java and PHP. A CPAN module or an ambiguous
+ * suffix stays the module name.
+ */
+function resolvePerlModule(spec: string, bySuffix: Map<string, string[]>): string {
+  if (!/^[A-Za-z_]\w*(?:::\w+)*$/.test(spec)) return spec;
+  const hits = bySuffix.get(`${spec.split("::").join("/")}.pm`);
   return hits && hits.length === 1 ? hits[0] : spec;
 }
 

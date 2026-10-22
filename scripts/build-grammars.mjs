@@ -2,8 +2,8 @@
  * Builds and packs the optional native tree-sitter grammars that live in sibling
  * repositories, so `npm run build` keeps them in step with graft's own code.
  *
- * Graft's depth tier covers 15 languages (C#, Groovy, PL/SQL, C, C++, CMake, CSS, HTML,
- * Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
+ * Graft's depth tier covers 18 languages (C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl,
+ * Make, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
  * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`, plus a
  * newer Kotlin grammar (`tree-sitter-kotlin-local`, from `../tree-sitter-kotlin-grammar`)
  * that takes over from the registry one when built. Those
@@ -828,7 +828,8 @@ function gitModified(repo, files) {
  * (tree-sitter-json's grammar.js is hours "newer" than its parser.c from one commit).
  *
  * A parser.c above the ABI graft's runtime loads is regenerated at that ABI too (e.g.
- * an upstream moved to ABI 15): it would build, then silently fail to load, and the
+ * an upstream moved to ABI 15, as tree-sitter-bash and tree-sitter-perl ship), on the
+ * first build as well as later ones: it would build, then fail the load check, and the
  * language would drop out of graft. A failed attempt is retried on the next build.
  *
  * Returns `{ generated, pending, failed }`. `pending`: some needed generating but could
@@ -853,10 +854,14 @@ function regenerate(name, dir, entry) {
     let reason = null;
     if (forceGenerate) {
       reason = "--generate";
-    } else if (rec) {
-      if (rec.in !== inHash && rec.parser === parserHash) reason = "grammar.js changed since src/parser.c was generated";
-      else if (abiTooNew) reason = `new src/parser.c is ABI ${abiNow}; graft's runtime loads ≤ ${MAX_ABI}`;
-    } else {
+    } else if (rec && rec.in !== inHash && rec.parser === parserHash) {
+      reason = "grammar.js changed since src/parser.c was generated";
+    } else if (abiTooNew) {
+      // Checked for a grammar seen for the first time too: a fresh checkout of an
+      // upstream that ships an ABI-15 parser.c would otherwise compile it as is and
+      // fail the ABI gate after the build.
+      reason = `src/parser.c is ABI ${abiNow}; graft's runtime loads ≤ ${MAX_ABI}`;
+    } else if (!rec) {
       const newest = Math.max(...inputs.map((f) => statSync(f).mtimeMs));
       if (newest > statSync(parserC).mtimeMs) {
         const mod = gitModified(dir, [...inputs, parserC]);
@@ -870,7 +875,7 @@ function regenerate(name, dir, entry) {
       continue;
     }
 
-    const abiOnly = reason.startsWith("new src/parser.c");
+    const abiOnly = reason.startsWith("src/parser.c is ABI");
     const cli = treeSitterCli(dir);
     if (cli.error) {
       warnings.push(`${label}: ${reason}, but src/ was not regenerated — ${cli.error}`);
@@ -961,6 +966,8 @@ const GRAFT_GRAMMARS_FALLBACK = {
   "tree-sitter-json": [undefined], "@tree-sitter-grammars/tree-sitter-yaml": [undefined],
   "@tree-sitter-grammars/tree-sitter-markdown": [undefined], "tree-sitter-scss": [undefined], "tree-sitter-csv": ["csv"],
   "tree-sitter-cmake": [undefined], "tree-sitter-kotlin-local": [undefined],
+  "tree-sitter-bash": [undefined], "@ganezdragon/tree-sitter-perl": [undefined],
+  "tree-sitter-make": [undefined],
 };
 function graftGrammarProps(pkgName) {
   try {

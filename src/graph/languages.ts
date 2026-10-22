@@ -99,6 +99,14 @@ const DEPTH: Record<Language, DepthSpec> = {
   // Functions, macros and targets; calls between them; include()/add_subdirectory()
   // imports; target_link_libraries is a reference, not inheritance.
   cmake: code(true, true, false, false),
+  // Functions and calls between them; `source`/`.` imports. No classes to inherit.
+  bash: code(true, true, false, false),
+  // Packages and subs; calls, `use`/`require` imports, `use parent`/`@ISA` inheritance;
+  // `$self->m()` and `Pkg->m()` resolved through the package.
+  perl: code(true, true, true, true),
+  // Targets, variables and defines; $(call) edges, prerequisite and $(VAR) references,
+  // include / $(MAKE) -C imports.
+  make: code(true, true, false, false),
   razor: { level: "file-only", symbols: false, calls: false, imports: false, inherits: false, types: false },
 };
 
@@ -132,6 +140,9 @@ const DISPLAY: Record<string, string> = {
   scss: "SCSS",
   csv: "CSV",
   cmake: "CMake",
+  bash: "Bash",
+  perl: "Perl",
+  make: "Make",
   rust: "Rust",
   ruby: "Ruby",
   scala: "Scala",

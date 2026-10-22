@@ -68,6 +68,11 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   cpp: { pkg: "tree-sitter-cpp" },
   // CMake (CMakeLists.txt, *.cmake): functions, macros, targets, include() edges.
   cmake: { pkg: "tree-sitter-cmake" },
+  // Shell and Perl scripts: functions/subs, calls, source/use/require edges.
+  bash: { pkg: "tree-sitter-bash" },
+  perl: { pkg: "@ganezdragon/tree-sitter-perl" },
+  // Makefiles: rules (targets), variables, defines, include edges.
+  make: { pkg: "tree-sitter-make" },
   // Data/markup: symbol-only custom extractors. markdown's binding default export
   // is the block grammar (its `inline` grammar is a separate property we don't use).
   json: { pkg: "tree-sitter-json" },
