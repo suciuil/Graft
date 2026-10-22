@@ -49,6 +49,7 @@
     "build:ts": "tsc -p tsconfig.json && tsc -p viewer/tsconfig.json && node scripts/build-viewer.mjs",
     "build:vendor": "node scripts/vendor-grammars.mjs",
     "pack:bundle": "node scripts/pack-bundle.mjs",
+    "prices:bundle": "node --import tsx scripts/update-bundled-prices.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "cli": "tsx src/cli.ts",
     "test": "node scripts/run-tests.mjs",

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   LITELLM_PRICES_URL,
+  bundledPriceCatalog,
   catalogPrice,
   parseLiteLlmCatalog,
   priceCatalogPath,
@@ -16,6 +17,7 @@ import {
   updatePriceCatalog,
   type PriceCatalog,
 } from '../src/context/price-catalog.js';
+import { BUNDLED_PRICE_CATALOG } from '../src/context/price-catalog-bundled.js';
 import { inputUsdPerMtok, listRate, turnInputCostMicros } from '../src/context/price.js';
 import { savingsLine, setPricing, setDeepDue } from '../src/context/savings.js';
 
@@ -166,6 +168,81 @@ test('update: a failed download keeps the previous catalog', async () => {
   const garbage = (async () => new Response('<html>', { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(updatePriceCatalog({ fetchImpl: garbage }), /valid JSON/);
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), previous);
+});
+
+/** Run `fn` with the bundled snapshot enabled and holding `models`, fetched `daysOld` ago. */
+function withBundled(models: PriceCatalog['models'], daysOld: number, fn: () => void): void {
+  const saved = { models: BUNDLED_PRICE_CATALOG.models, fetchedAt: BUNDLED_PRICE_CATALOG.fetchedAt };
+  const flag = process.env.GRAFT_BUNDLED_PRICES;
+  BUNDLED_PRICE_CATALOG.models = models;
+  BUNDLED_PRICE_CATALOG.fetchedAt = new Date(Date.now() - daysOld * 86_400_000).toISOString();
+  delete process.env.GRAFT_BUNDLED_PRICES;
+  try {
+    fn();
+  } finally {
+    BUNDLED_PRICE_CATALOG.models = saved.models;
+    BUNDLED_PRICE_CATALOG.fetchedAt = saved.fetchedAt;
+    if (flag === undefined) delete process.env.GRAFT_BUNDLED_PRICES;
+    else process.env.GRAFT_BUNDLED_PRICES = flag;
+  }
+}
+
+test('bundled: prices a model with no local catalog at all, and says so', () => {
+  useFile(null);
+  withBundled({ 'acme-bundled-1': { input: 0.7, cacheRead: 0.07 } }, 3, () => {
+    assert.equal(inputUsdPerMtok('acme-bundled-1'), 0.7);
+    const c = catalogPrice('openrouter/acme/acme-bundled-1');
+    assert.equal(c?.bundled, true);
+    assert.equal(c?.cacheRead, 0.07);
+    const r = listRate({ id: 'acme-bundled-1', confidence: 'certain' });
+    assert.equal(r?.catalogBundled, true);
+    const s = priceCatalogStatus();
+    assert.equal(s.state, 'missing');
+    assert.equal(s.bundled?.models, 1);
+    assert.equal(s.bundled?.ageDays, 3);
+
+    setPricing({ rate: r, model: { id: 'acme-bundled-1', confidence: 'certain' } });
+    setDeepDue(null);
+    const f = savingsLine('x'.repeat(400), { files: 2, baselineChars: 8000 });
+    assert.match(f, /from the LiteLLM price catalog bundled with graft, fetched /);
+    setPricing(null);
+  });
+});
+
+test('bundled: the newer catalog wins, and the other fills its gaps', () => {
+  useFile(freshCatalog({ 'acme-shared': { input: 3 }, 'acme-local-only': { input: 4 } }, 10));
+  withBundled({ 'acme-shared': { input: 2 }, 'acme-bundled-only': { input: 1 } }, 1, () => {
+    assert.equal(inputUsdPerMtok('acme-shared'), 2, 'a newer bundled snapshot beats an old local copy');
+    assert.equal(inputUsdPerMtok('acme-local-only'), 4, 'the local copy still prices what the snapshot lacks');
+    assert.equal(catalogPrice('acme-local-only')?.bundled, undefined);
+  });
+  useFile(freshCatalog({ 'acme-shared': { input: 3 } }, 1));
+  withBundled({ 'acme-shared': { input: 2 }, 'acme-bundled-only': { input: 1 } }, 10, () => {
+    assert.equal(inputUsdPerMtok('acme-shared'), 3, 'a newer `graft prices update` beats the snapshot');
+    assert.equal(inputUsdPerMtok('acme-bundled-only'), 1, 'the snapshot still prices what the local copy lacks');
+  });
+});
+
+test('bundled: the built-in table still wins, and GRAFT_BUNDLED_PRICES=0 turns the snapshot off', () => {
+  useFile(null);
+  withBundled({ 'claude-opus-5': { input: 99 }, 'acme-bundled-1': { input: 0.7 } }, 1, () => {
+    assert.equal(inputUsdPerMtok('claude-opus-5'), 5);
+    process.env.GRAFT_BUNDLED_PRICES = '0';
+    assert.equal(bundledPriceCatalog(), null);
+    assert.equal(inputUsdPerMtok('acme-bundled-1'), null);
+    assert.equal(priceCatalogStatus().bundled, undefined);
+  });
+});
+
+test('bundled: the shipped snapshot is a valid catalog of the LiteLLM URL', () => {
+  const b = BUNDLED_PRICE_CATALOG;
+  assert.equal(b.version, 1);
+  assert.equal(b.source, 'LiteLLM');
+  assert.ok(Number.isFinite(Date.parse(b.fetchedAt)));
+  for (const [key, p] of Object.entries(b.models)) {
+    assert.equal(typeof p.input, 'number', key);
+    assert.ok(p.input > 0 && p.input <= 1000, `${key} has a sane input rate`);
+  }
 });
 
 test('the catalog path defaults under ~/.graft and honours GRAFT_PRICES_FILE', () => {

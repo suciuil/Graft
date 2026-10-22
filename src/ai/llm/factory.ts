@@ -14,8 +14,8 @@
  * gateway's routing, failover, and guardrails behind a named provider instead
  * of a bare custom base URL.
  *
- * `llm-incubator` is the same over `openai`, pointed at the LLM Incubator
- * gateway when selected explicitly.
+ * `llm-incubator` is the same over `openai`, with its own label. It has no
+ * built-in base URL: the gateway must be configured (GRAFT_BASE_URL / --base-url).
  *
  * With no provider and no base URL configured, graft uses the Databricks AI
  * Gateway ({@link DEFAULT_BASE_URL}, see databricks.ts), which serves the
@@ -33,9 +33,6 @@ export type ProviderKind = "openai" | "anthropic" | "litellm" | "orcarouter" | "
 
 /** The endpoint used when no base URL and no provider are configured. */
 export const DEFAULT_BASE_URL = DATABRICKS_BASE_URL;
-
-/** The LLM Incubator gateway, used only when `--provider llm-incubator` is chosen explicitly. */
-export const LLM_INCUBATOR_BASE_URL = "https://llm-gateway.ve42034x.automotive-wan.com";
 
 export interface ChatModelConfig {
   provider: ProviderKind;
@@ -162,11 +159,15 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         headers: cfg.headers,
       });
     case "llm-incubator":
+      // No built-in URL: without one the OpenAI SDK would silently reach api.openai.com.
+      if (!cfg.baseUrl?.trim()) {
+        throw new Error("The llm-incubator provider has no default base URL. Set GRAFT_BASE_URL (or --base-url) to your gateway.");
+      }
       return new OpenAIChatModel({
         apiKey: cfg.apiKey,
         model: cfg.model,
         modelFallbacks: cfg.modelFallbacks,
-        baseUrl: cfg.baseUrl ?? LLM_INCUBATOR_BASE_URL,
+        baseUrl: cfg.baseUrl,
         headers: cfg.headers,
         label: `llm-incubator:${cfg.model}`,
       });

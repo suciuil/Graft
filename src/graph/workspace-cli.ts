@@ -28,6 +28,8 @@ import {
 
 export interface WorkspaceBuildOptions {
   deep: boolean;
+  /** With `deep`: ignore the LLM caches and re-summarize everything in every child. */
+  force?: boolean;
   extensions?: string[];
   concurrency?: number;
   /** Provider/model/key config for child builds — WITHOUT any contextDir
@@ -79,8 +81,8 @@ export async function runWorkspaceBuild(root: string, opts: WorkspaceBuildOption
       patchBuildConfig(childDir, childConfigPatch);
     }
     const engine = new Graft({ ...opts.childConfig, contextDir: undefined });
-    const c = opts.deep ? await engine.init(childDir, { extensions: opts.extensions }) : undefined;
-    const g = await engine.graph(childDir, { llm: opts.deep, concurrency: opts.concurrency });
+    const c = opts.deep ? await engine.init(childDir, { extensions: opts.extensions, force: opts.force }) : undefined;
+    const g = await engine.graph(childDir, { llm: opts.deep, force: opts.force, concurrency: opts.concurrency });
     console.log(`✓ ${childName}/: ${g.nodes} nodes, ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
     for (const e of g.errors) console.error(`✗ ${childName}/: ${e}`);
     if (opts.deep) llmMessages.push(c?.fatal, ...(c?.errors ?? []), g.meaning.fatal, ...g.errors);

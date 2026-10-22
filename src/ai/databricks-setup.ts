@@ -17,6 +17,7 @@ import {
   databricksModelFallbacks,
   databricksRoute,
   databricksRouteUrl,
+  databricksTokenHint,
   listDatabricksModels,
   normalizeDatabricksModel,
   type DatabricksLister,
@@ -92,6 +93,7 @@ async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModel
   for (let attempt = 0; attempt < MAX_KEY_ATTEMPTS && !listings; attempt++) {
     if (!apiKey) {
       deps.out("It needs a Databricks personal access token (GRAFT_API_KEY or ANTHROPIC_AUTH_TOKEN).");
+      deps.out(`${databricksTokenHint()}.`);
       const v = (await prompt.askHidden("Databricks personal access token (input hidden; Enter skips the LLM pass): ")).trim();
       if (!v) return { skip: "no API key for the Databricks AI Gateway" };
       apiKey = v;
@@ -108,6 +110,7 @@ async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModel
     const s = typedKey ? "the key you typed" : `${maskSecret(apiKey)} (from ${src.flag ?? src.env ?? "the environment"})`;
     deps.err(`⚠ the Databricks AI Gateway rejected ${s}: ${shortError(found[0]!.error)}`);
     deps.err("  It needs a Databricks personal access token (it usually starts with `dapi`), not another gateway's key.");
+    deps.err(`  ${databricksTokenHint()}.`);
     apiKey = undefined;
     typedKey = false;
   }

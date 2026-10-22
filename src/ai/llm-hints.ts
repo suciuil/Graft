@@ -19,6 +19,7 @@ import type { ProviderKind } from "./llm/factory.js";
 import {
   DATABRICKS_KNOWN_MODELS,
   databricksRoot,
+  databricksTokenHint,
   isDatabricksGatewayUrl,
   listDatabricksModels,
   normalizeDatabricksModel,
@@ -306,6 +307,7 @@ export async function llmFailureHints(messages: (string | undefined)[], ctx: Hin
         `  — run \`${cmd(SETTINGS.key.command)}\` to save it for every new terminal, or for this one:`,
         set("GRAFT_API_KEY", "<your-api-key>"),
       );
+      if (cfg.databricks) lines.push(`  ${databricksTokenHint()}.`);
     } else {
       const s = settingSource("model", ctx.config, cfg, env);
       const which =

@@ -140,6 +140,9 @@ export interface GraphBuildOptions {
   summarizer?: CruxSummarizer;
   /** Max files summarized in parallel during the Tier-2 pass. Default is set in enrich. */
   concurrency?: number;
+  /** With a {@link summarizer}: re-summarize every node, even those whose `ready`
+   * summary still matches their body (`graft build --deep --force`). */
+  force?: boolean;
   /** Repo-relative directory prefixes to limit the build to (`--only-dir`). When
    * set, only files under these prefixes are indexed; the list is recorded in the
    * fingerprint so the freshness probe enumerates the same set. */
@@ -388,6 +391,7 @@ export async function buildGraph(
   const meaning = await enrichGraph(nodes, priorById, sources, {
     summarizer: opts.summarizer,
     concurrency: opts.concurrency,
+    force: opts.force,
     onProgress: ({ index, total, node }) =>
       opts.onProgress?.({ phase: "enrich", index, total, file: node }),
     // Periodic durability flush of partial crux; the next run folds it back in by

@@ -53,6 +53,14 @@ export interface EnrichOptions {
    * never interleaves with a node mutation.
    */
   checkpoint?: () => void;
+  /**
+   * Re-summarize every node, not only the stale/pending ones (`graft build --deep
+   * --force`): a node whose body is unchanged since its `ready` summary is sent to
+   * the LLM anyway instead of being carried over. Only meaningful with a
+   * {@link summarizer}. When the forced call fails for such a node, its prior
+   * summary is still valid for the unchanged body, so it is kept as `ready`.
+   */
+  force?: boolean;
 }
 
 /** How often the crux pass flushes partial progress to disk. Read at call time (not
@@ -98,6 +106,10 @@ export async function enrichGraph(
 
   // Which nodes actually need an LLM call this run (after cache carry-over).
   const dirty: NodeV1[] = [];
+  // Under `force`: nodes whose `ready` summary still matches their body, queued for
+  // a recompute anyway. A failed recompute falls back to that summary as `ready`.
+  const forced = new Set<NodeV1>();
+  const force = !!opts.force && !!opts.summarizer;
 
   for (const node of nodes) {
     // No meaning tier by design (a structural-only language such as XML): never an
@@ -109,6 +121,11 @@ export async function enrichGraph(
       node.summary = was.summary;
       node.crux = was.crux;
       node.summary_state = "ready";
+      if (force) {
+        forced.add(node);
+        dirty.push(node);
+        continue;
+      }
       stats.cached++;
       continue;
     }
@@ -129,10 +146,21 @@ export async function enrichGraph(
     return stats;
   }
 
+  // A node that got no fresh summary this run: a forced node keeps its still-valid
+  // `ready` summary (counted as cached); anything else stays stale/pending.
+  const leaveAsIs = (node: NodeV1): void => {
+    if (forced.has(node)) stats.cached++;
+    else if (node.summary_state === "stale") stats.stale++;
+    else stats.pending++;
+  };
+
   // One LLM call per file: group the dirty nodes by the file they live in.
   const byFile = new Map<string, NodeV1[]>();
   for (const node of dirty) {
-    if (!sources.has(node.path)) continue;
+    if (!sources.has(node.path)) {
+      if (forced.has(node)) stats.cached++;
+      continue;
+    }
     const arr = byFile.get(node.path);
     if (arr) arr.push(node);
     else byFile.set(node.path, [node]);
@@ -165,10 +193,7 @@ export async function enrichGraph(
     // request. They are counted so the caller can report what was left undone.
     if (gate.stopped) {
       gate.skip();
-      for (const node of fileNodes) {
-        if (node.summary_state === "stale") stats.stale++;
-        else stats.pending++;
-      }
+      for (const node of fileNodes) leaveAsIs(node);
       // Still reported, so the caller's progress counter reaches `total` instead of
       // freezing at the file that broke — the abort is announced by the build's
       // summary, not by a stalled line.
@@ -196,8 +221,7 @@ export async function enrichGraph(
       if (!r || !r.summary.trim()) {
         // whole-file call failed, the model skipped this symbol, or it returned
         // an empty summary: keep what it had and leave it retryable.
-        if (node.summary_state === "stale") stats.stale++;
-        else stats.pending++;
+        leaveAsIs(node);
         continue;
       }
       node.summary = r.summary;

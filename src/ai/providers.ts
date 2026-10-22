@@ -3,7 +3,7 @@ import type { Synthesizer } from "./synthesize.js";
 import type { CruxSummarizer } from "./crux.js";
 import type { ChatModel } from "./llm/types.js";
 import type { ProviderKind } from "./llm/factory.js";
-import { bareModelFallbacks, DEFAULT_BASE_URL, LLM_INCUBATOR_BASE_URL } from "./llm/factory.js";
+import { bareModelFallbacks, DEFAULT_BASE_URL } from "./llm/factory.js";
 import {
   DATABRICKS_DEFAULT_MODEL,
   databricksHeaders,
@@ -123,7 +123,7 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
   if (!baseUrl && provider === "orcarouter") baseUrl = ORCAROUTER_BASE_URL;
   // Nothing configured at all: the Databricks AI Gateway, not api.openai.com.
   if (!baseUrl && provider === "openai" && providerDefaulted && !legacyRouting) baseUrl = DEFAULT_BASE_URL;
-  if (!baseUrl && provider === "llm-incubator") baseUrl = LLM_INCUBATOR_BASE_URL;
+  // llm-incubator has no built-in URL: the gateway must be configured explicitly.
 
   // The Databricks gateway serves each model family under its own route and wire format.
   if (isDatabricksGatewayUrl(baseUrl)) {
