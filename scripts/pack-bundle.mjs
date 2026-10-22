@@ -1,12 +1,12 @@
 /**
  * Packs graft plus every optional native grammar into ONE installable tarball.
  *
- * Normally the 16 depth-tier grammars reach graft through
+ * Normally the 19 depth-tier grammars reach graft through
  * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}` — sibling
  * working copies that exist only on the machine they were cloned onto. Anywhere else
- * npm skips all 16 (they are *optional*, so it does not even error) and graft quietly
- * loses C#, Groovy, PL/SQL, C, C++, CMake, CSS, HTML, Razor, XML, JSON, YAML, Markdown,
- * SCSS and CSV, and falls back to the older registry Kotlin grammar. The output of
+ * npm skips all 19 (they are *optional*, so it does not even error) and graft quietly
+ * loses C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl, Make, CSS, HTML, Razor, XML, JSON,
+ * YAML, Markdown, SCSS and CSV, and falls back to the older registry Kotlin grammar. The output of
  * this script has them baked in:
  *
  *     npm i -g ./nanonets-graft-<version>-win32-x64.tgz --ignore-scripts
@@ -129,7 +129,7 @@ staged.scripts = pkg.scripts?.postinstall ? { postinstall: pkg.scripts.postinsta
 staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE"];
 writeFileSync(join(stagingDir, "package.json"), `${JSON.stringify(staged, null, 2)}\n`);
 
-// The 16 optional grammars are in `vendor/` by now, but `dependencies` — tree-sitter
+// The 19 optional grammars are in `vendor/` by now, but `dependencies` — tree-sitter
 // itself and the nine registry-published grammars among them — would still be resolved
 // against the registry on the target machine. That reopens on every install the exact
 // uncertainty this bundle exists to close: a `^` range floats, the target's global tree

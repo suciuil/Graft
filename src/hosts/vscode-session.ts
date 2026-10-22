@@ -56,9 +56,9 @@ import { MAX_SESSION_AGE_MS } from './kilo-session.js';
 /** VS Code's user-data directory per platform, for each flavour in the field. */
 const FLAVOURS = ['Code', 'Code - Insiders'] as const;
 
-function userDataDirs(home: string, env: NodeJS.ProcessEnv, os: string): string[] {
+function userDataDirs(home: string, env: NodeJS.ProcessEnv, os: string, flavours: readonly string[] = FLAVOURS): string[] {
   const roots: string[] = [];
-  for (const flavour of FLAVOURS) {
+  for (const flavour of flavours) {
     if (os === 'win32') {
       const appData = env.APPDATA ?? join(home, 'AppData', 'Roaming');
       roots.push(join(appData, flavour, 'User'));
@@ -163,6 +163,39 @@ export function workspaceFolders(metaPath: string): string[] {
     if (typeof f?.path === 'string') out.push(resolve(dirname(wsFile), f.path));
   }
   return out.length ? out : [dirname(wsFile)];
+}
+
+/**
+ * Every folder a VS Code-family editor has opened (directly or as a root of a
+ * `.code-workspace`), from its `workspaceStorage`. For `graft savings --all`,
+ * which needs the folders graft may have been used in before the cross-repo
+ * registry existed.
+ *
+ * Cursor and Windsurf are VS Code forks with the same storage layout, so they are
+ * read too — unlike {@link vscodeSessionModel}, which only trusts VS Code's own
+ * chat log format. Never throwing; an editor that is not installed adds nothing.
+ */
+export function editorWorkspaceFolders(
+  opts: { home?: string; env?: NodeJS.ProcessEnv; os?: string } = {},
+): string[] {
+  const home = opts.home ?? homedir();
+  const env = opts.env ?? process.env;
+  const os = opts.os ?? platform();
+  const out: string[] = [];
+  for (const userDir of userDataDirs(home, env, os, [...FLAVOURS, 'Cursor', 'Windsurf', 'VSCodium'])) {
+    const storage = join(userDir, 'workspaceStorage');
+    let entries: string[];
+    try {
+      entries = readdirSync(storage);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const meta = join(storage, entry, 'workspace.json');
+      if (existsSync(meta)) out.push(...workspaceFolders(meta));
+    }
+  }
+  return out;
 }
 
 function normalize(p: string): string {

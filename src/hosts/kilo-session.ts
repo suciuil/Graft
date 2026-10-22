@@ -214,6 +214,36 @@ export function parseSessionModel(raw: unknown): string | null {
 }
 
 /**
+ * Every directory Kilo has ever held a session in, as Kilo wrote it.
+ *
+ * For `graft savings --all`, which needs the folders graft may have been used in
+ * before the cross-repo registry existed. Read-only and never throwing: no Kilo,
+ * no `node:sqlite`, or a schema without the column all answer `[]`.
+ */
+export function kiloSessionDirectories(opts: { home?: string; env?: NodeJS.ProcessEnv } = {}): string[] {
+  const path = kiloDbPath(opts);
+  if (path === null) return [];
+  const sqlite = loadSqlite();
+  if (sqlite === null) return [];
+  let db: any;
+  try {
+    db = new sqlite.DatabaseSync(path, { readOnly: true });
+    const rows = db.prepare('select distinct directory from session').all();
+    return rows
+      .map((r: any) => r?.directory)
+      .filter((d: unknown): d is string => typeof d === 'string' && d.trim() !== '');
+  } catch {
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* nothing to do */
+    }
+  }
+}
+
+/**
  * The model Kilo is running for `dir`, or null when nothing can say so.
  *
  * Read-only and never throwing: a locked database, a schema that moved, a Node

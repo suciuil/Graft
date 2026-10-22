@@ -11,8 +11,9 @@
  * Enumerating the files here instead means `npm test` behaves identically in
  * cmd.exe, PowerShell, bash and CI, on any supported Node.
  */
-import { readdirSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,11 +49,22 @@ const gitEnv = {
 // Off for the run; the tests of the move turn it back on.
 // A `graft prices update` on the developer's machine must not price models in
 // tests, so the local price catalog points at a file that never exists.
+// Every saving a test files registers its scratch repo in the user's cross-repo
+// list (`graft savings --all`), so the list points at a per-run scratch file
+// rather than the developer's real ~/.graft/repos.json.
+const reposFile = join(tmpdir(), `graft-test-repos-${process.pid}.json`);
 const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...files], {
   cwd: repoRoot,
   stdio: "inherit",
-  env: { ...process.env, ...gitEnv, GRAFT_NO_TRAIL_SWITCH: "1", GRAFT_PRICES_FILE: join(repoRoot, "test", ".no-such-prices.json") },
+  env: {
+    ...process.env,
+    ...gitEnv,
+    GRAFT_NO_TRAIL_SWITCH: "1",
+    GRAFT_PRICES_FILE: join(repoRoot, "test", ".no-such-prices.json"),
+    GRAFT_REPOS_FILE: reposFile,
+  },
 });
+try { rmSync(reposFile, { force: true }); } catch { /* scratch file; leave it */ }
 
 if (result.error) {
   console.error(`✗ could not start the test runner: ${result.error.message}`);

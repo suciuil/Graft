@@ -41,8 +41,8 @@ export type Kind =
   | "element"
   | "view"
   | "heading"
-  // A CMake build target (add_library / add_executable / add_custom_target):
-  // what target_link_libraries and add_dependencies name.
+  // A build target: CMake's add_library / add_executable / add_custom_target (what
+  // target_link_libraries names), or a make rule's target (what prerequisites name).
   | "target";
 
 /** How confident we are an edge is true, best-first. The hand-written AST

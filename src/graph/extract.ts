@@ -44,7 +44,10 @@ export type Language =
   | "markdown"
   | "scss"
   | "csv"
-  | "cmake";
+  | "cmake"
+  | "bash"
+  | "perl"
+  | "make";
 
 /** The active SQL dialect, or null when no SQL grammar is built. Only Oracle
  * PL/SQL is wired today, so this is "plsql" exactly when that grammar loads. */
@@ -149,6 +152,23 @@ const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label
   // so no other `.txt` file is ever taken for CMake.
   { ext: ".cmake", grammar: "cmake", label: "cmake" },
   { ext: "CMakeLists.txt", grammar: "cmake", label: "cmake" },
+  // Shell: bash scripts and the bash start-up files. `.zsh`/`.ksh`/`.csh` are other
+  // shells' dialects and stay unclaimed.
+  { ext: ".bash_profile", grammar: "bash", label: "bash" },
+  { ext: ".bashrc", grammar: "bash", label: "bash" },
+  { ext: ".bash", grammar: "bash", label: "bash" },
+  { ext: ".sh", grammar: "bash", label: "bash" },
+  // Perl: scripts, modules and test files (`.t`, the Test::More convention).
+  { ext: ".pl", grammar: "perl", label: "perl" },
+  { ext: ".pm", grammar: "perl", label: "perl" },
+  { ext: ".t", grammar: "perl", label: "perl" },
+  // Make: the makefiles by NAME (`Makefile`, `makefile`, `GNUmakefile`; matched
+  // case-insensitively) and included fragments by extension. Automake's
+  // `Makefile.am` / `Makefile.in` are a different syntax and stay unclaimed.
+  { ext: "GNUmakefile", grammar: "make", label: "make" },
+  { ext: "Makefile", grammar: "make", label: "make" },
+  { ext: ".mk", grammar: "make", label: "make" },
+  { ext: ".mak", grammar: "make", label: "make" },
 ];
 
 /** Whether `lowerPath` is claimed by an extension-table entry: a suffix match for an
@@ -514,6 +534,9 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   scss: {},
   csv: {},
   cmake: {},
+  bash: {},
+  perl: {},
+  make: {},
 };
 
 /**
@@ -566,6 +589,10 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   csv: new Set<string>(),
   // CMake: every command is a `normal_command`; extractCmake emits its call edges.
   cmake: new Set<string>(),
+  // Bash and Perl: their own walkers (extractBash / extractPerl) emit the call edges.
+  bash: new Set<string>(),
+  perl: new Set<string>(),
+  make: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -662,6 +689,9 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   if (lang === "scss") return extractScss(rel, source, root);
   if (lang === "csv") return extractCsv(rel, source, root);
   if (lang === "cmake") return extractCmake(rel, source, root);
+  if (lang === "bash") return extractBash(rel, source, root);
+  if (lang === "perl") return extractPerl(rel, source, root);
+  if (lang === "make") return extractMake(rel, source, root);
   if (lang === "razor") return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   const bindings = collectBindings(root, lang);
   const importedSymbols = collectImportedSymbols(root, lang);
@@ -3639,6 +3669,436 @@ function extractCmake(rel: string, source: string, root: Parser.SyntaxNode): Ext
     for (const child of node.namedChildren) visit(child, parentId);
   };
   visit(root, rel);
+  nodes[0].body_text = fileResidual(source, nodes.slice(1));
+  return { nodes, rawEdges };
+}
+
+/** Shell commands that run another script in the current shell: an import. */
+const BASH_SOURCE_COMMANDS = new Set(["source", "."]);
+
+/** A shell word as written, without surrounding quotes when it is a plain string. */
+function bashWord(node: Parser.SyntaxNode | null | undefined): string | null {
+  if (!node) return null;
+  if (node.type === "word" || node.type === "raw_string") return node.text.replace(/^'|'$/g, "");
+  if (node.type === "string") return node.text.replace(/^"|"$/g, "");
+  return node.text;
+}
+
+/**
+ * Bash (`*.sh`, `*.bash`, `.bashrc`, `.bash_profile`). Shell has one kind of
+ * definition and one kind of statement, so it gets its own walker:
+ * - `function name { … }` / `name() { … }` become `function` nodes;
+ * - every command invocation is a `calls` edge to its command name, from the
+ *   enclosing function (else the file). A call to a function of this project
+ *   resolves; an external program (`make`, `grep`) or a builtin finds nothing and
+ *   drops;
+ * - `source f` / `. f` is an `imports` edge, resolved in resolve.ts relative to the
+ *   sourcing script.
+ * Command names built from expansions (`$cmd`, `"${tool}"`) are left alone: what they
+ * run is only known at run time.
+ */
+function extractBash(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+
+  const visit = (node: Parser.SyntaxNode, parentId: string): void => {
+    if (node.type === "function_definition") {
+      const name = node.childForFieldName("name")?.text;
+      if (name) {
+        const id = mintId(`${rel}#${name}`, minted);
+        const body = node.childForFieldName("body");
+        const header = body ? source.slice(node.startIndex, body.startIndex) : node.text.split("\n")[0]!;
+        nodes.push({
+          id,
+          name,
+          kind: "function",
+          path: rel,
+          span: `L${node.startPosition.row + 1}-L${node.endPosition.row + 1}`,
+          signature: clean(header),
+          exported: true,
+          origin: "ast",
+          body_hash: contentHash(node.text),
+          body_text: searchBody(node.text),
+          summary_state: "pending",
+          summary: null,
+          crux: null,
+        });
+        rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+        for (const child of node.namedChildren) visit(child, id);
+        return;
+      }
+    }
+    if (node.type === "command") {
+      const nameNode = node.childForFieldName("name");
+      const word = nameNode?.namedChildren[0];
+      const name = word && word.type === "word" ? word.text : null;
+      if (name) {
+        if (BASH_SOURCE_COMMANDS.has(name)) {
+          const arg = bashWord(node.childrenForFieldName("argument")[0]);
+          if (arg) rawEdges.push({ source: rel, relation: "imports", specifier: arg, file: rel });
+        } else {
+          rawEdges.push({ source: parentId, relation: "calls", name, file: rel });
+        }
+      }
+    }
+    for (const child of node.namedChildren) visit(child, parentId);
+  };
+  visit(root, rel);
+  nodes[0].body_text = fileResidual(source, nodes.slice(1));
+  return { nodes, rawEdges };
+}
+
+/** Perl pragmas: `use strict` and friends configure the compiler and name no module. */
+const PERL_PRAGMAS = new Set([
+  "strict", "warnings", "utf8", "lib", "vars", "constant", "feature", "integer", "bytes", "overload",
+  "subs", "less", "sort", "open", "locale", "bigint", "bignum", "bigrat", "diagnostics", "autodie",
+  "re", "if", "experimental", "version", "mro", "base", "parent", "fields", "encoding",
+]);
+
+/** A Perl quoted string's text without its quotes (`'a'`, `"a"`). */
+function perlString(node: Parser.SyntaxNode): string {
+  return node.text.replace(/^(['"])([\s\S]*)\1$/, "$2");
+}
+
+/** The package names a `use base` / `use parent` / `@ISA` list names: quoted strings
+ * and `qw(...)` items, minus the `-norequire` flag. */
+function perlNameList(node: Parser.SyntaxNode): string[] {
+  const out: string[] = [];
+  const visit = (n: Parser.SyntaxNode): void => {
+    if (n.type === "string_single_quoted" || n.type === "string_double_quoted") out.push(perlString(n));
+    else if (n.type === "list_item") out.push(n.text);
+    else for (const c of n.namedChildren) visit(c);
+  };
+  visit(node);
+  return out.map((s) => s.trim()).filter((s) => /^[A-Za-z_]\w*(?:::\w+)*$/.test(s));
+}
+
+/**
+ * Perl (`*.pl`, `*.pm`, `*.t`). A package is a namespace, not a lexical block — every
+ * `package X;` statement switches the current package for what follows — so it gets
+ * its own walker:
+ * - `package X;` and `package X { … }` become `package` nodes, spanning their block or
+ *   up to the next `package` statement;
+ * - `sub name { … }` becomes a `method` owned by the current package (keyed by the full
+ *   package name, so `My::Util->new()` resolves to `My::Util`'s `new` and never to
+ *   `Other::Util`'s), id'd `file#Pkg::name`; a `function` in a script with no package;
+ * - `foo(…)`, `foo …`, `&foo(…)` and `Pkg::foo(…)` are `calls` edges; `Pkg->m(…)` is a
+ *   member call typed by `Pkg`; `$obj->m(…)` is too, with the enclosing package as the
+ *   type when the receiver is `$self` / `$class`;
+ * - `use Module` / `require Module` are `imports` edges (pragmas like `strict` are not),
+ *   resolved to the in-repo `.pm` in resolve.ts;
+ * - `use parent` / `use base` / `our @ISA = (…)` are `extends` edges from the package.
+ * Builtins (`print`, `bless`, `shift`) are calls to names nothing defines, so they drop.
+ */
+function extractPerl(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  const lines = source.split("\n");
+
+  const mint = (name: string, kind: Kind, node: Parser.SyntaxNode, endRow: number, parentId: string, owner?: string): string => {
+    const id = mintId(`${rel}#${owner ? `${owner}::${name}` : name}`, minted);
+    const body = node.childForFieldName("body");
+    const header = body ? source.slice(node.startIndex, body.startIndex) : lines[node.startPosition.row] ?? node.text;
+    const text = lines.slice(node.startPosition.row, endRow + 1).join("\n");
+    nodes.push({
+      id,
+      name,
+      kind,
+      path: rel,
+      span: `L${node.startPosition.row + 1}-L${endRow + 1}`,
+      signature: clean(header.replace(/;\s*$/, "")),
+      exported: !name.startsWith("_"), // Perl's convention for a private sub
+      origin: "ast",
+      body_hash: contentHash(text),
+      body_text: searchBody(text),
+      summary_state: "pending",
+      summary: null,
+      crux: null,
+      ...(owner ? { owner } : {}),
+    });
+    rawEdges.push({ source: parentId, relation: "contains", targetId: id, file: rel });
+    return id;
+  };
+
+  /** The package in effect: its node id and its full name (the owner key of its subs). */
+  type Pkg = { id: string; name: string };
+
+  const walk = (children: Parser.SyntaxNode[], pkg: Pkg | null, parentId: string): void => {
+    let current = pkg;
+    let currentParent = parentId;
+    children.forEach((node, i) => {
+      if (node.type === "package_statement") {
+        const name = node.namedChildren.find((c) => c.type === "package_name")?.text;
+        if (!name) return;
+        const block = node.childForFieldName("body");
+        if (block) {
+          // `package X { … }`: scoped to the block.
+          const id = mint(name, "package", node, node.endPosition.row, parentId);
+          walk(block.namedChildren, { id, name }, id);
+          return;
+        }
+        // `package X;`: runs until the next package statement at this level — to the
+        // last statement before it, so trailing blank lines are not part of the span.
+        const rest = children.slice(i + 1);
+        const nextAt = rest.findIndex((c) => c.type === "package_statement");
+        const owned = nextAt === -1 ? rest : rest.slice(0, nextAt);
+        const end = owned.length > 0 ? owned[owned.length - 1]!.endPosition.row : node.endPosition.row;
+        const id = mint(name, "package", node, Math.max(node.startPosition.row, end), parentId);
+        current = { id, name };
+        currentParent = id;
+        return;
+      }
+      statement(node, current, currentParent);
+    });
+  };
+
+  const fromOf = (pkg: Pkg | null, parentId: string) => pkg?.id ?? parentId;
+
+  const statement = (node: Parser.SyntaxNode, pkg: Pkg | null, parentId: string): void => {
+    switch (node.type) {
+      case "function_definition":
+      case "function_definition_without_sub": {
+        const name = node.childForFieldName("name")?.text;
+        if (!name) break;
+        const id = pkg
+          ? mint(name, "method", node, node.endPosition.row, parentId, pkg.name)
+          : mint(name, "function", node, node.endPosition.row, parentId);
+        const body = node.childForFieldName("body");
+        if (body) for (const c of body.namedChildren) expression(c, pkg, id);
+        return;
+      }
+      case "use_no_statement":
+      case "require_statement": {
+        if (node.type === "use_no_statement" && node.childForFieldName("no")) break; // `no strict`
+        const mod = node.childForFieldName("package_name")?.text;
+        if (!mod) break;
+        if (mod === "base" || mod === "parent") {
+          for (const base of perlNameList(node)) {
+            rawEdges.push({ source: fromOf(pkg, parentId), relation: "extends", name: base, file: rel });
+            rawEdges.push({ source: rel, relation: "imports", specifier: base, file: rel });
+          }
+          return;
+        }
+        if (!PERL_PRAGMAS.has(mod)) rawEdges.push({ source: rel, relation: "imports", specifier: mod, file: rel });
+        return;
+      }
+      case "use_parent_statement": {
+        const norequire = node.namedChildren.some((c) => c.type === "no_require");
+        for (const base of perlNameList(node)) {
+          rawEdges.push({ source: fromOf(pkg, parentId), relation: "extends", name: base, file: rel });
+          if (!norequire) rawEdges.push({ source: rel, relation: "imports", specifier: base, file: rel });
+        }
+        return;
+      }
+      case "binary_expression": {
+        // `our @ISA = ('Base');` / `@ISA = qw(Base)` — inheritance by assignment.
+        const lhs = node.namedChildren[0];
+        if (lhs && /@ISA\b/.test(lhs.text)) {
+          for (const base of perlNameList(node.namedChildren[1] ?? node)) {
+            rawEdges.push({ source: fromOf(pkg, parentId), relation: "extends", name: base, file: rel });
+          }
+          return;
+        }
+        break;
+      }
+    }
+    expression(node, pkg, fromOf(pkg, parentId));
+  };
+
+  const expression = (node: Parser.SyntaxNode, pkg: Pkg | null, from: string): void => {
+    if (node.type === "function_definition" || node.type === "function_definition_without_sub") {
+      statement(node, pkg, from); // a nested named sub
+      return;
+    }
+    if (node.type === "call_expression_with_bareword") {
+      const name = node.childForFieldName("function_name")?.text;
+      const qualifier = node.childForFieldName("package_name")?.text;
+      if (name && qualifier) {
+        // `My::Util::log_it(…)`: a sub of a named package — typed like `Pkg->m()`.
+        rawEdges.push({ source: from, relation: "calls", name, viaMember: true, recvType: qualifier, file: rel });
+      } else if (name) {
+        // A bare call reaches a sub of the current package or an imported one; both are
+        // `method` nodes when they live in a package, so allow either kind.
+        rawEdges.push({ source: from, relation: "calls", name, kinds: ["function", "method"], file: rel });
+      }
+    } else if (node.type === "method_invocation") {
+      const name = node.childForFieldName("function_name")?.text;
+      const viaPkg = node.childForFieldName("package_name")?.text;
+      const obj = (node.childForFieldName("object_return_value") ?? node.childForFieldName("object"))?.text;
+      const recvType = viaPkg
+        ? viaPkg
+        : pkg && (obj === "$self" || obj === "$class" || obj === "__PACKAGE__")
+          ? pkg.name
+          : undefined;
+      if (name) rawEdges.push({ source: from, relation: "calls", name, viaMember: true, recvType, file: rel });
+    }
+    for (const child of node.namedChildren) expression(child, pkg, from);
+  };
+
+  walk(root.namedChildren, null, rel);
+  nodes[0].body_text = fileResidual(source, nodes.slice(1));
+  return { nodes, rawEdges };
+}
+
+/** Make's special targets (`.PHONY`, `.SUFFIXES`, `.DEFAULT_GOAL`, …): directives, not targets. */
+const MAKE_SPECIAL_TARGET = /^\.[A-Z_]+$/;
+/** `$(MAKE) -C dir …` / `make -C dir`: a recursive make into `dir`'s Makefile. */
+const MAKE_RECURSE = /(?:\$[({]MAKE[)}]|\bmake)\s+(?:\S+\s+)*?-C\s*([^\s;|&$()]+)/;
+
+/**
+ * Make (`Makefile`, `makefile`, `GNUmakefile`, `*.mk`, `*.mak`):
+ * - each literal target of a rule becomes a `target` node spanning its rule (special
+ *   targets like `.PHONY` excepted); a target given several rules (`clean::`, or a
+ *   rule that only adds prerequisites) is one node, at its first rule;
+ * - each literal prerequisite is a `references` edge from the target to the target of
+ *   that name, so `graft callers app` lists what depends on `app`;
+ * - `NAME = …` / `:=` / `?=` / `+=` define a `variable` node (first assignment), and
+ *   `define NAME … endef` a `function` node — what `$(call NAME, …)` invokes;
+ * - `$(call NAME)` is a `calls` edge, `$(NAME)` / `${NAME}` a `references` edge, from
+ *   the target whose recipe holds it (else the variable being defined, else the file);
+ * - `include` / `-include` / `sinclude` and `$(MAKE) -C dir` are `imports` edges,
+ *   resolved to the in-repo file in resolve.ts.
+ * Rules are never nested in make, so every target is contained by the file — even one
+ * the grammar parses inside the recipe of the rule before it (a conditional after a
+ * recipe lands there).
+ */
+function extractMake(rel: string, source: string, root: Parser.SyntaxNode): ExtractResult {
+  const nodes: NodeV1[] = [fileNodeOf(rel, source)];
+  const rawEdges: RawEdge[] = [];
+  const minted = new Set<string>([rel]);
+  /** Symbols already defined in this file, by kind and name: a re-definition reuses the node. */
+  const defined = new Map<string, string>();
+
+  /** The last row `n` really occupies: make's nodes end at the start of the next line,
+   * which would put every span one line too long. */
+  const lastRow = (n: Parser.SyntaxNode): number =>
+    n.endPosition.column === 0 && n.endPosition.row > n.startPosition.row ? n.endPosition.row - 1 : n.endPosition.row;
+
+  const mint = (name: string, kind: Kind, node: Parser.SyntaxNode, header: string, endRow = lastRow(node)): string => {
+    const key = `${kind}\0${name}`;
+    const known = defined.get(key);
+    if (known) return known;
+    const id = mintId(`${rel}#${name}`, minted);
+    const lines = source.split("\n").slice(node.startPosition.row, endRow + 1).join("\n");
+    nodes.push({
+      id,
+      name,
+      kind,
+      path: rel,
+      span: `L${node.startPosition.row + 1}-L${endRow + 1}`,
+      signature: header.replace(/\s+/g, " ").trim() || null,
+      exported: true,
+      origin: "ast",
+      body_hash: contentHash(lines),
+      body_text: searchBody(lines),
+      summary_state: "pending",
+      summary: null,
+      crux: null,
+    });
+    rawEdges.push({ source: rel, relation: "contains", targetId: id, file: rel });
+    defined.set(key, id);
+    return id;
+  };
+
+  /** A literal word (no `$` expansion), or null. */
+  const literal = (n: Parser.SyntaxNode): string | null => (n.type === "word" && !n.text.includes("$") ? n.text : null);
+
+  /** `$(call …)`, `$(VAR)` and `$(MAKE) -C dir` anywhere under `node`, attributed to `owner`. */
+  const uses = (node: Parser.SyntaxNode, owner: string): void => {
+    if (node.type === "rule") {
+      rule(node);
+      return;
+    }
+    if (node.type === "function_call" && node.childForFieldName("function")?.text === "call") {
+      const first = node.namedChildren.find((c) => c.type === "arguments")?.namedChildren[0];
+      const name = first?.text.trim();
+      if (name && /^[\w.-]+$/.test(name)) rawEdges.push({ source: owner, relation: "calls", name, file: rel });
+    } else if (node.type === "variable_reference") {
+      const inner = node.namedChildren[0];
+      const name = inner && node.namedChildren.length === 1 ? literal(inner) : null;
+      if (name) rawEdges.push({ source: owner, relation: "references", name, kinds: ["variable", "function"], file: rel });
+    } else if (node.type === "recipe_line") {
+      const dir = MAKE_RECURSE.exec(node.text)?.[1]?.replace(/[/\\]+$/, "");
+      if (dir) rawEdges.push({ source: rel, relation: "imports", specifier: `${dir}/Makefile`, file: rel });
+    }
+    for (const child of node.namedChildren) uses(child, owner);
+  };
+
+  const rule = (node: Parser.SyntaxNode): void => {
+    const targets = node.namedChildren.find((c) => c.type === "targets");
+    const recipe = node.namedChildren.find((c) => c.type === "recipe");
+    const header = recipe ? source.slice(node.startIndex, recipe.startIndex) : node.text;
+    // The rule ends at its last recipe line — not at a conditional (and the rules in it)
+    // the grammar nests in the recipe when it follows the rule directly.
+    const own = [
+      ...node.namedChildren.filter((c) => c.type !== "recipe"),
+      ...(recipe?.namedChildren.filter((c) => c.type === "recipe_line") ?? []),
+    ];
+    const end = Math.max(node.startPosition.row, ...own.map(lastRow));
+    const names = (targets?.namedChildren ?? []).map(literal).filter((n): n is string => n !== null);
+    const ids = names.filter((n) => !MAKE_SPECIAL_TARGET.test(n)).map((n) => mint(n, "target", node, header, end));
+    const owner = ids[0] ?? rel;
+    for (const field of ["normal", "order_only"]) {
+      for (const prereq of node.childForFieldName(field)?.namedChildren ?? []) {
+        const dep = literal(prereq);
+        if (dep && !dep.includes("%")) {
+          for (const id of ids) rawEdges.push({ source: id, relation: "references", name: dep, kinds: ["target"], file: rel });
+        } else {
+          uses(prereq, owner); // `$(OBJS)` names a variable
+        }
+      }
+    }
+    if (recipe) uses(recipe, owner);
+  };
+
+  const visit = (node: Parser.SyntaxNode): void => {
+    switch (node.type) {
+      case "rule":
+        rule(node);
+        return;
+      case "include_directive":
+        for (const f of node.childForFieldName("filenames")?.namedChildren ?? []) {
+          const spec = literal(f);
+          if (spec) rawEdges.push({ source: rel, relation: "imports", specifier: spec, file: rel });
+        }
+        return;
+      case "define_directive": {
+        const name = node.childForFieldName("name")?.text;
+        if (!name) break;
+        const id = mint(name, "function", node, `define ${name}`);
+        const body = node.childForFieldName("value")?.text ?? "";
+        // A define body is raw text to the grammar; its `$(call x)` and `$(VAR)` uses
+        // are read off it.
+        for (const m of body.matchAll(/\$[({]call\s+([\w.-]+)/g)) rawEdges.push({ source: id, relation: "calls", name: m[1]!, file: rel });
+        for (const m of body.matchAll(/\$[({]([\w.-]+)[)}]/g)) {
+          rawEdges.push({ source: id, relation: "references", name: m[1]!, kinds: ["variable", "function"], file: rel });
+        }
+        return;
+      }
+      case "variable_assignment": {
+        const name = node.childForFieldName("name")?.text;
+        const value = node.childForFieldName("value");
+        // `target: VAR = x` is a target-specific value, not a definition of VAR.
+        if (!name || name.includes("$") || node.childForFieldName("target_or_pattern")) {
+          if (value) uses(value, rel);
+          return;
+        }
+        const id = mint(name, "variable", node, node.text.split("\n")[0]!);
+        if (value) uses(value, id);
+        return;
+      }
+    }
+    // An expansion at file level (an `ifeq ($(OS),…)` condition, a bare `$(info …)`).
+    if (node.type === "variable_reference" || node.type === "function_call" || node.type === "recipe_line") {
+      uses(node, rel);
+      return;
+    }
+    // Conditionals, export/override wrappers, …: what they hold is file-level.
+    for (const child of node.namedChildren) visit(child);
+  };
+  for (const child of root.namedChildren) visit(child);
   nodes[0].body_text = fileResidual(source, nodes.slice(1));
   return { nodes, rawEdges };
 }

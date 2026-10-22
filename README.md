@@ -490,7 +490,15 @@ compiler-grade layer, all `$0` and deterministic (no model, no key):
   `function()`/`macro()` definitions, `add_library`/`add_executable` targets,
   calls between them, `target_link_libraries` as target references,
   `include()`/`add_subdirectory()` as imports; needs the optional
-  `tree-sitter-cmake` grammar built), and **Vue** single-file components (their
+  `tree-sitter-cmake` grammar built), **Bash** (`.sh`, `.bash`, `.bashrc`,
+  `.bash_profile`: functions, calls between them, `source`/`.` as imports),
+  **Perl** (`.pl`, `.pm`, `.t`: packages, subs, `$self->m()` and `Pkg->m()`
+  resolved through the package, `use`/`require` as imports, `use parent`/`@ISA`
+  as inheritance), **Make** (`Makefile`, `makefile`, `GNUmakefile`, `*.mk`,
+  `*.mak`: rule targets, variables and `define`s, prerequisites and `$(VAR)` as
+  references, `$(call …)` as calls, `include` and `$(MAKE) -C dir` as imports)
+  — Bash, Perl and Make need the optional `tree-sitter-bash` / `tree-sitter-perl`
+  / `tree-sitter-make` grammars built — and **Vue** single-file components (their
   `<script>` blocks go through the TypeScript extractor).
 
 - **Broad**: symbols (functions, classes, methods, types, …) plus name-resolved
@@ -511,7 +519,7 @@ compiler-grade layer, all `$0` and deterministic (no model, no key):
   **gopls** (Go), **pyright** (Python), **typescript-language-server** (TS/JS).
   It's best-effort: with no server installed the graph is unchanged.
 
-Twenty-four languages, plus Vue single-file components. A file whose language isn't listed is skipped, not
+Twenty-seven languages, plus Vue single-file components. A file whose language isn't listed is skipped, not
 indexed. `graft languages` prints this list as a table for your install: each
 language's level (`full`, `broad`, `symbols`, `structural`, `file-only`, or
 `skipped` when an optional grammar isn't built), whether it gets symbols,
@@ -732,6 +740,12 @@ trail config follow-nested-repos on|off       # same as build --[no-]follow-nest
 trail prices update                  # fetch LiteLLM's public model price catalog (one anonymous GET) into ~/.graft/prices.json,
                                      # so savings for models the built-in table does not list are priced in dollars (kept until the next update)
 trail prices status [model]          # whether a local catalog is stored and how old it is; with a model, the price used for it
+
+trail savings [period] [dir]         # tokens and dollars saved in this repo, per model: all time, or a yyyy / yyyy-mm / yyyy-mm-dd period
+trail savings --all [period]         # the same added up across every folder graft has recorded a saving in on this machine,
+                                     # per repo and per model (the folders are listed in ~/.graft/repos.json; --json for scripts)
+                                     # the first run also finds repos used before that list existed, through the folders
+                                     # Claude Code, Kilo, VS Code/Cursor/Windsurf, JetBrains and Codex remember; --discover rescans
 
 trail status [dir]                   # the graft map, learnings and tokens saved, on one screen
 trail upgrade                        # npm install -g the latest published version

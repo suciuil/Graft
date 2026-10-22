@@ -1,5 +1,5 @@
 /**
- * Tests for the C/C++/CMake depth extractors and the JSON/YAML/Markdown/SCSS breadth
+ * Tests for the C/C++/CMake/Bash/Perl/Make depth extractors and the JSON/YAML/Markdown/SCSS breadth
  * extractors. Each grammar is an optional, locally-built native dependency; the
  * per-language tests skip when its binding isn't built.
  */
@@ -148,6 +148,166 @@ test("CMake depth: functions, macros, targets, calls, target links and includes"
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/** Build a repo from a `path → source` map (subdirectories included) and return its graph. */
+async function buildTree(files: Record<string, string>): Promise<GraphV1> {
+  const dir = mkdtempSync(join(tmpdir(), "graft-lang-"));
+  try {
+    for (const [name, src] of Object.entries(files)) {
+      mkdirSync(join(dir, name, ".."), { recursive: true });
+      writeFileSync(join(dir, name), src);
+    }
+    await buildGraph(dir);
+    return readGraph(wiringPath(join(dir, "graft")))!;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("Bash depth: functions, calls across sourced scripts, source imports", { skip: grammarAvailable("bash") ? false : "bash grammar not built" }, async () => {
+  const graph = await buildTree({
+    "scripts/deploy.sh": [
+      "#!/bin/bash",
+      "source ./lib/util.sh",
+      '. "$HOME/.profile"',
+      "function deploy() {",
+      '  local target="$1"',
+      '  log_info "deploying $target"',
+      "  build_all",
+      "}",
+      "build_all() {",
+      "  make -j4 && run_tests",
+      "}",
+      "deploy prod",
+      "",
+    ].join("\n"),
+    "scripts/lib/util.sh": 'log_info() { echo "[info] $*"; }\nrun_tests() { log_info tests; }\n',
+    "notes.txt": "not a script\n",
+  });
+  assert.deepEqual(graph.meta.languages, ["bash"]);
+  assert.equal(nodeById(graph, "scripts/deploy.sh#deploy")?.kind, "function");
+  assert.equal(nodeById(graph, "scripts/deploy.sh#deploy")?.span, "L4-L8");
+  assert.equal(nodeById(graph, "scripts/deploy.sh#deploy")?.signature, "function deploy()");
+  assert.equal(nodeById(graph, "scripts/deploy.sh#build_all")?.signature, "build_all()");
+  assert.ok(hasEdge(graph, "calls", "scripts/deploy.sh", "scripts/deploy.sh#deploy"), "a top-level call");
+  assert.ok(hasEdge(graph, "calls", "scripts/deploy.sh#deploy", "scripts/deploy.sh#build_all"));
+  assert.ok(hasEdge(graph, "calls", "scripts/deploy.sh#deploy", "scripts/lib/util.sh#log_info"), "into a sourced script");
+  assert.ok(hasEdge(graph, "calls", "scripts/deploy.sh#build_all", "scripts/lib/util.sh#run_tests"), "after && too");
+  assert.ok(hasEdge(graph, "imports", "scripts/deploy.sh", "scripts/lib/util.sh"), "source, relative to the script");
+  assert.ok(hasEdge(graph, "imports", "scripts/deploy.sh", "$HOME/.profile"), "an expansion stays the raw path");
+  assert.ok(!graph.edges.some((e) => e.relation === "calls" && /#(make|echo|local)$/.test(e.target)), "external commands drop");
+});
+
+test("Perl depth: packages, subs, typed method calls, use/require, use parent", { skip: grammarAvailable("perl") ? false : "perl grammar not built" }, async () => {
+  const graph = await buildTree({
+    "lib/My/Base.pm": [
+      "package My::Base;",
+      "use strict;",
+      "sub new { my ($class, %a) = @_; my $self = bless {%a}, $class; $self->init; return $self; }",
+      "sub init { 1 }",
+      "1;",
+      "",
+    ].join("\n"),
+    "lib/My/App.pm": [
+      "package My::App;",
+      "use strict;",
+      "use warnings;",
+      "use parent -norequire, 'My::Base';",
+      "use My::Util qw(helper);",
+      "use JSON::PP;",
+      "sub init {",
+      "  my $self = shift;",
+      "  helper(1);",
+      '  My::Util::log_it("x");',
+      "  $self->_setup;",
+      "}",
+      "sub _setup { return 1 }",
+      "1;",
+      "",
+    ].join("\n"),
+    "lib/My/Util.pm": "package My::Util;\nour @ISA = ('Exporter');\nsub helper { log_it(\"h\") }\nsub log_it { print @_ }\n1;\n",
+    "t/app.t": 'use My::App;\nmy $app = My::App->new(name => "x");\nprint "ok\\n";\n',
+  });
+  assert.deepEqual(graph.meta.languages, ["perl"]);
+  assert.equal(nodeById(graph, "lib/My/App.pm#My::App")?.kind, "package");
+  assert.equal(nodeById(graph, "lib/My/App.pm#My::App")?.span, "L1-L14", "a `package X;` runs to the end of its region");
+  const init = nodeById(graph, "lib/My/App.pm#My::App::init");
+  assert.equal(init?.kind, "method");
+  assert.equal(init?.owner, "My::App");
+  assert.equal(init?.span, "L7-L12");
+  assert.equal(nodeById(graph, "lib/My/App.pm#My::App::_setup")?.exported, false, "a leading underscore is private");
+  assert.ok(nodeById(graph, "lib/My/Base.pm#My::Base::init"), "same sub name in two packages: two ids");
+
+  assert.ok(hasEdge(graph, "imports", "lib/My/App.pm", "lib/My/Util.pm"), "use My::Util → lib/My/Util.pm");
+  assert.ok(hasEdge(graph, "imports", "lib/My/App.pm", "JSON::PP"), "a CPAN module stays its name");
+  assert.ok(!graph.edges.some((e) => e.relation === "imports" && /^(strict|warnings|parent)$/.test(e.target)), "pragmas are not imports");
+  assert.ok(hasEdge(graph, "imports", "t/app.t", "lib/My/App.pm"));
+  assert.ok(hasEdge(graph, "extends", "lib/My/App.pm#My::App", "lib/My/Base.pm#My::Base"), "use parent");
+  assert.ok(hasEdge(graph, "extends", "lib/My/Util.pm#My::Util", "Exporter"), "@ISA, external base kept by name");
+
+  assert.ok(hasEdge(graph, "calls", "lib/My/App.pm#My::App::init", "lib/My/Util.pm#My::Util::helper"), "imported bare call");
+  assert.ok(hasEdge(graph, "calls", "lib/My/App.pm#My::App::init", "lib/My/Util.pm#My::Util::log_it"), "Pkg::sub(...)");
+  assert.ok(hasEdge(graph, "calls", "lib/My/App.pm#My::App::init", "lib/My/App.pm#My::App::_setup"), "$self->m");
+  assert.ok(hasEdge(graph, "calls", "lib/My/Base.pm#My::Base::new", "lib/My/Base.pm#My::Base::init"), "$self->m in the base");
+  assert.ok(hasEdge(graph, "calls", "t/app.t", "lib/My/Base.pm#My::Base::new"), "Pkg->new walks use parent to the base");
+  assert.ok(!hasEdge(graph, "calls", "lib/My/Base.pm#My::Base::new", "lib/My/App.pm#My::App::init"), "$self->init stays in its own package");
+});
+
+test("Make depth: targets, prerequisites, variables, defines, includes, recursive make", { skip: grammarAvailable("make") ? false : "make grammar not built" }, async () => {
+  const graph = await buildTree({
+    Makefile: [
+      "include mk/common.mk",
+      "-include $(wildcard *.d)",
+      "CC := gcc",
+      "OBJS = main.o util.o",
+      "define compile",
+      "\t$(CC) $(CFLAGS) -c $< -o $@",
+      "endef",
+      ".PHONY: all clean",
+      "all: app docs",
+      "app: $(OBJS) libcore.a",
+      "\t$(CC) -o $@ $^",
+      "\t$(MAKE) -C sub install",
+      "%.o: %.c",
+      "\t$(call compile)",
+      "libcore.a: ; ar rcs $@",
+      "docs clean:: | build",
+      "\trm -rf build",
+      "build:",
+      "\tmkdir -p $@",
+      "ifeq ($(OS),Windows_NT)",
+      "win: app",
+      "endif",
+      "",
+    ].join("\n"),
+    "mk/common.mk": "CFLAGS ?= -O2 -Wall\n",
+    "sub/Makefile": "install:\n\tcp x /usr/local/bin\n",
+    "Makefile.am": "bin_PROGRAMS = app\n",
+  });
+  assert.deepEqual(graph.meta.languages, ["make"], "Makefile.am (automake) is not claimed");
+  const app = nodeById(graph, "Makefile#app");
+  assert.equal(app?.kind, "target");
+  assert.equal(app?.span, "L10-L12", "a rule spans its recipe, not the next line");
+  assert.equal(app?.signature, "app: $(OBJS) libcore.a");
+  assert.equal(nodeById(graph, "Makefile#build")?.span, "L18-L19", "a conditional after a recipe is not part of it");
+  assert.equal(nodeById(graph, "Makefile#win")?.kind, "target", "a rule inside a conditional");
+  assert.ok(nodeById(graph, "Makefile#docs") && nodeById(graph, "Makefile#clean"), "every target of a multi-target rule");
+  assert.equal(nodeById(graph, "Makefile#.PHONY"), undefined, "special targets are not targets");
+  assert.equal(nodeById(graph, "Makefile#CC")?.kind, "variable");
+  assert.equal(nodeById(graph, "Makefile#compile")?.kind, "function");
+
+  assert.ok(hasEdge(graph, "references", "Makefile#all", "Makefile#app"), "prerequisite → target");
+  assert.ok(hasEdge(graph, "references", "Makefile#app", "Makefile#libcore.a"));
+  assert.ok(hasEdge(graph, "references", "Makefile#docs", "Makefile#build"), "order-only prerequisite");
+  assert.ok(hasEdge(graph, "references", "Makefile#win", "Makefile#app"));
+  assert.ok(hasEdge(graph, "references", "Makefile#app", "Makefile#OBJS"), "$(OBJS) in the prerequisites");
+  assert.ok(hasEdge(graph, "references", "Makefile#app", "Makefile#CC"), "$(CC) in the recipe");
+  assert.ok(hasEdge(graph, "calls", "Makefile#%.o", "Makefile#compile"), "$(call compile)");
+  assert.ok(hasEdge(graph, "references", "Makefile#compile", "mk/common.mk#CFLAGS"), "a define body, into an included file");
+  assert.ok(hasEdge(graph, "imports", "Makefile", "mk/common.mk"), "include");
+  assert.ok(hasEdge(graph, "imports", "Makefile", "sub/Makefile"), "$(MAKE) -C sub");
+  assert.ok(!graph.edges.some((e) => /#(main\.o|util\.o|MAKE|OS)$/.test(e.target)), "source files and make's own variables drop");
 });
 
 test("C++ header: a .h with a class is parsed as C++, not C", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {

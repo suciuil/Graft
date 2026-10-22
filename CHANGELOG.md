@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- **`graft savings --all`: savings added up across every repo.** Each repo
+  still keeps its own ledger (`graft/.cache/savings.json`). Now, whenever graft
+  records a saving in a repo, it also adds that folder to `~/.graft/repos.json`
+  in your profile (at most one write per repo per day). `graft savings --all
+  [period]` reads every folder on that list and prints each repo's total, a
+  per-model breakdown and one grand total, in tokens, with dollars wherever a
+  rate is known. Each repo is priced at its own rate, so one repo's billing
+  never re-prices another's, and the per-repo lines add up to the total. If a
+  listed folder's ledger is gone, the report names the folder and leaves it out
+  of the totals. `--json` outputs the same data. `GRAFT_REPOS_FILE` points the
+  list at another file.
+- **Repos you used graft in before this version are found automatically.** The
+  first `graft savings --all` also looks through the folders your agents
+  remember working in: Claude Code's project list (`~/.claude.json`), Kilo's
+  sessions, VS Code / Cursor / Windsurf / VSCodium workspaces, JetBrains IDEs'
+  recent projects, and the working folders of Codex sessions. Any of those
+  folders (or a parent folder) that holds a graft savings ledger is added to
+  the list, dated by its own history. This scan runs once. After that, each
+  repo adds itself when it records a saving. `--discover` scans again;
+  `--no-discover` skips the scan. It only reads files, never writes into the
+  hosts' files, and takes well under a second.
+
 ### Changed
 
 - **`graft build --deep` no longer asks for a model on every run.** On the
@@ -94,6 +118,38 @@
   id (`gemini-3.8-flash`) and another as its display name (`Gemini 3.8 Flash`).
 
 ### Added
+
+- **Make support (depth tier).** Through the optional `tree-sitter-make` grammar
+  (`file:../tree-sitter-make`), built by `npm run build:grammars` like the
+  others. `Makefile`, `makefile` and `GNUmakefile` are claimed by name and
+  `*.mk` / `*.mak` by extension; automake's `Makefile.am` / `Makefile.in` are
+  not. Every literal rule target is a `target` node spanning its rule (special
+  targets like `.PHONY` excepted), assignments are `variable` nodes and
+  `define … endef` blocks `function` nodes. A prerequisite is a reference from
+  the target to the target of that name (so `graft callers app` lists what
+  depends on `app`), `$(VAR)` a reference to the variable, `$(call f)` a call;
+  `include` / `-include` / `sinclude` and `$(MAKE) -C dir` are imports resolved
+  to the in-repo file.
+
+- **Bash and Perl support (depth tier).** Through the optional
+  `tree-sitter-bash` and `@ganezdragon/tree-sitter-perl` grammars
+  (`file:../tree-sitter-bash`, `file:../tree-sitter-perl`), built by
+  `npm run build:grammars` like the others.
+  - Bash (`.sh`, `.bash`, `.bashrc`, `.bash_profile`): `function f` / `f()`
+    definitions, every command as a call (project functions resolve, external
+    programs drop), `source f` / `. f` as an import resolved relative to the
+    script.
+  - Perl (`.pl`, `.pm`, `.t`): `package X;` and `package X { … }` as `package`
+    nodes, subs as methods owned by their package (`file#My::App::init`), bare,
+    `&f()` and `Pkg::f()` calls, `Pkg->m()` and `$self->m()` resolved through the
+    package and up `use parent` / `use base` / `@ISA`, `use` / `require Module`
+    as imports resolved to the in-repo `Module.pm` (pragmas like `strict` are
+    not imports).
+- **`npm run build:grammars` regenerates an ABI-15 parser on the first build
+  too.** It only did so for a grammar it had already built once, so a fresh
+  checkout of an upstream that ships an ABI-15 `parser.c` (tree-sitter-bash,
+  tree-sitter-perl) compiled it unchanged and then failed the load check. It is
+  now regenerated at the runtime's ABI (14) before the build.
 
 - **The newer Kotlin grammar is built again.** `tree-sitter-kotlin-local` is back
   in `optionalDependencies`, now pointing at `../tree-sitter-kotlin-grammar`

@@ -174,5 +174,35 @@
     },
     "build": "b11054c177d1aad6178ce1016deb8a352bbcb986a86e134b941b41af6d45217e",
     "pack": "d085276a3abdfb1f2ce67f744fc6e4e3f891a93982e9b10709f13168988decde"
+  },
+  "@ganezdragon/tree-sitter-perl": {
+    "gen": {
+      ".": {
+        "in": "7b38d628fdda3181fe440863e2bdee203beca8343f088c68f7da34cdd93e873b",
+        "parser": "320673407ef8cab487808169cd048da6a496da82b47b7f9da17f889e6c4a4686"
+      }
+    },
+    "build": "3c105f9504c04fb9cd72cb5291a0b440cf6bae358d02ee16d2d0e4547df93120",
+    "pack": "10fa3ce4bc81c83dafe47bf72fca08e634773c18d56b2b16a54a9fc7e2797786"
+  },
+  "tree-sitter-bash": {
+    "gen": {
+      ".": {
+        "in": "905bc371d680ca7d8c9a98bf6d63fe8e4de2cfac4feacc86546cf6ba2a6a09a9",
+        "parser": "917c39757f4bb9d29c1d0b3ea0d9584b5da83db52c9b3f1a702635ef6101de77"
+      }
+    },
+    "build": "636567be61d3464317c1a52c1fee3a36ec4ef3a423d87f89b1826fc70df56526",
+    "pack": "d8780cf0f3042f1a77c350a3d7dd46a2a28b6c0bc0cd78fd336c4fd856a7a82e"
+  },
+  "tree-sitter-make": {
+    "gen": {
+      ".": {
+        "in": "6348284fa5ba2d2c8b0f6457518dd39deac486e56c9c609bb55f2225f491cdf9",
+        "parser": "07cdcd841349bf4134cd273d67551bfb9c36ec6c70a17467648734fe6cbd1817"
+      }
+    },
+    "build": "635245621aa24efb27b87b6bec3166f8228c5eed2339683bd826d7df7ef22caa",
+    "pack": "95c23e7aaed1b5b7a2bfd922474af91ff578d3d45cb84a06adaa610de18984e2"
   }
 }

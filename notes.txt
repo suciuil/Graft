@@ -1,0 +1,5 @@
+npm run build => updates my local installation
+npm run pack:bundle => builds the package with all the gramars (including optional ones)
+npm i -g ./nanonets-graft-0.23.0-win32-x64.tgz --ignore-scripts --dangerously-allow-all-scripts => installs the package on a new machine
+
+npx node-gyp rebuild - build a tree-sitter package

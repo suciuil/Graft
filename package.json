@@ -80,9 +80,11 @@
     "web-tree-sitter": "^0.26.13"
   },
   "optionalDependencies": {
+    "@ganezdragon/tree-sitter-perl": "file:../tree-sitter-perl",
     "@tree-sitter-grammars/tree-sitter-markdown": "file:../tree-sitter-markdown",
     "@tree-sitter-grammars/tree-sitter-xml": "file:../tree-sitter-xml",
     "@tree-sitter-grammars/tree-sitter-yaml": "file:../tree-sitter-yaml",
+    "tree-sitter-bash": "file:../tree-sitter-bash",
     "tree-sitter-c": "file:../tree-sitter-c",
     "tree-sitter-c-sharp": "file:../tree-sitter-c-sharp",
     "tree-sitter-cmake": "file:../tree-sitter-cmake",
@@ -93,6 +95,7 @@
     "tree-sitter-html": "file:../tree-sitter-html",
     "tree-sitter-json": "file:../tree-sitter-json",
     "tree-sitter-kotlin-local": "file:../tree-sitter-kotlin-grammar",
+    "tree-sitter-make": "file:../tree-sitter-make",
     "tree-sitter-plsql": "file:../tree-sitter-plsql",
     "tree-sitter-razor": "file:../tree-sitter-razor",
     "tree-sitter-scss": "file:../tree-sitter-scss"

@@ -17,8 +17,11 @@
  * the saving is filed under {@link UNKNOWN_MODEL} and reported in tokens alone,
  * never priced at a guess (see `context/price.ts` for why).
  */
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { cacheDir, readJson, writeJsonAtomic } from '../util/state.js';
+import { locateLedger, pathKey, readRepoRegistry, registerRepo, repoRegistryPath } from './repo-registry.js';
 import {
   NO_MODEL,
   blendedRate,
@@ -206,7 +209,13 @@ export function ledgerPath(d: string): string {
 }
 
 export function readLedger(d: string): SavingsLedger {
-  const l = readJson<SavingsLedger>(ledgerPath(d));
+  return readLedgerFile(ledgerPath(d));
+}
+
+/** {@link readLedger} by file path, for ledgers found through the user's repo
+ * registry rather than resolved from a repo root. */
+export function readLedgerFile(p: string): SavingsLedger {
+  const l = readJson<SavingsLedger>(p);
   return l && typeof l.days === 'object' && l.days !== null ? l : { days: {} };
 }
 
@@ -249,7 +258,12 @@ function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedge
     const key = ledgerKey(model);
     const bucket = (day[key] ??= { savedTokens: 0, costMicros: 0, tokensBilled: 0 });
     patch(bucket);
-    writeJsonAtomic(ledgerPath(d), ledger);
+    const file = ledgerPath(d);
+    writeJsonAtomic(file, ledger);
+    // Note the folder in the user's profile so `graft savings --all` can find
+    // this ledger from anywhere. Throttled to one write per repo per day, and
+    // never throws.
+    registerRepo(d, file, { when });
   } catch {
     // A lifetime total is never worth failing a hook over.
   }
@@ -412,4 +426,211 @@ export function formatSavingsReport(r: SavingsReport): string {
     `  ${'─'.repeat(modelWidth + tokenWidth + valueWidth + 4)}`,
     line(rows[rows.length - 1]),
   ].join('\n');
+}
+
+// ── every repo on this machine ────────────────────────────────────────────
+
+/** One registered folder's share of a cross-repo report. */
+export interface RepoSavings {
+  root: string;
+  /** The ledger file read, or null when none of its known places holds one. */
+  ledger: string | null;
+  report: SavingsReport;
+}
+
+export interface AllSavingsReport {
+  period: string | null;
+  /** The registry file the folder list came from. */
+  registry: string;
+  /** Folders with something recorded in the period, biggest saving first. */
+  repos: RepoSavings[];
+  /** Registered folders whose ledger is gone (deleted, moved, cache cleared). */
+  missing: string[];
+  /** Every repo added up. Each repo is priced at ITS OWN rate first — a model
+   * billed cheaply in one repo is not re-priced at another repo's rate — so the
+   * per-repo dollars and the per-model dollars both add up to this total. */
+  total: AllReportTotal;
+}
+
+/** A model's savings summed across repos. `unpricedTokens` is the share no repo
+ * could price — non-zero only for a model with no list price that some repos
+ * were billed for and others were not. */
+export interface TotalModelSavings extends ModelSavings {
+  unpricedTokens: number;
+}
+
+export interface AllReportTotal extends SavingsReport {
+  models: TotalModelSavings[];
+}
+
+/**
+ * Roll up every ledger the user's registry lists, over a period.
+ *
+ * Each repo is aggregated on its own (its own measured rates, its own list-rate
+ * fallbacks), and the results are summed — never a merged ledger re-priced as
+ * one, which would blend one repo's billing into another's figures and leave the
+ * per-repo lines not adding up to the total printed under them.
+ */
+export function aggregateAllSavings(
+  period?: string | null,
+  file: string = repoRegistryPath(),
+): AllSavingsReport {
+  const registry = readRepoRegistry(file);
+  const repos: RepoSavings[] = [];
+  const missing: string[] = [];
+  const seenLedgers = new Set<string>();
+  const days = new Set<string>();
+
+  for (const entry of registry.repos) {
+    const ledgerFile = locateLedger(entry);
+    if (!ledgerFile) {
+      missing.push(entry.root);
+      continue;
+    }
+    // Two entries reaching the same file (a repo registered under two
+    // spellings, or a GRAFT_DIR shared by both) must count once.
+    const k = pathKey(ledgerFile);
+    if (seenLedgers.has(k)) continue;
+    seenLedgers.add(k);
+
+    const ledger = readLedgerFile(ledgerFile);
+    const report = aggregateSavings(ledger, period);
+    if (report.models.length === 0) continue;
+    for (const day of Object.keys(ledger.days)) {
+      if (!period || day.startsWith(period)) days.add(day);
+    }
+    repos.push({ root: entry.root, ledger: ledgerFile, report });
+  }
+  repos.sort((a, b) => b.report.savedTokens - a.report.savedTokens || a.root.localeCompare(b.root));
+
+  return { period: period ?? null, registry: file, repos, missing, total: sumReports(repos.map((r) => r.report), period ?? null, days.size) };
+}
+
+/** Add per-repo reports up model by model, keeping each repo's own pricing. */
+function sumReports(reports: SavingsReport[], period: string | null, days: number): AllReportTotal {
+  const byModel = new Map<string, TotalModelSavings & { allMeasured: boolean }>();
+  let savedTokens = 0;
+  let usd = 0;
+  let priced = false;
+  let measured = true;
+  let unpricedTokens = 0;
+
+  for (const r of reports) {
+    savedTokens += r.savedTokens;
+    unpricedTokens += r.unpricedTokens;
+    if (r.usd !== null) {
+      priced = true;
+      usd += r.usd;
+      if (!r.measured) measured = false;
+    }
+    for (const m of r.models) {
+      const acc = byModel.get(m.model) ?? {
+        model: m.model, savedTokens: 0, costMicros: 0, tokensBilled: 0, value: null, unpricedTokens: 0, allMeasured: true,
+      };
+      acc.savedTokens += m.savedTokens;
+      acc.costMicros += m.costMicros;
+      acc.tokensBilled += m.tokensBilled;
+      if (m.value) {
+        acc.allMeasured &&= m.value.measured;
+        acc.value = { usd: (acc.value?.usd ?? 0) + m.value.usd, measured: acc.allMeasured };
+      } else {
+        // A model with no list price that one repo was billed for (and so
+        // priced) and another was not: only the priced share is in the dollars.
+        acc.unpricedTokens += m.savedTokens;
+      }
+      byModel.set(m.model, acc);
+    }
+  }
+
+  const models: TotalModelSavings[] = [...byModel.values()].map(({ allMeasured: _ignored, ...m }) => m);
+  models.sort((a, b) => b.savedTokens - a.savedTokens || a.model.localeCompare(b.model));
+  return {
+    period,
+    days,
+    models,
+    savedTokens,
+    usd: priced ? usd : null,
+    measured: priced && measured,
+    unpricedTokens,
+  };
+}
+
+/** A folder as people read it: `~/…` under the home folder, as given otherwise. */
+function shownRoot(p: string, home: string = homedir()): string {
+  const rel = relative(home, p);
+  return rel && !rel.startsWith('..') && !isAbsolute(rel) ? `~${sep}${rel}` : p;
+}
+
+/** The rendered readout of `graft savings --all`: one line per repo, then the
+ * same per-model table a single repo prints, totalled across all of them. */
+export function formatAllSavingsReport(r: AllSavingsReport): string {
+  const scope = r.period ? `— ${r.period}` : '— all time';
+  const gone = r.missing.length
+    ? [
+        `  (${r.missing.length} registered folder${r.missing.length === 1 ? ' has' : 's have'} no savings ledger any more: ${r.missing.map((m) => shownRoot(m)).join(', ')})`,
+      ]
+    : [];
+  if (r.repos.length === 0) {
+    const head = r.period
+      ? `graft savings --all ${scope}: nothing recorded in that period in any repo.`
+      : 'graft savings --all: nothing recorded yet in any repo — use graft in an agent session, then look again.';
+    return [head, ...gone].join('\n');
+  }
+
+  type Row = { label: string; tokens: string; value: string; note: string };
+  const priceNote = (v: { usd: number; measured: boolean } | null, unpriced = 0): string => {
+    if (!v) return '(no rate — tokens only)';
+    const notes = [v.measured ? '' : 'list rate', unpriced > 0 ? `excludes ~${formatCount(unpriced)} unpriced tokens` : ''].filter(Boolean);
+    return notes.length ? `(${notes.join('; ')})` : '';
+  };
+  const repoRows: Row[] = r.repos.map((x) => ({
+    label: shownRoot(x.root),
+    tokens: `~${formatCount(x.report.savedTokens)} tokens`,
+    value: x.report.usd === null ? '' : `~${formatDollars(x.report.usd)}`,
+    note: priceNote(x.report.usd === null ? null : { usd: x.report.usd, measured: x.report.measured }, x.report.unpricedTokens),
+  }));
+  const modelRows: Row[] = r.total.models.map((m) => ({
+    label: m.model,
+    tokens: `~${formatCount(m.savedTokens)} tokens`,
+    value: m.value ? `~${formatDollars(m.value.usd)}` : '',
+    note: priceNote(m.value, m.unpricedTokens),
+  }));
+  const totalRow: Row = {
+    label: 'total',
+    tokens: `~${formatCount(r.total.savedTokens)} tokens`,
+    value: r.total.usd === null ? '' : `~${formatDollars(r.total.usd)}`,
+    note: r.total.unpricedTokens > 0 ? `(excludes ~${formatCount(r.total.unpricedTokens)} unpriced tokens)` : '',
+  };
+
+  const all = [...repoRows, ...modelRows, totalRow];
+  const labelWidth = Math.max(...all.map((x) => x.label.length));
+  const tokenWidth = Math.max(...all.map((x) => x.tokens.length));
+  const valueWidth = Math.max(...all.map((x) => x.value.length));
+  const line = (x: Row) =>
+    `    ${x.label.padEnd(labelWidth)}  ${x.tokens.padStart(tokenWidth)}  ${x.value.padStart(valueWidth)}${x.note ? `  ${x.note}` : ''}`.trimEnd();
+
+  const repoCount = `${r.repos.length} repo${r.repos.length === 1 ? '' : 's'}`;
+  const dayCount = `${r.total.days} day${r.total.days === 1 ? '' : 's'} recorded`;
+  return [
+    `graft savings --all ${scope} · ${repoCount} · ${dayCount}`,
+    '  per repo',
+    ...repoRows.map(line),
+    '  per model',
+    ...modelRows.map(line),
+    `    ${'─'.repeat(labelWidth + tokenWidth + valueWidth + 4)}`,
+    line(totalRow),
+    ...gone,
+  ].join('\n');
+}
+
+/**
+ * Make sure a repo whose ledger predates the registry is listed in it, without
+ * moving its `lastSeen`. `graft savings` calls this for the repo it reports on,
+ * so a repo used before cross-repo totals existed joins them the first time
+ * anyone looks at its savings — the next saving filed there would add it anyway.
+ */
+export function registerExistingLedger(d: string): void {
+  const file = ledgerPath(d);
+  if (!existsSync(file)) return;
+  registerRepo(d, file, { touch: false });
 }
