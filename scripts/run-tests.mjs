@@ -48,7 +48,8 @@ const gitEnv = {
 // command, so a contributor who has trail installed would see test repos move.
 // Off for the run; the tests of the move turn it back on.
 // A `graft prices update` on the developer's machine must not price models in
-// tests, so the local price catalog points at a file that never exists.
+// tests, so the local price catalog points at a file that never exists, and the
+// bundled snapshot is off.
 // Every saving a test files registers its scratch repo in the user's cross-repo
 // list (`graft savings --all`), so the list points at a per-run scratch file
 // rather than the developer's real ~/.graft/repos.json.
@@ -61,6 +62,9 @@ const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...file
     ...gitEnv,
     GRAFT_NO_TRAIL_SWITCH: "1",
     GRAFT_PRICES_FILE: join(repoRoot, "test", ".no-such-prices.json"),
+    // Likewise the LiteLLM snapshot shipped with graft: regenerating it must not
+    // change which models the tests see priced. Its own tests turn it back on.
+    GRAFT_BUNDLED_PRICES: "0",
     GRAFT_REPOS_FILE: reposFile,
   },
 });

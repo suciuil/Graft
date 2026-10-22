@@ -75,3 +75,47 @@ test("#128: a rerun replays checkpointed crux by body_hash instead of re-issuing
   assert.equal(stats.cached, 2, "two crux carried over from the interrupted run");
   assert.equal(stats.computed, 2, "two freshly computed");
 });
+
+/** Prior graph where every node is `ready` with an old summary and the same body_hash. */
+function allReadyPrior(): Map<string, NodeV1> {
+  const { nodes } = fixture();
+  return new Map(nodes.map((n) => [n.id, { ...n, summary: `old ${n.id}`, crux: null, summary_state: "ready" as const }]));
+}
+
+test("--force: every unchanged ready node is re-summarized instead of carried over", async () => {
+  const { nodes, sources } = fixture();
+  const rec = new RecordingCrux();
+  const stats = await enrichGraph(nodes, allReadyPrior(), sources, { summarizer: rec, force: true, concurrency: 1 });
+
+  assert.deepEqual([...rec.calls].sort(), FILES, "every file was sent to the LLM");
+  assert.equal(stats.cached, 0);
+  assert.equal(stats.computed, FILES.length);
+  assert.ok(nodes.every((n) => n.summary === `crux ${n.id}` && n.summary_state === "ready"), "fresh summaries applied");
+});
+
+test("--force without a summarizer is a no-op: the prior meaning is carried over", async () => {
+  const { nodes, sources } = fixture();
+  const stats = await enrichGraph(nodes, allReadyPrior(), sources, { force: true });
+  assert.equal(stats.cached, FILES.length);
+  assert.equal(stats.pending + stats.stale, 0);
+  assert.ok(nodes.every((n) => n.summary === `old ${n.id}` && n.summary_state === "ready"));
+});
+
+test("--force: a failed recompute keeps the still-valid prior summary as ready", async () => {
+  const { nodes, sources } = fixture();
+  const failing: CruxSummarizer = {
+    async describeFile(input: FileCruxInput): Promise<NodeCrux[]> {
+      if (input.path === "b.ts") throw new Error("boom");
+      return input.nodes.map((n) => ({ id: n.id, summary: `crux ${n.id}`, crux_start: 0, crux_end: 0 }));
+    },
+  };
+  const stats = await enrichGraph(nodes, allReadyPrior(), sources, { summarizer: failing, force: true, concurrency: 1 });
+
+  const b = nodes.find((n) => n.path === "b.ts")!;
+  assert.equal(b.summary, `old ${b.id}`, "prior summary kept");
+  assert.equal(b.summary_state, "ready", "unchanged body: still ready, not demoted to stale");
+  assert.equal(stats.failedFiles, 1);
+  assert.equal(stats.cached, 1);
+  assert.equal(stats.computed, FILES.length - 1);
+  assert.equal(stats.stale + stats.pending, 0);
+});

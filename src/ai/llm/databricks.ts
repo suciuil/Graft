@@ -21,6 +21,14 @@ import { errorEnvelopeFetch } from "./openai.js";
 
 export const DATABRICKS_BASE_URL = "https://dbc-b40437c6-87d6.cloud.databricks.com";
 
+/** Where a user signs in to generate a Databricks personal access token for the gateway. */
+export const DATABRICKS_TOKEN_URL = "https://dbx.1adp.automotive.cloud/login";
+
+/** The one-line pointer shown whenever a Databricks token is missing or rejected. */
+export function databricksTokenHint(): string {
+  return `Generate a Databricks personal access token at ${DATABRICKS_TOKEN_URL}`;
+}
+
 export type DatabricksRoute = "anthropic" | "openai" | "mlflow" | "serving";
 
 export const DATABRICKS_ROUTES: readonly DatabricksRoute[] = ["anthropic", "openai", "mlflow", "serving"];

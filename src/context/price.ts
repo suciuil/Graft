@@ -24,9 +24,10 @@
  *
  * Precedence (see {@link pricingFor}): what the session was BILLED, else this
  * table's list price for the model we were told we are running, else the list
- * price in the local LiteLLM catalog (`price-catalog.ts`) for that same model.
- * The catalog is fetched only by an explicit `graft prices update` and carries
- * its fetch date, which the wording names alongside every figure it supplies.
+ * price in the LiteLLM catalog (`price-catalog.ts`) for that same model — the
+ * snapshot shipped with graft, or a newer local copy fetched by an explicit
+ * `graft prices update`. Either carries its fetch date, which the wording names
+ * alongside every figure it supplies.
  */
 import { catalogPrice } from './price-catalog.js';
 
@@ -304,6 +305,9 @@ export interface InputRate {
    * graft's own table: the ISO date that catalog was fetched, so the wording can
    * say where the figure came from and how old it is. */
   catalogFetchedAt?: string;
+  /** Set alongside {@link catalogFetchedAt} when that catalog was the LiteLLM
+   * snapshot shipped with graft rather than one `graft prices update` stored. */
+  catalogBundled?: true;
 }
 
 /**
@@ -376,7 +380,14 @@ export function listRate(model: AgentModel): InputRate | null {
   if (builtin !== null) return { usdPerMtok: builtin, measured: false, model: model.id, label: model.label };
   const c = catalogPrice(model.id);
   if (!c) return null;
-  return { usdPerMtok: c.input, measured: false, model: model.id, label: model.label, catalogFetchedAt: c.fetchedAt };
+  return {
+    usdPerMtok: c.input,
+    measured: false,
+    model: model.id,
+    label: model.label,
+    catalogFetchedAt: c.fetchedAt,
+    ...(c.bundled ? { catalogBundled: true as const } : {}),
+  };
 }
 
 /**

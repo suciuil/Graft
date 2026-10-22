@@ -19,6 +19,7 @@ import { resolveConfig, type EngineConfig } from "./ai/providers.js";
 import { printLlmFailureHints } from "./ai/llm-hints.js";
 import { runSettingCommand, terminalPrompter, userEnvStore, type SettingDeps, type SettingOptions } from "./ai/llm-settings.js";
 import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
+import { databricksTokenHint } from "./ai/llm/databricks.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
@@ -558,6 +559,10 @@ grouped(program.command("build"), GROUP.setup)
   .option("--check", "build nothing: fail if graft/ is stale relative to the code (for CI)")
   .option("--json", "with --check: output the drift as JSON")
   .option("--deep", "run the LLM pass: concept nodes (graft/*.md) + per-symbol summary/crux")
+  .option(
+    "--force",
+    "with --deep: re-summarize EVERY file and symbol, ignoring the LLM cache (default: only changed or new ones) — costs a full LLM pass",
+  )
   .option("-e, --extensions <exts...>", 'code extensions to include (e.g. ".ts" ".py"); an extension with no parser is ignored with a warning that lists the supported set')
   .option("-j, --concurrency <n>", "files summarized in parallel during --deep (default 5)")
   .option("--no-reuse", "re-parse every file instead of replaying unchanged ones from the extraction cache")
@@ -613,6 +618,7 @@ grouped(program.command("build"), GROUP.setup)
       check?: boolean;
       json?: boolean;
       deep?: boolean;
+      force?: boolean;
       extensions?: string[];
       concurrency?: string;
       reuse?: boolean;
@@ -644,6 +650,11 @@ grouped(program.command("build"), GROUP.setup)
       process.exit(1);
     }
     warnUnsupportedExtensions(opts.extensions);
+    // --force only changes what the LLM pass recomputes; without --deep there is none.
+    if (opts.force && !opts.deep) {
+      console.error("✗ --force only applies with --deep (it re-runs the LLM pass on every file): `graft build --deep --force`");
+      process.exit(1);
+    }
     // Persisted BEFORE the build itself runs, so this invocation's walks (and
     // every later no-flag build / hooks refresh) see it identically — the
     // walkDir call sites read it from state, not from a threaded option.
@@ -740,15 +751,19 @@ grouped(program.command("build"), GROUP.setup)
       deep = false;
       console.error(
         `⚠ ${deepSkip} — falling back to the structural build (no LLM summaries).\n` +
-          `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.`,
+          `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.\n` +
+          `  ${databricksTokenHint()}.`,
       );
     }
     if (deep && !resolved.apiKey) {
       deep = false;
       console.error(
         "⚠ no API key set — falling back to the structural build (no LLM summaries).\n" +
-          `  Set GRAFT_API_KEY (\`${cmd("graft api key")}\`), and GRAFT_BASE_URL / GRAFT_MODEL for your provider\n` +
-          `  (\`${cmd("graft api url")}\`, \`${cmd("graft model")}\`), then re-run \`${cmd("graft build --deep")}\` to add concept nodes and summaries.`,
+          (resolved.databricks
+            ? `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`\n` +
+              `  to add concept nodes and summaries. ${databricksTokenHint()}.`
+            : `  Set GRAFT_API_KEY (\`${cmd("graft api key")}\`), and GRAFT_BASE_URL / GRAFT_MODEL for your provider\n` +
+              `  (\`${cmd("graft api url")}\`, \`${cmd("graft model")}\`), then re-run \`${cmd("graft build --deep")}\` to add concept nodes and summaries.`),
       );
     }
     if (deep && resolved.usedLegacyEnv) {
@@ -763,6 +778,7 @@ grouped(program.command("build"), GROUP.setup)
     if (isWorkspaceBuildRoot(buildRoot, buildGlobalDir)) {
       await runWorkspaceBuild(buildRoot, {
         deep: !!deep,
+        force: !!deep && !!opts.force,
         extensions: opts.extensions,
         concurrency,
         childConfig: cliConfig(),
@@ -783,6 +799,7 @@ grouped(program.command("build"), GROUP.setup)
       const c = await engine.init(dir, {
         extensions: opts.extensions,
         onlyDirs,
+        force: opts.force,
         onProgress: ({ phase, index, total, file }) =>
           process.stderr.write(
             `\r${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
@@ -814,6 +831,7 @@ grouped(program.command("build"), GROUP.setup)
     // Wiring graph — always; LLM meaning only with --deep.
     const g = await engine.graph(dir, {
       llm: deep,
+      force: deep ? opts.force : undefined,
       concurrency,
       reuse: opts.reuse,
       lsp: opts.lsp,
@@ -1327,11 +1345,18 @@ pricesCommand
   .argument("[model]", "a model id to look up, e.g. claude-opus-4-5")
   .action((model: string | undefined) => {
     const s = priceCatalogStatus();
+    const days = (n: number) => `${n} day${n === 1 ? "" : "s"} ago`;
     if (s.state === "missing") {
       console.log(`no local model prices (${s.path}) — run \`${cmd("graft prices update")}\` to fetch them from LiteLLM`);
     } else {
-      const when = `fetched ${s.fetchedAt!.slice(0, 10)}, ${s.ageDays} day${s.ageDays === 1 ? "" : "s"} ago`;
+      const when = `fetched ${s.fetchedAt!.slice(0, 10)}, ${days(s.ageDays!)}`;
       console.log(`local model prices: ${s.models} models from LiteLLM, ${when} (${s.path})`);
+    }
+    if (s.bundled) {
+      console.log(
+        `bundled model prices: ${s.bundled.models} models from LiteLLM, shipped with graft, ` +
+          `fetched ${s.bundled.fetchedAt.slice(0, 10)}, ${days(s.bundled.ageDays)}`,
+      );
     }
     if (model) {
       const builtin = listRate({ id: model, confidence: "certain" });
@@ -1343,7 +1368,8 @@ pricesCommand
           c?.cacheRead !== undefined ? `cache read $${c.cacheRead}/Mtok` : "",
           c?.cacheWrite !== undefined ? `cache write $${c.cacheWrite}/Mtok` : "",
         ].filter(Boolean);
-        console.log(`${model}: $${builtin.usdPerMtok}/Mtok input${cache.length ? `, ${cache.join(", ")}` : ""} (LiteLLM catalog)`);
+        const from = c?.bundled ? "LiteLLM catalog bundled with graft" : "local LiteLLM catalog";
+        console.log(`${model}: $${builtin.usdPerMtok}/Mtok input${cache.length ? `, ${cache.join(", ")}` : ""} (${from})`);
       } else {
         console.log(`${model}: no known price`);
       }

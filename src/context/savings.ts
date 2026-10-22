@@ -364,7 +364,7 @@ export function savingsTurnNudge(savedTokens: number): string {
   const basis = rate.measured
     ? 'the rate this session is actually paying for input tokens'
     : rate.catalogFetchedAt
-      ? `${name} list rates from the local LiteLLM price catalog, fetched ${rate.catalogFetchedAt.slice(0, 10)} ` +
+      ? `${name} list rates from the ${rate.catalogBundled ? 'LiteLLM price catalog bundled with graft' : 'local LiteLLM price catalog'}, fetched ${rate.catalogFetchedAt.slice(0, 10)} ` +
         '(the model named on this call)'
       : `${name} list rates (the model named on this call)`;
   // "One line, no table" is stated explicitly because the alternative was

@@ -130,6 +130,13 @@ test("hints: rejected key names GRAFT_API_KEY and never echoes the key", async (
   assert.match(lines, /rejected the API key \(from GRAFT_API_KEY\)/);
   assert.match(lines, /export GRAFT_API_KEY="<your-api-key>"/);
   assert.doesNotMatch(lines, /secret-key/);
+  assert.doesNotMatch(lines, /dbx\.1adp\.automotive\.cloud/, "the Databricks token page is only for the Databricks gateway");
+});
+
+test("hints: a key rejected by the Databricks gateway points at the token page", async () => {
+  const lines = (await llmFailureHints(["401 Unauthorized"], { config: { apiKey: "k" }, env: {}, platform: "linux" })).join("\n");
+  assert.match(lines, /rejected the API key/);
+  assert.match(lines, /https:\/\/dbx\.1adp\.automotive\.cloud\/login/);
 });
 
 test("hints: unknown model lists what the endpoint serves and suggests a mid-tier one", async () => {

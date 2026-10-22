@@ -75,6 +75,11 @@ export interface BuildOptions {
   synthesizer: Synthesizer;
   /** Files summarized in parallel during phase 1. Default 8. Raised via `graft build -j`. */
   concurrency?: number;
+  /** Ignore the LLM-call cache (`graft build --deep --force`): re-summarize every
+   * file and re-synthesize every batch, even when its content hash is unchanged.
+   * Fresh results overwrite the cache; a failed call falls back to the cached
+   * result for unchanged content, so a forced run never loses what it had. */
+  force?: boolean;
   onProgress?: (info: BuildProgress) => void;
 }
 
@@ -210,8 +215,11 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
       return undefined;
     }
     const hash = contentHash(code);
-    const hit = cache.summaries[rel];
-    if (hit && hit.hash === hash) {
+    const entry = cache.summaries[rel];
+    const hit = entry && entry.hash === hash ? entry : undefined;
+    // `force` bypasses the hit and pays for a fresh call — except once the gate has
+    // closed: then the hit is served as usual, since the call would only fail.
+    if (hit && (!opts.force || gate.stopped)) {
       result.cached++;
       return { rel, hash, summary: hit.summary };
     }
@@ -232,6 +240,9 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
       const message = errMsg(err);
       result.errors.push(`${rel}: ${message}`);
       gate.record(message);
+      // A forced re-summary that failed: the cached summary still matches this
+      // content, so keep using it rather than dropping the file from synthesis.
+      if (hit) return { rel, hash, summary: hit.summary };
       return { rel, hash }; // covered (counts against staleness) but not summarized
     }
   });
@@ -269,7 +280,9 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
     const hit = cache.synth[key];
     // An empty array is a miss, not a hit: caching [] made a silent empty
     // synthesis permanent, the same trap #177 closed for the meaning pass (#129).
-    const cached = Array.isArray(hit) && hit.length > 0;
+    // `force` re-synthesizes a cached batch too, unless the synthesis gate has
+    // already closed (then the cached batch is served, as it costs nothing).
+    const cached = Array.isArray(hit) && hit.length > 0 && (!opts.force || synthGate.stopped);
     let nodes: SynthNode[];
     if (cached) {
       // Served even after the gate closes: a cache hit costs nothing.
@@ -296,6 +309,10 @@ export async function buildContext(dir: string, opts: BuildOptions): Promise<Bui
         // from cache. Stale keys are pruned after the loop, so an intermediate
         // save carrying them is harmless.
         saveCache(outDir, cache);
+      } else if (Array.isArray(hit) && hit.length > 0) {
+        // A forced re-synthesis came back empty: keep the cached batch for this
+        // unchanged input instead of wiping its concepts.
+        nodes = hit;
       } else {
         delete cache.synth[key];
       }

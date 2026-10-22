@@ -62,8 +62,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Build or update the code graph in graft/: the wiring graph (who calls what) and one card per file. " +
       "Free, no API key. Add --deep to also have an LLM write summaries and a concept map; that needs an API key, " +
       "an endpoint and a model: save them once with `graft api key`, `graft api url` and `graft model`, or pass " +
-      "--api-key, --base-url and --model (below).",
-    examples: ["graft build", "graft build --deep", "graft build --check"],
+      "--api-key, --base-url and --model (below). --deep only re-summarizes code that changed since the last run; " +
+      "add --force to re-summarize everything.",
+    examples: ["graft build", "graft build --deep", "graft build --deep --force", "graft build --check"],
     globals: ["dir", "llm"],
   },
   callers: {
@@ -266,15 +267,16 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   },
   "prices status": {
     description:
-      "Show whether a local copy of LiteLLM's model price catalog is stored and how old it is; name a model to see " +
-      "the price graft would use for it. Local only, no network.",
+      "Show whether a local copy of LiteLLM's model price catalog is stored and how old it is, and the snapshot of " +
+      "that catalog shipped with graft; name a model to see the price graft would use for it. Local only, no network.",
     examples: ["graft prices status", "graft prices status claude-opus-4-5"],
   },
   "prices update": {
     description:
       "Download LiteLLM's public model price catalog and store it locally (~/.graft/prices.json), so savings for " +
       "models graft's built-in table does not list are priced in dollars. One anonymous GET of the whole catalog: " +
-      "nothing about you, your repo or your models is sent. Kept until you run it again.",
+      "nothing about you, your repo or your models is sent. Kept until you run it again. graft already ships a " +
+      "snapshot of this catalog; whichever of the two is newer is used first.",
     examples: ["graft prices update"],
   },
   savings: {

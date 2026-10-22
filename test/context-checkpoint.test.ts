@@ -94,3 +94,42 @@ test("a rerun re-summarizes nothing — resume is $0 for unchanged files", async
     rmDir(dir);
   }
 });
+
+test("--force: a rerun re-summarizes and re-synthesizes everything despite the cache", async () => {
+  const dir = fixture(4);
+  try {
+    await buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: new BracketSynthesizer() });
+
+    let summaries = 0;
+    let syntheses = 0;
+    const summarizer: Summarizer = { async summarize(code: string) { summaries++; return code; } };
+    const inner = new BracketSynthesizer();
+    const synthesizer = {
+      async synthesize(batch: Parameters<BracketSynthesizer["synthesize"]>[0]) {
+        syntheses++;
+        return inner.synthesize(batch);
+      },
+    };
+    const forced = await buildContext(dir, { model: "fake", summarizer, synthesizer, force: true });
+    assert.equal(summaries, 4, "every file re-summarized");
+    assert.equal(forced.summarized, 4);
+    assert.equal(forced.cached, 0);
+    assert.ok(syntheses >= 1, "cached synthesis batches re-run too");
+    assert.ok(forced.nodes > 0);
+  } finally {
+    rmDir(dir);
+  }
+});
+
+test("--force: a failed re-summary falls back to the cached summary", async () => {
+  const dir = fixture(2);
+  try {
+    const first = await buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: new BracketSynthesizer() });
+    const failing: Summarizer = { async summarize() { throw new Error("boom"); } };
+    const forced = await buildContext(dir, { model: "fake", summarizer: failing, synthesizer: new BracketSynthesizer(), force: true });
+    assert.equal(forced.failedFiles, 2);
+    assert.equal(forced.nodes, first.nodes, "concepts still built from the cached summaries");
+  } finally {
+    rmDir(dir);
+  }
+});

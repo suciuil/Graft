@@ -11,7 +11,10 @@ import type Anthropic from "@anthropic-ai/sdk";
 import AnthropicSDK from "@anthropic-ai/sdk";
 import { OpenAIChatModel, baseUrlCandidates } from "../src/ai/llm/openai.js";
 import { resolveConfig, DEFAULT_MODELS } from "../src/ai/providers.js";
-import { ProviderFallbackChatModel, createChatModel, LLM_INCUBATOR_BASE_URL } from "../src/ai/llm/factory.js";
+import { ProviderFallbackChatModel, createChatModel } from "../src/ai/llm/factory.js";
+
+/** Any non-Databricks gateway; graft ships no built-in URL for it. */
+const GATEWAY_URL = "https://llm-gateway.example.com";
 import { DATABRICKS_BASE_URL, DATABRICKS_DEFAULT_MODEL } from "../src/ai/llm/databricks.js";
 import type { ChatModel } from "../src/ai/llm/types.js";
 import { AnthropicChatModel, anthropicBaseUrl } from "../src/ai/llm/anthropic.js";
@@ -349,25 +352,30 @@ test("resolveConfig: nothing configured → the Databricks AI Gateway, routed by
   });
   withEnv({ GRAFT_API_KEY: "k", GRAFT_PROVIDER: "llm-incubator" }, () => {
     const c = resolveConfig();
-    assert.equal(c.provider, "llm-incubator", "the LLM Incubator gateway stays reachable explicitly");
-    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
+    assert.equal(c.provider, "llm-incubator");
+    assert.equal(c.baseUrl, undefined, "llm-incubator has no built-in base URL");
     assert.equal(c.databricks, undefined);
+  });
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_PROVIDER: "llm-incubator", GRAFT_BASE_URL: GATEWAY_URL }, () => {
+    const c = resolveConfig();
+    assert.equal(c.provider, "llm-incubator");
+    assert.equal(c.baseUrl, GATEWAY_URL);
   });
 });
 
-test("resolveConfig: the old LLM Incubator URL keeps its old handling", () => {
-  withEnv({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: `${LLM_INCUBATOR_BASE_URL}/v1`, GRAFT_MODEL: "claude-sonnet-5-5" }, () => {
+test("resolveConfig: a non-Databricks gateway URL keeps the plain OpenAI handling", () => {
+  withEnv({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: `${GATEWAY_URL}/v1`, GRAFT_MODEL: "claude-sonnet-5-5" }, () => {
     const c = resolveConfig();
     assert.equal(c.provider, "openai");
-    assert.equal(c.baseUrl, `${LLM_INCUBATOR_BASE_URL}/v1`);
+    assert.equal(c.baseUrl, `${GATEWAY_URL}/v1`);
     assert.equal(c.model, "claude-sonnet-5-5");
     assert.deepEqual(c.providerFallback, { provider: "anthropic", model: "claude-sonnet-5-5" });
     assert.equal(c.databricks, undefined);
     assert.equal(c.modelHeaders, undefined);
   });
-  withEnv({ ANTHROPIC_AUTH_TOKEN: "tok", ANTHROPIC_BASE_URL: LLM_INCUBATOR_BASE_URL }, () => {
+  withEnv({ ANTHROPIC_AUTH_TOKEN: "tok", ANTHROPIC_BASE_URL: GATEWAY_URL }, () => {
     const c = resolveConfig();
-    assert.equal(c.baseUrl, LLM_INCUBATOR_BASE_URL);
+    assert.equal(c.baseUrl, GATEWAY_URL);
     assert.equal(c.databricks, undefined);
   });
 });
@@ -404,9 +412,16 @@ test("resolveConfig: GRAFT_API_KEY → ANTHROPIC_AUTH_TOKEN (sent as Bearer on t
 });
 
 test("factory: llm-incubator speaks the OpenAI wire with its own label", () => {
-  const m = createChatModel({ provider: "llm-incubator", apiKey: "x", model: "gemini-3.8-flash" });
+  const m = createChatModel({ provider: "llm-incubator", apiKey: "x", model: "gemini-3.8-flash", baseUrl: GATEWAY_URL });
   assert.ok(m instanceof OpenAIChatModel);
   assert.equal(m.label, "llm-incubator:gemini-3.8-flash");
+});
+
+test("factory: llm-incubator without a base URL fails instead of using a built-in one", () => {
+  assert.throws(
+    () => createChatModel({ provider: "llm-incubator", apiKey: "x", model: "gemini-3.8-flash" }),
+    /no default base URL/,
+  );
 });
 
 test("factory: an ANTHROPIC_AUTH_TOKEN key goes out as a Bearer token, not x-api-key", () => {

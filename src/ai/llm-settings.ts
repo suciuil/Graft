@@ -33,6 +33,7 @@ import {
   type SettingKind,
 } from "./llm-hints.js";
 import { bareModelFallbacks } from "./llm/factory.js";
+import { databricksTokenHint } from "./llm/databricks.js";
 import { cmd } from "../brand.js";
 
 // ---------------------------------------------------------------------------
@@ -313,7 +314,10 @@ function printStatus(kind: SettingKind, deps: SettingDeps, saved: string | undef
 }
 
 async function fetchModels(deps: SettingDeps, cfg: ResolvedConfig): Promise<{ ids: string[]; error?: string }> {
-  if (!cfg.apiKey) return { ids: [], error: `no API key — set one with \`${cmd(SETTINGS.key.command)}\`` };
+  if (!cfg.apiKey) {
+    const where = cfg.databricks ? `; ${databricksTokenHint()}` : "";
+    return { ids: [], error: `no API key — set one with \`${cmd(SETTINGS.key.command)}\`${where}` };
+  }
   try {
     return { ids: rankModelsForHint(await (deps.listModels ?? listEndpointModels)(cfg)) };
   } catch (err) {
@@ -335,6 +339,7 @@ function printModelList(deps: SettingDeps, ids: string[], numbered: boolean): vo
 /** Interactive input for `kind`; `undefined` = keep the current value. */
 async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter): Promise<string | undefined> {
   if (kind === "key") {
+    if (resolveConfig(deps.config, deps.env).databricks) deps.out(`${databricksTokenHint()}.`);
     const v = (await prompt.askHidden("New API key (input hidden; Enter keeps the current one): ")).trim();
     return v || undefined;
   }
@@ -369,6 +374,7 @@ async function verifySetting(kind: SettingKind, deps: SettingDeps, env: NodeJS.P
   const url = cfg.baseUrl ?? defaultBaseUrl(cfg.provider);
   if (!cfg.apiKey) {
     deps.out(`  not verified: no API key yet — set one with \`${cmd(SETTINGS.key.command)}\`.`);
+    if (cfg.databricks) deps.out(`  ${databricksTokenHint()}.`);
     return;
   }
   let ids: string[];
@@ -379,6 +385,7 @@ async function verifySetting(kind: SettingKind, deps: SettingDeps, env: NodeJS.P
     const problem = classifyLlmError(message);
     if (problem === "auth") {
       deps.err(`⚠ ${url} rejected the API key (${message}) — set a valid one with \`${cmd(SETTINGS.key.command)}\`.`);
+      if (cfg.databricks) deps.err(`  ${databricksTokenHint()}.`);
     } else if (problem === "unreachable" && !/^40[45]\b/.test(message)) {
       deps.err(`⚠ ${url} could not be reached (${message}) — check it with \`${cmd(SETTINGS.url.command)}\`.`);
     } else {

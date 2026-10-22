@@ -15,6 +15,7 @@ import { ChatSynthesizer, type Synthesizer } from "./ai/synthesize.js";
 import { ChatSummarizer, type Summarizer } from "./ai/summarize.js";
 import { ChatCruxSummarizer, type CruxSummarizer } from "./ai/crux.js";
 import { createChatModel } from "./ai/llm/factory.js";
+import { databricksTokenHint } from "./ai/llm/databricks.js";
 import { BalanceRetryChatModel, BalanceWaiter, relayName } from "./ai/llm/balance-retry.js";
 import type { ChatModel } from "./ai/llm/types.js";
 import { buildContext, CODE_EXTENSIONS, type BuildProgress, type BuildResult } from "./context/build.js";
@@ -32,6 +33,8 @@ export interface InitOptions {
   extensions?: string[];
   /** Repo-relative directory prefixes to limit the concept pass (`--only-dir`). */
   onlyDirs?: string[];
+  /** Ignore the LLM-call cache and re-summarize/re-synthesize everything (`--force`). */
+  force?: boolean;
   /** Progress callback for long builds. */
   onProgress?: (info: BuildProgress) => void;
 }
@@ -45,6 +48,8 @@ export interface GraphRunOptions {
   llm?: boolean;
   /** Max files summarized in parallel during the LLM pass. */
   concurrency?: number;
+  /** With `llm`: re-summarize every symbol, not only stale/new ones (`--force`). */
+  force?: boolean;
   /** Replay unchanged files from the extraction cache (default true). */
   reuse?: boolean;
   /** Opt-in compiler-grade LSP edge enrichment (`graft build --lsp`). */
@@ -67,6 +72,7 @@ export class Graft {
       contextDir: this.cfg.contextDir,
       extensions: opts.extensions,
       onlyDirs: opts.onlyDirs,
+      force: opts.force,
       model: this.modelLabel(),
       summarizer: this.summarizer(),
       synthesizer: this.synthesizer(),
@@ -95,6 +101,7 @@ export class Graft {
       contextDir: this.cfg.contextDir,
       summarizer: opts.llm ? this.cruxSummarizer() : undefined,
       concurrency: opts.concurrency,
+      force: opts.llm ? opts.force : undefined,
       reuse: opts.reuse,
       lsp: opts.lsp,
       onlyDirs: opts.onlyDirs,
@@ -127,8 +134,10 @@ export class Graft {
     if (this._chatModel) return this._chatModel;
     if (!this.cfg.apiKey) {
       throw new Error(
-        "No API key. Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL " +
-          "for your provider) to build or summarize the graph.",
+        this.cfg.databricks
+          ? `No API key. Set GRAFT_API_KEY to a Databricks personal access token to build or summarize the graph. ${databricksTokenHint()}.`
+          : "No API key. Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL " +
+              "for your provider) to build or summarize the graph.",
       );
     }
     // A relay's "insufficient balance" 403 is temporary (a top-up or grant refills

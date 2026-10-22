@@ -48,7 +48,7 @@ test("databricks: any workspace on cloud.databricks.com is recognised, nothing e
   assert.ok(!isDatabricksGatewayUrl("https://x.cloud.databricks.com.evil.example"));
   assert.ok(!isDatabricksGatewayUrl("https://x.cloud.databricks.com:8443"));
   assert.ok(!isDatabricksGatewayUrl("ftp://x.cloud.databricks.com"));
-  assert.ok(!isDatabricksGatewayUrl("https://llm-gateway.ve42034x.automotive-wan.com"));
+  assert.ok(!isDatabricksGatewayUrl("https://llm-gateway.example.com"));
   assert.ok(!isDatabricksGatewayUrl("not a url"));
   assert.ok(!isDatabricksGatewayUrl(undefined));
 });
@@ -392,9 +392,9 @@ test("GRAFT_MODEL: each model family's request goes to its own route, whatever U
   }
 });
 
-test("GRAFT_MODEL: the old gateway URL keeps its old requests", async () => {
-  const sent = await sendOnce({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://llm-gateway.ve42034x.automotive-wan.com/v1", GRAFT_MODEL: "claude-sonnet-5-5" });
-  assert.equal(sent.url, "https://llm-gateway.ve42034x.automotive-wan.com/v1/chat/completions");
+test("GRAFT_MODEL: a non-Databricks gateway URL keeps plain OpenAI requests", async () => {
+  const sent = await sendOnce({ GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://llm-gateway.example.com/v1", GRAFT_MODEL: "claude-sonnet-5-5" });
+  assert.equal(sent.url, "https://llm-gateway.example.com/v1/chat/completions");
   assert.equal(sent.model, "claude-sonnet-5-5");
   assert.equal(sent.headers["databricks-ai-gateway-request-tags"], undefined);
 });
@@ -532,7 +532,7 @@ const rejecting: DatabricksLister = async () => {
 
 test("deep model choice: other endpoints and an explicit --model are left alone", async () => {
   const p = scriptedPrompter([]);
-  const other = deps({ config: { baseUrl: "https://llm-gateway.ve42034x.automotive-wan.com" }, env: env({ GRAFT_API_KEY: "k" }), prompt: p });
+  const other = deps({ config: { baseUrl: "https://llm-gateway.example.com" }, env: env({ GRAFT_API_KEY: "k" }), prompt: p });
   assert.deepEqual(await chooseDatabricksDeepModel(other), { config: other.config });
   const flagged = deps({ config: { model: "claude-opus-5" }, env: env({ GRAFT_API_KEY: "k" }), prompt: p });
   assert.deepEqual(await chooseDatabricksDeepModel(flagged), { config: flagged.config });
@@ -583,6 +583,7 @@ test("deep model choice: a rejected key is reported and a new one asked for", as
   const d = deps({ env: env({ GRAFT_API_KEY: "gAAAA-old" }), prompt: p, store, lister });
   const r = await chooseDatabricksDeepModel(d);
   assert.match(d.lines.join("\n"), /rejected .*from GRAFT_API_KEY/);
+  assert.match(d.lines.join("\n"), /https:\/\/dbx\.1adp\.automotive\.cloud\/login/, "the rejection points at the token page");
   assert.equal(p.hidden.length, 1);
   assert.deepEqual(r, { config: { model: "claude-sonnet-5-5", apiKey: "dapi-good" } });
   assert.equal(p.asked.length, 1, "only whether to save the typed key: the default model is served, so no model is asked");
@@ -625,7 +626,9 @@ test("deep model choice: a default the gateway does not serve is not used silent
 });
 
 test("deep model choice: no key typed, or every key rejected → the structural build", async () => {
-  assert.deepEqual(await chooseDatabricksDeepModel(deps({ prompt: scriptedPrompter([""]) })), { skip: "no API key for the Databricks AI Gateway" });
+  const none = deps({ prompt: scriptedPrompter([""]) });
+  assert.deepEqual(await chooseDatabricksDeepModel(none), { skip: "no API key for the Databricks AI Gateway" });
+  assert.match(none.lines.join("\n"), /Generate a Databricks personal access token at https:\/\/dbx\.1adp\.automotive\.cloud\/login/);
   const r = await chooseDatabricksDeepModel(
     deps({ env: env({ GRAFT_API_KEY: "bad" }), prompt: scriptedPrompter(["bad2", "bad3"]), lister: rejecting }),
   );
