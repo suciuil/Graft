@@ -8,9 +8,10 @@
  * timestamps, so rebuilding an unchanged repo produces a byte-identical file and
  * git diffs stay minimal.
  */
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { EdgeV1, GraphV1, NodeV1 } from "./types.js";
+import { renameReplacing } from "../util/rename-replacing.js";
 
 /** Hidden subdir under the context dir that holds machine-only graph artifacts. */
 export const GRAPH_DIR = ".graph";
@@ -54,7 +55,8 @@ export function writeGraph(graph: GraphV1, outDir: string): string {
   const tmp = `${path}.${process.pid}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(sorted, null, 2) + "\n");
-    renameSync(tmp, path);
+    // Retried on Windows while a scanner or a query briefly holds the graph (see util/rename-replacing.ts).
+    renameReplacing(tmp, path);
   } catch (e) {
     try {
       rmSync(tmp, { force: true });

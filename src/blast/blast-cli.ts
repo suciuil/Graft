@@ -132,6 +132,10 @@ export async function runBlastCommand(dir: string, opts: BlastCliOptions): Promi
  */
 async function nameClusters(graph: GraphV1, report: BlastReport, contextDir: string): Promise<void> {
   const { nameReport } = await import("./name.js");
+  // The LLM settings saved by `graft api key` / `graft model` count here too, even
+  // in a terminal opened before they were saved.
+  const { applySavedSettings } = await import("../ai/llm-settings.js");
+  applySavedSettings();
   const { note } = await nameReport(graph, report, contextDir);
   if (note) console.error(`• --name: ${note}`);
 }

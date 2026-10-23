@@ -839,12 +839,13 @@ test("over MCP the savings tally carries the deep-build recommendation, until it
 
     const due = await callTool(d, "graft_find_code", { query: "mul" });
     assert.ok(due.text.includes("\u{1F331}"), `fixture: a saving was claimed\n${due.text}`);
-    // Unpriced (no model sent), so the price-update line sits between the tally
-    // and the deep-build line.
+    // Unpriced because no model was sent — which a price catalog cannot fix, so
+    // no price-update line: the deep-build line sits directly under the tally.
     assert.match(
       tallyOf(due.text),
-      /this turn  \n⚠️ Run the 'graft prices update' command — recommended \(no known price for the model used[^\n]*  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet — /,
+      /this turn  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet — /,
     );
+    assert.doesNotMatch(tallyOf(due.text), /prices update/);
 
     patchBuildConfig(d, { deepStaleThreshold: 100 });
     const off = await callTool(d, "graft_find_code", { query: "mul" });

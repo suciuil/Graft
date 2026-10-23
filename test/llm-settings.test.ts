@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  applySavedSettings,
+  withSavedSettings,
   maskSecret,
   parseRegQuery,
   posixUserEnv,
@@ -147,13 +149,13 @@ test("set a model the endpoint does not list: warns with the ones it does", asyn
   await runSettingCommand("model", "no-such-model", {}, d);
   const out = d.lines.join("\n");
   assert.match(out, /no-such-model is not in the models this endpoint lists/);
-  assert.match(out, /claude-sonnet-5\.5\n.*gemini-3\.8-flash {2}\(recommended\)\n.*claude-opus-5.*top tier/);
+  assert.match(out, /claude-sonnet-5\.5 {2}\(recommended\)\n.*gemini-3\.8-flash\n.*claude-opus-5.*top tier/);
 });
 
 test("set a top-tier model: saved, with a mid-tier suggestion", async () => {
   const d = deps({ env: { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" } });
   await runSettingCommand("model", "claude-opus-5", {}, d);
-  assert.match(d.lines.join("\n"), /a mid-tier model such as gemini-3\.8-flash is enough/);
+  assert.match(d.lines.join("\n"), /a mid-tier model such as claude-sonnet-5\.5 is enough/);
 });
 
 test("interactive model: pick by number from the endpoint's list", async () => {
@@ -163,7 +165,71 @@ test("interactive model: pick by number from the endpoint's list", async () => {
   // ranked: claude-sonnet-5.5, gemini-3.8-flash, claude-opus-5
   assert.equal(d.store.read("GRAFT_MODEL"), "gemini-3.8-flash");
   assert.match(d.lines.join("\n"), /top-tier model .* is not necessary/);
-  assert.match(prompt.asked[0]!, /recommended: gemini-3\.8-flash/);
+  assert.match(prompt.asked[0]!, /recommended: claude-sonnet-5\.5/);
+});
+
+test("a saved model is in effect even when this terminal predates it", async () => {
+  // The bug: `graft model` saved GRAFT_MODEL, but a terminal opened earlier lacks
+  // it, so "in effect" (and `build --deep`) fell back to graft's default.
+  const d = deps({
+    store: memoryStore({ GRAFT_MODEL: "gpt-5-6-terra" }),
+    env: { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" },
+  });
+  assert.equal(await runSettingCommand("model", undefined, {}, d), 0);
+  const out = d.lines.join("\n");
+  assert.match(out, /current:\s+not set/);
+  assert.match(out, /saved:\s+gpt-5-6-terra/);
+  assert.match(out, /in effect:\s+gpt-5-6-terra \(from the saved GRAFT_MODEL\)/);
+});
+
+test("nothing set or saved: the default model is claude-sonnet-5-5", async () => {
+  const d = deps({ env: { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" } });
+  assert.equal(await runSettingCommand("model", undefined, {}, d), 0);
+  assert.match(d.lines.join("\n"), /in effect:\s+claude-sonnet-5-5 \(graft's default model\)/);
+});
+
+test("withSavedSettings: fills only what the process lacks; the process value wins", () => {
+  const store = memoryStore({ GRAFT_MODEL: "saved-model", GRAFT_API_KEY: "saved-key", GRAFT_BASE_URL: "https://saved" });
+  const { env, applied } = withSavedSettings({ GRAFT_MODEL: "shell-model" }, store);
+  assert.equal(env.GRAFT_MODEL, "shell-model");
+  assert.equal(env.GRAFT_API_KEY, "saved-key");
+  assert.equal(env.GRAFT_BASE_URL, "https://saved");
+  assert.deepEqual(applied.sort(), ["GRAFT_API_KEY", "GRAFT_BASE_URL"]);
+  // Opt-out, used by the test runner.
+  const off = withSavedSettings({ GRAFT_NO_SAVED_SETTINGS: "1" }, store);
+  assert.equal(off.env.GRAFT_MODEL, undefined);
+  assert.deepEqual(off.applied, []);
+});
+
+test("applySavedSettings: mutates the given env in place; an unreadable store is ignored", () => {
+  const env: NodeJS.ProcessEnv = {};
+  assert.deepEqual(applySavedSettings(env, memoryStore({ GRAFT_MODEL: "m" })), ["GRAFT_MODEL"]);
+  assert.equal(env.GRAFT_MODEL, "m");
+  const broken: UserEnvStore = {
+    where: "x",
+    read: () => {
+      throw new Error("boom");
+    },
+    write: () => {},
+  };
+  const env2: NodeJS.ProcessEnv = {};
+  assert.deepEqual(applySavedSettings(env2, broken), []);
+  assert.equal(env2.GRAFT_MODEL, undefined);
+});
+
+test("windows store: readMany reads every name from one reg query", () => {
+  const calls: string[][] = [];
+  const store = windowsUserEnv((_c, args) => {
+    calls.push(args);
+    return {
+      status: 0,
+      stdout: "\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    C:\\x\r\n    GRAFT_MODEL    REG_SZ    gpt-5-6-terra\r\n\r\n",
+      stderr: "",
+    };
+  });
+  assert.deepEqual(store.readMany!(["GRAFT_MODEL", "GRAFT_API_KEY"]), { GRAFT_MODEL: "gpt-5-6-terra" });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], ["query", "HKCU\\Environment"]);
 });
 
 test("interactive key: hidden prompt; Enter keeps; Ctrl+C cancels", async () => {

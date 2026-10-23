@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { walkDir } from "../ingest/fs.js";
 import { contextDirFor, ensureGitignored, ensureSearchable } from "../context/node-file.js";
+import { noteProfileRepo, profileRepoDirOfMap } from "../context/profile-store.js";
 import { extractFile, languageLabelOf, languageLabelOfSource, languageOf, type Language, type RawEdge } from "./extract.js";
 import { extractGeneric, fallbackLangOf, genericLangOf, warmGenericGrammars, type GenericLang } from "./generic.js";
 import { containerLangOf, extractContainer, warmContainerGrammars, type ContainerLang } from "./container.js";
@@ -453,6 +454,9 @@ export async function buildGraph(
     // .gitignore, so without this the cards can never be grepped, which is the one
     // way an agent was supposed to stumble onto them.
     ensureSearchable(root, outDir);
+    // A map in the profile store: name the checkout it belongs to beside it.
+    const storeDir = profileRepoDirOfMap(root, outDir);
+    if (storeDir) noteProfileRepo(root, storeDir);
     cardStats = writeCards(graph, outDir);
     writeIndex(outDir, cardStats.files);
     // Backfill concept nodes with their `covers:` symbol/file:line list (the

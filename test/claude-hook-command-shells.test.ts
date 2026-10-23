@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { repoShimCmd } from '../src/claude/settings-merge.js';
+import { mergeGraftSettings, repoShimCmd } from '../src/claude/settings-merge.js';
 import { tmpRepo } from './helpers.js';
 
 interface Shell { name: string; run: (cmd: string) => [string, string[]] }
@@ -92,6 +92,28 @@ for (const sh of shells()) {
     });
     assert.equal(res.status, 0, `${sh.name} exited ${res.status}: ${res.stderr}`);
     assert.equal(res.stderr.trim(), '');
+  });
+}
+
+// What `graft init` writes into .claude/settings.json, not just repoShimCmd on its own: a shell-level
+// suffix (`|| exit 0`) on top of it is a parse error under Windows PowerShell 5.1, which has no `||`.
+for (const sh of shells()) {
+  test(`${sh.name}: every repo-level hook command init writes runs, and a shim that fails still exits 0`, () => {
+    const { dir } = project(`shell-written-${sh.name}`);
+    writeFileSync(join(dir, '.claude', 'helpers', 'graft-hooks.cjs'), "process.stdout.write('{}');\nprocess.exit(3);\n");
+    const hooks = mergeGraftSettings({}).merged.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    for (const [event, blocks] of Object.entries(hooks)) {
+      for (const b of blocks) for (const h of b.hooks) {
+        const [exe, args] = sh.run(h.command);
+        const res = spawnSync(exe, args, {
+          encoding: 'utf8', timeout: 30_000, cwd: dir, input: '{}',
+          env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+          windowsVerbatimArguments: exe === 'cmd.exe',
+        });
+        assert.equal(res.status, 0, `${sh.name} ${event}: exited ${res.status}: ${res.stderr}\n${h.command}`);
+        assert.equal(res.stdout, '{}', `${sh.name} ${event}: the shim's answer reaches the host`);
+      }
+    }
   });
 }
 

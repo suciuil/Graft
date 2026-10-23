@@ -88,3 +88,12 @@ test('status prints the endpoint but never the key', () => {
 test('debug on an empty queue explains rather than printing an empty batch', () => {
   assert.match(formatDebug(home('notice-debug-empty', { installId: 'x' })), /nothing queued/);
 });
+
+test('DO_NOT_TRACK: no notice, and status says the update check is off too', () => {
+  const h = home('notice-dnt', { installId: 'x' });
+  assert.equal(firstRunNotice(h, { DO_NOT_TRACK: '1' }), null);
+  const status = formatStatus(h, { DO_NOT_TRACK: '1' });
+  assert.match(status, /DO_NOT_TRACK/);
+  assert.match(status, /update check: off/);
+  assert.doesNotMatch(formatStatus(h, OPEN), /update check/);
+});

@@ -20,8 +20,9 @@
  * is the fix; without a directory this behaves exactly as it did before.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { renameReplacing } from "../util/rename-replacing.js";
 
 /** Long enough to review a PR at leisure, short enough that a leaked link dies. */
 const DEFAULT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -180,7 +181,7 @@ export class PageStore {
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(tmp, JSON.stringify(page));
-      renameSync(tmp, join(dir, `${id}${SUFFIX}`));
+      renameReplacing(tmp, join(dir, `${id}${SUFFIX}`));
     } catch (err) {
       // The page is in memory and its link works; it just will not outlive this
       // process. Worth a line in the log and nothing more: throwing here would

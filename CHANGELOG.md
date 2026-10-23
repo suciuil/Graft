@@ -4,6 +4,75 @@
 
 ### Added
 
+- **Profile store, on by default: a repo's map and settings live in your
+  profile.** A repo that has no `graft/` map and no `.graft/config.json` yet
+  gets them in `~/.graft/repos/<folder>-<hash of the repo path>/` (`graph/` and
+  `config.json`). graft finds them again from the repo's path, so nothing is
+  written into the checkout, including `.gitignore` and `.ignore`. A map or
+  settings file already in the repo always wins and is never moved, so existing
+  repos keep working as before. `GRAFT_PROFILE_STORE=0` (or
+  `"profileStore": false` in `~/.graft/settings.json`) restores `<repo>/graft/`
+  for new repos. An absolute folder puts the store there instead. `--dir` and
+  `GRAFT_DIR` still take precedence. The home folder used as a repo keeps
+  `graft/`. `graft savings --all` and `graft retract` know about the store.
+- **Every environment variable graft reads has its own command**, like
+  `graft api key` and `graft model`, with a full description in `--help` and in
+  `graft --help`. Run with no value, a command shows the variable. With a value
+  it saves it, and `--unset` removes it. Switches take on/off for the feature
+  the command names, not for the variable, so `graft refresh auto off` saves
+  `GRAFT_NO_REFRESH=1`. The commands, grouped:
+  - `graft files store` (GRAFT_PROFILE_STORE)
+  - `files map-dir` (GRAFT_DIR)
+  - `files repos-list` (GRAFT_REPOS_FILE)
+  - `api provider`, `retries`, `tool-rescues`, `balance-wait`, `balance-poll`,
+    `balance-backoff`, `balance-backoff-max`, `openrouter-model`, `system-ca`
+  - `prices file`, `prices bundled`
+  - `refresh auto`, `hash`, `seed`, `gitignore`, `ignore-file`
+  - `agents gate`, `statusline`, `npx`, `trail-switch`
+  - `output savings-copy`, `rename-notice`, `browser`
+
+  Values are saved as user environment variables (HKCU\Environment on Windows,
+  `~/.graft/env.sh` elsewhere), the same place `graft api key` uses, so new
+  terminals, IDEs, hooks and MCP servers see them. Each value is checked before
+  it is saved. Each change prints the line that applies it to the current
+  terminal. `graft env list` shows all of them with their command, default and
+  current values. `graft env get|set|unset <NAME>` does the same by the
+  variable's name. Secrets are always masked. Test seams, internal variables,
+  and every switch that would send data off the machine (telemetry, Trail
+  cloud, `TRAIL_NO_LOOK_BACK`, `TRAIL_NO_FETCH`) have no command.
+- **`graft where`: shows where a repo's files are kept.** For the current
+  folder, or each folder given, it prints the map folder and the settings file,
+  whether each is in your profile store or inside the repo, and whether each
+  exists yet. For a repo using the profile store, that is the store folder
+  whose name you can't guess from the repo's name. A folder of several git
+  repos lists each repo. `--all` lists every folder in the profile store with
+  the repo it belongs to, and marks the ones whose repo is gone. `--json`
+  outputs the same data.
+- **Savings are no longer lost when an agent pipes graft's output.** An agent
+  that ran graft through `Select-Object -First`, `head`, `Select-String` or
+  `findstr` cut the savings line out with everything else, and then had to say
+  it had no figures to report. Four changes fix this:
+  - Every agent's instructions (Copilot, Cursor, Kiro, Windsurf, Kilo,
+    AGENTS.md), not only the Claude skill, now say never to pipe or filter
+    graft output, naming the PowerShell filters too, and how to recover if it
+    happens anyway. Run `graft init` to pick up the new instructions.
+  - **`graft savings --last`** prints the latest turn's graft calls in this repo
+    and the summed tally to close a reply with. It uses the figures the footers
+    printed and doesn't recompute anything. `--json` outputs the same data. The
+    calls are kept in `graft/.cache/recent-calls.json`, capped at 50 calls and
+    24 hours.
+  - When stdout is piped, the CLI repeats the savings figure and the example
+    tally on stderr, which the pipe can't filter. The copy uses a different
+    wording from the `[graft] tokens saved ≈ N` footer, so a host that reads
+    both streams together still counts the call once. It is off under Claude
+    Code, whose hooks already keep the count, and `GRAFT_STDERR_SAVINGS=0`
+    turns it off anywhere else.
+  - A graft call made within 10 minutes of another one in the same repo gets a
+    short savings footer: the figure, its dollar value and the example tally,
+    without the paragraph the agent has just read. The warning lines stay in the
+    example. Repeating the long footer on every call is what made agents filter
+    it out.
+
 - **`graft savings --all`: savings added up across every repo.** Each repo
   still keeps its own ledger (`graft/.cache/savings.json`). Now, whenever graft
   records a saving in a repo, it also adds that folder to `~/.graft/repos.json`
@@ -27,6 +96,64 @@
   hosts' files, and takes well under a second.
 
 ### Changed
+
+- **The default model is `claude-sonnet-5-5` on every provider.** When neither
+  `--model` nor `GRAFT_MODEL` names one, `graft build --deep` uses
+  `claude-sonnet-5-5` (falling back to the `claude-sonnet-5.5` spelling when a
+  gateway does not serve the first), instead of `google/gemini-3.8-flash` on
+  OpenAI-compatible endpoints. `graft model` and the failure hints now recommend
+  the latest Claude Sonnet an endpoint serves first, then Gemini Flash, then GPT
+  terra.
+
+### Fixed
+
+- **A Claude Code tool call no longer hangs when the host leaves stdin open.**
+  The `pre-tool` hook (the gate before every Read, Grep and shell call) read its
+  payload with a blocking read that never returned when stdin wasn't closed, so
+  the call stalled until the host killed the hook. The `pre-bash` hook had the
+  same problem on Windows, where a pending pipe read can't be cancelled. Both
+  now give up after 2 seconds and exit 0, which lets the call through.
+- **Fewer lost writes on Windows.** graft and Trail save files by writing a
+  temp file and renaming it over the old one. On Windows that rename fails while
+  another process, such as antivirus or the search indexer, has the file open
+  for a moment, and the write was lost. The rename is now retried for about a
+  quarter of a second. This covers the savings ledger, stats and session files,
+  Trail's state files, the graph, the summaries cache and the review page store.
+  A file that stays locked still fails the write, as before.
+- **The test suite runs on Windows.** Several tests used POSIX-only commands
+  (`rm`, `ps`, `mkdir -p`), depended on the machine's own Kilo config or on Go
+  being installed, or were too tightly timed for a loaded machine. `npm test`
+  now skips the Trail cloud test files, since cloud is permanently disabled.
+  `CLOUD_TESTS=1` runs them anyway.
+- **Trail's look-back and fetching are off by default.** The look-back has
+  `trail init` read your past Claude Code sessions and send what it finds to
+  Claude. Fetching covers `git fetch origin`, `gh pr list`, and the read of
+  merged PRs' review comments, which also go to Claude. Both now behave as if
+  `TRAIL_NO_LOOK_BACK=1` and `TRAIL_NO_FETCH=1` were set. Set the variable to
+  `0` to turn a feature back on. Any value other than `0` keeps it off. Before,
+  `TRAIL_NO_FETCH=0` turned some fetching off and left the rest on; now every
+  part gives the same answer. `npm test` sets both to `0`, because the suite
+  tests these features.
+- **A written no-cloud policy for this fork.** `docs/no-cloud-policy.md` sets
+  two rules for every AI agent and contributor. First, anything that sends data
+  to a cloud, whether new or merged from upstream, is off by default and can't
+  be turned back on without being asked. Second, tests of such features are
+  skipped. The rules are in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+  `.github/copilot-instructions.md`, and the Kilo Code, Cursor, Windsurf, Kiro,
+  Cline and Roo rule folders. To skip a test file, add an
+  `@cloud-sending-test` comment to it; `npm test` skips every file that has one.
+- **A model saved with `graft model` is used even in a terminal opened before
+  it was saved.** `graft model` showed the saved `GRAFT_MODEL` while `graft
+  build --deep` in the same terminal still ran graft's default model and failed
+  with `unknown model`. `build --deep`, `blast --name` and `graft model` /
+  `graft api url|key` now fill `GRAFT_BASE_URL`, `GRAFT_API_KEY` and
+  `GRAFT_MODEL` from the saved user settings (HKCU\Environment, or
+  `~/.graft/env.sh`) when the process does not set them; a value in the shell
+  or `./.env` still wins. `GRAFT_NO_SAVED_SETTINGS=1` turns this off.
+- **Warnings no longer run into the build's progress line.** A message printed
+  during `graft build --deep` (`⚠ … retrying at …`, `synthesis batch …`) used to
+  be appended to the end of the `reading concepts 17/913: …` line. The progress
+  line is now taken off before any other output and redrawn below it.
 
 - **`graft build --deep` no longer asks for a model on every run.** On the
   Databricks AI Gateway it used to list every model and ask which to use each
@@ -412,6 +539,98 @@
   instructions are approximate. The hint now appears only on the CLI. Hosts with
   a per-model table are told to relay that instead, and are no longer told both
   "reproduce the table" and "report the tokens alone" in the same breath.
+
+## 0.24.1
+
+### Added
+
+- **`trail init --pair <code>`**: set up from the Trail web app at
+  team.trailhq.com. The setup prompt there carries a pair code; with it, init
+  streams its steps (map, PR reviews, past sessions, learnings) to the live
+  onboarding page, which shows the tokens one lookup on the map saved and
+  teammates' open branches that touch your files, then hands the repo's
+  learnings and skills over for you to review before anything is uploaded.
+  A learning you drop there stays dropped.
+- **`trail init --connect <code>`**: connects this machine to your Trail
+  workspace with the one-time code from team.trailhq.com (the token goes where
+  `trail login` keeps it) and sends one summary of the repo: what a lookup on
+  the code map saved, the learnings' titles, and teammates' recently pushed
+  branches that change the files you work on. Titles, counts and names only;
+  never code, diffs or session text.
+- **`--server <url>`** (or `TRAIL_URL`) points `--pair` and `--connect` at a
+  self-hosted Trail. Offline, init says so once and prints the exact command
+  to connect later.
+- **Workspace brains in your agents**: once connected, `trail mcp` also serves
+  the workspace's `list_brains`, `get_context`, `search_rules` and `get_rules`,
+  passed to the workspace with your token; the repo tools keep working
+  offline. Claude Code gets one user-level `trail` entry that serves just
+  those (`trail mcp --brains`); `trail logout` takes it out.
+- `trail init` writes a skill when your past sessions repeat a procedure.
+
+### Changed
+
+- Trail cloud now defaults to https://team.trailhq.com.
+
+### Fixed
+
+- The agent picker no longer leaves a stray title behind in an 80-column
+  terminal.
+
+## 0.24.0
+
+### Added
+
+- **`trail init` offers what your teammates' Claude doesn't know yet** (#662):
+  what reviewers flagged on merged PRs, and Claude Code's memory of the repo.
+  Every team row names real code, and anything CLAUDE.md, AGENTS.md or a
+  learning already says is dropped. What you told Claude more than once is now
+  offered as personal only.
+- **Learnings are asked for on real signals** (#663): a check that failed, then
+  passed after an edit; a correction followed by code work; a commit, push or
+  PR after edits; a long read that found where something lives. The ask names
+  what happened.
+- **`trail note` checks a team learning before saving it**: it must name a file
+  or function in the repo, give a reason, and not repeat an existing learning.
+  `--replaces <file>` supersedes an old one, and `--anyway` skips the checks.
+- **Shell parsing and command risk checks** behind trail's hooks, and new
+  learning fields (#654).
+- **Gleam support** (#408).
+
+### Fixed
+
+- Language servers are found and started on Windows (#579), and child
+  processes no longer flash console windows there (#631).
+- Update checks honor `DO_NOT_TRACK` (#651).
+- `--no-gitignore` is kept when build options are saved (#413), and `/graft/`
+  isn't added to `.gitignore` when git already ignores the folder (#622).
+- Unchanged cards aren't rewritten on every build (#472).
+- Background task notifications no longer trigger retrieval in the prompt hook
+  (#551).
+- Deep builds: stringified concept-pass nodes are read, empty batches don't
+  tick (#395), and concept batches run in parallel (#521).
+- LLM providers: a 200 carrying an error is retried, a forced `tool_choice`
+  that isn't honoured falls back (#502), and structured message content from
+  OpenAI-compatible providers is read (#479).
+- The viewer keeps the selection after a pan (#630).
+
+## 0.23.1
+
+### Fixed
+
+- **Learnings reach Claude when it opens the file they're about** (#642). When
+  Claude reads or edits a file, it gets the learnings whose `touches` name that
+  file, at most two, once a session, without calling trail first.
+- **A learning's `touches` come from what the session did**: files edited, then
+  files named in the learning, then files read. They no longer list whatever
+  untracked files sat in the repo.
+- **An empty `trail grep` names the git-ignored code it didn't search.**
+- **Exploratory turns are asked for a learning too**, when trail's answers
+  saved 30k+ tokens of reading.
+- **`trail init` refuses your home folder**, and outside git it says the
+  learnings stay on this machine.
+- **The shared hook reads single-quoted learning titles** (#626), as Prettier
+  writes them, so teammates without trail see clean titles. `.trail/hook.cjs`
+  is updated at the next session; commit it once.
 
 ## 0.23.0
 

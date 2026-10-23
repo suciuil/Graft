@@ -16,7 +16,7 @@
  * breadth tier instead (`fallbackLangOf` in generic.ts), and the build says which
  * languages and how to get the native parser back ({@link nativeFallbackNotice}).
  */
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,28 @@ import type Parser from "tree-sitter";
 import type { Language } from "./extract.js";
 
 const nodeRequire = createRequire(import.meta.url);
+
+/**
+ * Grammars the build copies into dist/vendor/ (scripts/vendor-swift.mjs)
+ * instead of the package depending on them. tree-sitter-swift asks for
+ * tree-sitter ^0.22 while every other grammar asks for ^0.21, so as a dependency
+ * it made every `npm install -g` print a wall of peer warnings. Its prebuilt
+ * binaries cover all six desktop platforms; anywhere else the require fails and
+ * Swift goes to its WASM stand-in like any missing grammar. Run from src/, there
+ * is no dist/vendor/ and the dev dependency stands in.
+ */
+const VENDORED = new Set(["tree-sitter-swift"]);
+const VENDOR_DIR = fileURLToPath(new URL("../vendor/", import.meta.url));
+
+/** `id` from `vendorDir` when the build put it there, else from node_modules. */
+export function requireGrammar(id: string, vendorDir = VENDOR_DIR): unknown {
+  const dir = join(vendorDir, id);
+  if (!VENDORED.has(id) || !existsSync(dir)) return nodeRequire(id);
+  const grammar = nodeRequire(join(dir, "prebuilds", `${process.platform}-${process.arch}`, `${id}.node`)) as Record<string, unknown>;
+  // What the package's own bindings/node/index.js adds to the binding.
+  grammar.nodeTypeInfo = nodeRequire(join(dir, "node-types.json"));
+  return grammar;
+}
 
 const CORE = "tree-sitter";
 
@@ -181,7 +203,7 @@ export function grammarAvailable(key: string): boolean {
 
 type Loaded = { ok: true; value: unknown } | { ok: false; error: string };
 
-let requireModule: (id: string) => unknown = (id) => nodeRequire(id);
+let requireModule: (id: string) => unknown = (id) => requireGrammar(id);
 const modules = new Map<string, Loaded>();
 const ready = new Map<Language, boolean>();
 /** undefined: not tried yet. null: tried, and the core binding is unusable. */
@@ -302,7 +324,8 @@ export function missingNativePackages(langs: Iterable<Language>): string[] {
     const module = GRAMMAR_MODULES[lang]?.module;
     for (const id of [CORE, ...(module ? [module] : [])]) {
       const m = modules.get(id);
-      if (m && !m.ok) out.add(NPM_NAME[id] ?? id);
+      // A vendored grammar has no install script for a flag to allow.
+      if (m && !m.ok && !VENDORED.has(id)) out.add(NPM_NAME[id] ?? id);
     }
   }
   return [...out].sort();
@@ -334,7 +357,7 @@ export function nativeFallbackNotice(fallback: NativeFallback | undefined, packa
  * `require`), and forget everything loaded so far. A missing binary is simulated by
  * a function that throws for that module id, the way node-gyp-build does. */
 export function setNativeRequireForTest(fn: ((id: string) => unknown) | null): void {
-  requireModule = fn ?? ((id) => nodeRequire(id));
+  requireModule = fn ?? ((id) => requireGrammar(id));
   optionalOverridesCore = fn === null;
   modules.clear();
   ready.clear();
@@ -343,5 +366,5 @@ export function setNativeRequireForTest(fn: ((id: string) => unknown) | null): v
 
 /** The real `require` the seam above wraps, for a test's pass-through. */
 export function realNativeRequire(id: string): unknown {
-  return nodeRequire(id);
+  return requireGrammar(id);
 }

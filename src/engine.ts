@@ -35,6 +35,8 @@ export interface InitOptions {
   onlyDirs?: string[];
   /** Ignore the LLM-call cache and re-summarize/re-synthesize everything (`--force`). */
   force?: boolean;
+  /** Max concept synthesis batches in flight at once. Default 4. */
+  synthConcurrency?: number;
   /** Progress callback for long builds. */
   onProgress?: (info: BuildProgress) => void;
 }
@@ -73,6 +75,7 @@ export class Graft {
       extensions: opts.extensions,
       onlyDirs: opts.onlyDirs,
       force: opts.force,
+      synthConcurrency: opts.synthConcurrency,
       model: this.modelLabel(),
       summarizer: this.summarizer(),
       synthesizer: this.synthesizer(),

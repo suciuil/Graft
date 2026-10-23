@@ -142,6 +142,18 @@ test('a model sent with the call is priced, and filed under that model', async (
   // The whole point: over MCP nothing else can name the model, so without this
   // argument a Kilo session's savings accumulate in the ledger as `unknown`.
   const d = builtFixture('graft-mcp-modelarg-');
+  // The display name comes from the host's own config, read from the home
+  // folder. Give it one that names the model, so the label does not depend on
+  // whichever Kilo config (if any) the machine running the tests happens to have.
+  const home = tmpRepo('graft-mcp-modelarg-home');
+  mkdirSync(join(home, '.config', 'kilo'), { recursive: true });
+  writeFileSync(
+    join(home, '.config', 'kilo', 'kilo.jsonc'),
+    JSON.stringify({ provider: { vertex_ai: { models: { 'claude-opus-5': { name: 'Claude Opus 5' } } } } }),
+  );
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
   setMcpClient('Kilo Code');
   try {
     const res = await callTool(d, 'graft_find_code', {
@@ -160,6 +172,10 @@ test('a model sent with the call is priced, and filed under that model', async (
     assert.equal(day['vertex_ai/claude-opus-5'], undefined, 'never keyed by the route');
     assert.equal(day[UNKNOWN_MODEL], undefined, 'and nothing left unattributed');
   } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
     setAgentModel(null);
     setMcpClient(undefined);
   }

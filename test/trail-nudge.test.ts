@@ -21,7 +21,8 @@ import { tmpRepo } from "./helpers.js";
 
 process.env.DO_NOT_TRACK = "1";
 process.env[BRAND_ENV] = "trail";
-process.env.TRAIL_URL = "http://trail.test";
+// The test-only stand-in address: real sign-ins only go where `trail login --server` says, or to Trail cloud.
+process.env.TRAIL_TEST_SERVER = "http://trail.test";
 process.env.TRAIL_NO_FETCH = "1";
 process.env.TRAIL_CLOUD = "1";
 

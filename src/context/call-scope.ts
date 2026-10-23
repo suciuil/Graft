@@ -66,6 +66,22 @@ export interface CallScope {
    * Carried by the savings tally, like {@link deepDue}.
    */
   initDue: string | null;
+  /**
+   * Set when this repo saw another graft call a few minutes ago, so the agent has
+   * very likely just read the full savings nudge. The footer then carries a
+   * short form: the same figure and example tally without the paragraph around
+   * them. A long nudge repeated on every call is what makes agents filter the
+   * footer out of the output, which loses the figure along with the noise.
+   */
+  compactNudge: boolean;
+  /**
+   * Called with each saving as a footer claims it, before the output is
+   * printed. The CLI uses it to log the call and to repeat the savings line on
+   * stderr. That has to happen at this point, not after the command: a pipe that
+   * stops reading (`Select-Object -First`, `head`) ends the process before
+   * anything placed after the output gets to run.
+   */
+  onClaim: ((tokens: number) => void) | null;
 }
 
 function freshScope(): CallScope {
@@ -79,6 +95,8 @@ function freshScope(): CallScope {
     hostModel: null,
     deepDue: null,
     initDue: null,
+    compactNudge: false,
+    onClaim: null,
   };
 }
 

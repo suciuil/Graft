@@ -80,17 +80,32 @@ export interface ResolvedConfig {
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1";
 
-/** Per-provider default model. */
+/** The model graft uses whenever none is configured (GRAFT_MODEL / --model), on every provider. */
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
+
+/**
+ * Other spellings of {@link DEFAULT_MODEL}, tried in order when an endpoint does
+ * not serve it: gateways disagree on the version separator (`5-5` vs `5.5`).
+ */
+const DEFAULT_MODEL_ALIASES = ["claude-sonnet-5.5"];
+
+/** Per-provider default model: {@link DEFAULT_MODEL}, routing-prefixed where the gateway needs it. */
 export const DEFAULT_MODELS: Record<ProviderKind, string> = {
-  openai: "google/gemini-3.8-flash",
-  anthropic: "claude-sonnet-5",
+  openai: DEFAULT_MODEL,
+  anthropic: DEFAULT_MODEL,
   // Provider-prefixed so the LiteLLM proxy routes it; override with GRAFT_MODEL.
-  litellm: "gemini/gemini-3.8-flash",
+  litellm: `anthropic/${DEFAULT_MODEL}`,
   // Provider-prefixed so the OrcaRouter gateway routes it; override with GRAFT_MODEL.
-  orcarouter: "google/gemini-3.8-flash",
+  orcarouter: `anthropic/${DEFAULT_MODEL}`,
   // The LLM Incubator gateway lists its models under bare ids.
-  "llm-incubator": "gemini-3.8-flash",
+  "llm-incubator": DEFAULT_MODEL,
 };
+
+/** Fallback ids for `model`: its bare id, and the alternate spellings when it is the default. */
+function modelFallbacksFor(model: string, isDefault: boolean): string[] | undefined {
+  const list = [...(bareModelFallbacks(model) ?? []), ...(isDefault ? DEFAULT_MODEL_ALIASES : [])].filter((id) => id !== model);
+  return list.length > 0 ? [...new Set(list)] : undefined;
+}
 
 export const DEFAULTS = {
   provider: "openai" as ProviderKind,
@@ -157,7 +172,7 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
     env.ORCAROUTER_MODEL ??
     DEFAULT_MODELS[provider];
   // Gateways disagree on routing prefixes, so a prefixed id also tries its bare form.
-  const modelFallbacks = bareModelFallbacks(model);
+  const modelFallbacks = modelFallbacksFor(model, model === DEFAULT_MODELS[provider]);
 
   const headers =
     provider === "openai" && baseUrl?.includes("openrouter.ai")

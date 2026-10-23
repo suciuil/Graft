@@ -163,15 +163,29 @@ function initLine(): string {
 }
 
 /**
- * The tally's price-update line: shown exactly when the saving is reported in
- * tokens alone because graft knows no price for the model, and "" whenever a
- * dollar figure was shown.
+ * Whether this call names a model graft has no price for — the one unpriced
+ * state a price catalog can fix. Distinct from "nothing named a model at all",
+ * where a catalog has nothing to look up and the fix is naming the model.
+ */
+function namedButUnpriced(rate: InputRate | null): boolean {
+  if (rate !== null) return false;
+  const model = callScope().pricing.model;
+  return model.confidence === 'certain' && !!model.id;
+}
+
+/**
+ * The tally's price-update line: shown exactly when a model WAS named and graft
+ * knows no price for it, and "" otherwise — whenever a dollar figure was shown,
+ * and also when nothing named a model. In that last case `graft prices update`
+ * cannot help (there is no model to look up), and suggesting it sent users to
+ * run a command that left the warning in place, for a model graft already
+ * prices.
  *
  * In the example tally for the same reason as {@link deepLine}: it is the block
  * agents relay, so it is the only place the user reliably learns about it.
  */
 function pricesLine(rate: InputRate | null): string {
-  if (rate !== null) return '';
+  if (!namedButUnpriced(rate)) return '';
   return (
     `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft prices update')}' command \u2014 recommended (no known price for the model used: it fetches ` +
     'model prices from LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)'
@@ -197,13 +211,78 @@ export function claimedSavings(): number {
  * including `ask`, which renders its own footer rather than going through
  * {@link savingsLine}. */
 export function noteClaimedSavings(tokens: number): void {
-  if (tokens > 0) callScope().claimedTokens += tokens;
+  if (!(tokens > 0)) return;
+  const scope = callScope();
+  scope.claimedTokens += tokens;
+  try {
+    scope.onClaim?.(tokens);
+  } catch {
+    // A log line or a stderr copy is never worth failing a retrieval over.
+  }
+}
+
+/** Set (or clear, with null) the callback each claimed saving is handed to —
+ * see `CallScope.onClaim`. */
+export function setClaimListener(fn: ((tokens: number) => void) | null): void {
+  callScope().onClaim = fn;
 }
 
 /** Forget what has been claimed. A scoped call gets a fresh counter anyway; this
  * stays for the process-level store the CLI and the hooks share. */
 export function resetClaimedSavings(): void {
   callScope().claimedTokens = 0;
+}
+
+/** Ask for the short form of the savings nudge on this call (see
+ * `CallScope.compactNudge`). */
+export function setCompactNudge(on: boolean): void {
+  callScope().compactNudge = on === true;
+}
+
+/**
+ * What this call claimed, in the terms its footer used: the tokens, their dollar
+ * value at the rate the footer priced them at (null when it priced nothing), and
+ * the model name the example tally carried. Kept so a footer that was cut out of
+ * the output can be rebuilt afterwards from the same figures, with nothing
+ * recomputed at a different rate.
+ */
+export function claimedSummary(
+  tokens: number = callScope().claimedTokens,
+): { tokens: number; usd: number | null; model: string | null; measured: boolean } {
+  const rate = tokens > 0 ? callScope().pricing.rate : null;
+  if (!rate) return { tokens, usd: null, model: null, measured: false };
+  return { tokens, usd: (tokens * rate.usdPerMtok) / 1_000_000, model: modelLabel(rate), measured: rate.measured === true };
+}
+
+/** The warning lines this call's example tally carried (prices update, init,
+ * deep build), in the same order and with the same line breaks, or "". */
+export function tallyWarnings(): string {
+  const rate = callScope().claimedTokens > 0 ? callScope().pricing.rate : null;
+  return pricesLine(rate) + initLine() + deepLine();
+}
+
+/**
+ * The savings line again, for stderr, when stdout went into a pipe.
+ *
+ * An agent that pipes graft through `Select-Object -First`, `head`,
+ * `Select-String` or `findstr` cuts the footer out with the rest, and then has
+ * no figure to report. stderr is not part of the pipe, so the copy still reaches
+ * the agent's terminal.
+ *
+ * Deliberately NOT in the `[graft] tokens saved ≈ N` shape: a host that reads
+ * stdout and stderr together (Claude Code's Bash tool, Codex) sums every match
+ * of that pattern, and a second match would count the same call twice. Empty
+ * when nothing was claimed.
+ */
+export function stderrSavingsCopy(tokens: number = callScope().claimedTokens): string {
+  const s = claimedSummary(tokens);
+  if (s.tokens <= 0) return '';
+  const rate = callScope().pricing.rate;
+  const worth = s.usd !== null ? `, worth ${formatDollars(s.usd)}` : '';
+  return (
+    `${tag()} savings, repeated here because stdout is piped (the same call: count it once): ~${formatCount(s.tokens)} tokens${worth}. ` +
+    `Close your reply with the summed tally, e.g. ${tallyTail(tallyExample(s.tokens, rate))}`
+  );
 }
 
 /** How the agent should name the model in the tally: the host's display name
@@ -335,25 +414,44 @@ export function savingsTurnNudge(savedTokens: number): string {
   const rate = savedTokens > 0 ? scope.pricing.rate : null;
   const example = tallyExample(savedTokens, rate);
 
+  // The short form, for a call that follows another graft call in this repo by
+  // a few minutes: the agent has just read the paragraph below, so this repeats
+  // only what changes (this call's dollar value) and the example it copies. A
+  // long footer on every call is what got the whole footer filtered out — and
+  // the figure with it. The warnings ride in the example, so none is lost.
+  if (scope.compactNudge) {
+    const worth = rate ? ` Worth ${formatDollars((savedTokens * rate.usdPerMtok) / 1_000_000)}.` : '';
+    const table = !rate && modelTableBlock(savedTokens) ? ' Reproduce the table exactly, in a collapsed/expandable section.' : '';
+    return `${worth} Add it to this turn's ${b} tally and close your reply with the sum.${table} e.g. ${tallyTail(example)}`;
+  }
+
   if (rate === null) {
     // What to do about it, named per surface so the agent is never told to use
     // something that does not exist where it is running:
     //   - a per-model table (Kilo, no model sent) — relay it; that IS the
     //     answer, so no other advice belongs in the same breath;
+    //   - a model was named but has no price — the price-update line in the
+    //     example is the fix, and naming the model again would change nothing;
     //   - over MCP, the `model` tool argument;
     //   - on the CLI, the `--agent-model` flag.
-    // Both of the latter turn the next call into an exactly-priced one, and file
-    // the saving under a real model instead of `unknown`.
+    // The last two turn the next call into an exactly-priced one, and file the
+    // saving under a real model instead of `unknown`.
+    const named = namedButUnpriced(rate);
     const instruction = modelTableBlock(savedTokens)
       ? `Reproduce the table exactly, summed across your ${b} calls, in a ` +
         'collapsed/expandable section.'
-      : scope.overMcp
-        ? `Send \`model: "<your model id>"\` with your ${b} tool calls to have ` +
-          'savings priced directly.'
-        : `Pass \`--agent-model <your model id>\` on your ${b} calls to have ` +
-          'savings priced directly.';
+      : named
+        ? 'Keep the price-update line under the tally, as shown.'
+        : scope.overMcp
+          ? `Send \`model: "<your model id>"\` with your ${b} tool calls to have ` +
+            'savings priced directly.'
+          : `Pass \`--agent-model <your model id>\` on your ${b} calls to have ` +
+            'savings priced directly.';
+    const why = named
+      ? `${b} knows no price for ${scope.pricing.model.label ?? scope.pricing.model.id}.`
+      : 'nothing named the model you are running.';
     return (
-      ' This call cannot be priced: nothing named the model you are running. ' +
+      ` This call cannot be priced: ${why} ` +
       `At the end of your reply, tell the user the total ${b} tokens saved ` +
       `this turn. ${instruction}${sum}${tallyTail(example)}`
     );

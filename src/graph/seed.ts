@@ -40,7 +40,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -50,6 +49,7 @@ import { CACHE_DIR, contextDirFor } from "../context/node-file.js";
 import { EXTRACT_CACHE_PREFIX } from "./extract-cache.js";
 import { FINGERPRINT_PREFIX } from "./fingerprint.js";
 import { GRAPH_DIR, wiringPath } from "./write.js";
+import { renameReplacing } from "../util/rename-replacing.js";
 
 /** The one line a linked worktree's `.git` file carries. */
 const GITDIR_KEY = "gitdir:";
@@ -192,7 +192,7 @@ function installGraph(srcGraph: string, destGraph: string): void {
   const tmp = `${destGraph}.seed.${process.pid}`;
   try {
     copyFileSync(srcGraph, tmp);
-    renameSync(tmp, destGraph);
+    renameReplacing(tmp, destGraph);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch { /* nothing to clean up */ }
     throw err;

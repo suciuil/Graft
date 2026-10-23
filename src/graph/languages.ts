@@ -154,6 +154,7 @@ const DISPLAY: Record<string, string> = {
   clojure: "Clojure",
   nix: "Nix",
   lua: "Lua",
+  gleam: "Gleam",
   vue: "Vue",
 };
 

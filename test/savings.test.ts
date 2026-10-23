@@ -202,7 +202,7 @@ test('a due deep build gets its own ⚠️ line under the tally, the block agent
   setPricing(pricingFor(NO_MODEL));
   assert.match(
     footer(),
-    /🌱 graft saved ~N tokens by this turn  \n⚠️ Run the 'graft prices update' command — recommended \([^\n]*\)  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet\)\./,
+    /🌱 graft saved ~N tokens by this turn  \n⚠️ Run the 'graft build --deep' command — recommended \(no summaries yet\)\./,
   );
 
   setDeepDue(null);
@@ -228,8 +228,37 @@ test('a saving graft cannot price suggests `graft prices update` under the tally
   assertUnquotedTally(f);
 
   setDeepDue(null);
+  clearPricing();
+});
+
+test('a named-but-unpriced model is explained as such, not as a missing model', () => {
+  setPricing(pricingFor(certain('claude-opus-6', 'Claude Opus 6')));
+  setModelTable(null);
+  setDeepDue(null);
+  const f = footer();
+  assert.match(f, /This call cannot be priced: graft knows no price for Claude Opus 6\./);
+  assert.doesNotMatch(f, /nothing named the model/);
+  assert.doesNotMatch(f, /--agent-model|Send `model:/, 'the model was named; naming it again changes nothing');
+  clearPricing();
+});
+
+test('when nothing named the model, `graft prices update` is never suggested', () => {
+  // Observed: a Kilo turn mixing priced calls with calls that sent no `model`
+  // told the user "no known price for the model used — run graft prices update"
+  // for Claude Opus 5.5, a model graft already prices. A catalog cannot price a
+  // model nobody named; the fix is naming it, which the nudge already says.
+  setDeepDue(null);
   setPricing(pricingFor(NO_MODEL));
-  assert.match(footer(), /by this turn  \n⚠️ Run the 'graft prices update' command — recommended \([^)]*\)\.$/, 'also when nothing named the model');
+  setModelTable(null);
+  const cli = footer();
+  assert.doesNotMatch(cli, /prices update|no known price/);
+  assert.match(cli, /nothing named the model you are running/);
+  assert.match(cli, /by this turn\.$/, 'the tally stands alone');
+
+  setMcpSurface(true);
+  assert.doesNotMatch(footer(), /prices update/);
+  setModelTable(() => [{ label: 'M', value: '$1.00' }]);
+  assert.doesNotMatch(footer(), /prices update/, 'nor under a per-model table');
   clearPricing();
 });
 
@@ -322,11 +351,11 @@ test('a host that lists its models gets a per-model table instead of nothing', (
   // Fenced, because the padding IS the table — unfenced, a chat host collapses
   // the space runs and the box falls apart.
   assert.match(f, /below:\n```\n\+/);
-  // The block ends on its closing fence, followed only by the price-update line
-  // (no price is known here). It used to end ```" — a quote that closed graft's
-  // own example and was then copied verbatim into the user's reply. Nor does a
-  // full stop dangle off the fence: it closes the last line instead.
-  assert.match(f, /\+\n```  \n⚠️ Run the 'graft prices update' command — recommended \([^\n]*\)\.$/);
+  // The block ends on its closing fence — no price-update line, since nothing
+  // named a model for a catalog to look up. It used to end ```" — a quote that
+  // closed graft's own example and was then copied verbatim into the user's
+  // reply. Nor does a full stop dangle off the fence.
+  assert.match(f, /\+\n```$/);
   // And the agent is told where to put it.
   assert.match(f, /collapsed\/expandable section/);
   clearPricing();

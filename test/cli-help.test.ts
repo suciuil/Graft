@@ -124,7 +124,8 @@ test("an unknown command prints the error, the suggestion, then the full help â€
 
   const group = runCli(["api", "nope"]);
   assert.equal(group.status, 1, group.describe());
-  assert.match(group.stderr, /^error: unknown command 'nope'\n\n {2}graft api key /, "a group shows its own commands");
+  assert.match(group.stderr, /^error: unknown command 'nope'\n\n {2}graft api [a-z-]+ /, "a group shows its own commands");
+  assert.match(group.stderr, /^ {2}graft api key /m, "api key among them");
 
   const missing = runCli(["ask"]);
   assert.equal(missing.status, 1);

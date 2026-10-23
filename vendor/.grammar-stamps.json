@@ -65,7 +65,7 @@
       }
     },
     "build": "a3bc790d59182b49124446f5760be42e4901cc46521c6d2eef52aa2cdc3778b6",
-    "pack": "6f96a7be1abf47c54df297036cfde82f3f89a0422598c00708f8b8c913879fa7"
+    "pack": "27f80b63498a83932601bfeaad859ec6a373b956da62290b04d4366c99cb26ab"
   },
   "tree-sitter-cpp": {
     "gen": {

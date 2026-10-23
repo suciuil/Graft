@@ -37,6 +37,7 @@ import { claudeGlobalTargets } from './claude-global.js';
 import { claudeTargetsFor, legacyClaudeTargets, TRAIL_HOOK, TRAIL_STATUSLINE, trailSkillPath } from '../claude/init.js';
 import { isGraftAllowEntry, isGraftFooterRegex } from '../claude/settings-merge.js';
 import type { WriteScope } from './plan.js';
+import { anyProfileMapDirFor } from '../context/profile-store.js';
 import type { Brand } from '../brand.js';
 
 /** Both names a file can go by: graft's, and trail's in a repo that uses trail. */
@@ -555,6 +556,12 @@ function targets(repo: string, opts: RetractOpts): Target[] {
       { hostId: 'graph', path: gitignore, what: 'graft/ ignore entry', scope: 'repo', run: (a) => stripIgnoreEntries(gitignore, [/^\/?graft\/?$/], a) },
       { hostId: 'graph', path: ignore, what: 'graft/ search re-admit entries', scope: 'repo', run: (a) => stripIgnoreEntries(ignore, [/^!?graft\/?$/, /^graft\/\.(cache|graph)\/?$/], a) },
     ] as Target[]) add(t);
+    // The repo's map in the profile store, when one was built there. Outside the
+    // repo, so it goes with the other out-of-repo targets.
+    if (opts.global !== false) {
+      const profileMap = anyProfileMapDirFor(repo, process.env, home);
+      add({ hostId: 'graph', path: profileMap, what: 'local graph cache (profile store)', scope: 'global', run: (a) => removeDir(profileMap, a) });
+    }
   }
 
   return out;

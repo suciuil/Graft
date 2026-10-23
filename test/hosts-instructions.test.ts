@@ -20,6 +20,16 @@ test('canonical body names the three essentials', () => {
   assert.ok(!/\bhook|statusline\b/i.test(b), 'no host-specific machinery in the shared body');
 });
 
+test('every host is told not to pipe graft output, PowerShell filters included, and how to recover', () => {
+  const b = instructionBody();
+  assert.match(b, /Never pipe or filter a graft command's output/);
+  for (const f of ['head', 'tail', 'Select-Object -First/-Last', 'Select-String', 'findstr']) {
+    assert.ok(b.includes(`\`${f}\``), `names ${f}`);
+  }
+  assert.match(b, /graft savings --last/, 'names the recovery command');
+  assert.match(skillTemplate(), /graft savings --last/, 'and the Claude/AdaL/Grok skill too');
+});
+
 test('only Copilot receives the IntelliJ-specific model reporting override', () => {
   const copilot = HOSTS.find((host) => host.id === 'copilot')!.content();
   assert.ok(copilot.startsWith(instructionBody()));
