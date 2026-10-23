@@ -77,6 +77,15 @@ This is a rule, not a preference: every one of those substitutions returns the
 same answer for a fraction of the tokens, and the graph edges behind
 \`callers\` are not reconstructible by reading at all.
 
+Never pipe or filter a graft command's output: no \`head\`, \`tail\`, \`sed -n\`,
+\`grep\`, \`Select-Object -First/-Last\`, \`Select-String\`, \`findstr\` or
+\`Out-String |\`. Every graft command is already capped and says what it dropped,
+and clipping it also cuts the savings line your closing tally comes from. If you
+clipped one anyway, graft repeats that line on stderr; failing that, run
+\`graft savings --last\`, which prints this turn's graft calls and the tally to
+close your reply with. Never answer "I have no figures" while either is
+available.
+
 ### Verify before you assert
 
 Every factual claim you make about this repo must come from something you have
@@ -96,8 +105,8 @@ true, and the reader cannot tell your guesses from your findings.
   An explicit "I haven't checked X" is useful; a confident sentence that turns
   out to be invented costs the reader more than the answer was worth.
 - Re-verify instead of trusting recall when the code may have moved under you —
-  after your own edits, or when your memory of a span is from earlier in a long
-  session. Graft's results already reflect uncommitted edits.
+  after your own edits, or when what you recall of a span is from earlier in a
+  long session. Graft's results already reflect uncommitted edits.
 - Never invent a symbol, path, file, flag, or option to fill a gap. If graft and
   the source do not show it, it does not exist; report the gap instead.
 

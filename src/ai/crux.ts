@@ -47,11 +47,19 @@ export interface CruxSummarizer {
 }
 
 /** Why a crux call produced no usable summaries (#235). */
-export type CruxMissKind = "empty-toolCalls" | "unparseable" | "truncated" | "empty-parsed";
+export type CruxMissKind =
+  | "empty-toolCalls"
+  | "unparseable"
+  | "truncated"
+  | "empty-parsed"
+  | "id-mismatch";
 
 export interface CruxMiss {
   kind: CruxMissKind;
   finishReason: string | null;
+  /** `id-mismatch` only: how many entries came back, and the first one's raw id. */
+  returned?: number;
+  firstId?: string;
 }
 
 function isTruncatedStop(reason: string | null): boolean {
@@ -67,11 +75,24 @@ function hitOutputCap(res: Pick<ChatResponse, "stopReason"> & { usage?: { output
   return isTruncatedStop(res.stopReason) || (res.usage?.output ?? 0) >= MAX_OUTPUT_TOKENS * 0.97;
 }
 
-/** Classify an empty/unusable crux reply. `null` means at least one usable summary. */
-export function classifyCruxMiss(res: ChatResponse, parsed: NodeCrux[]): CruxMiss | null {
+/**
+ * Classify an empty/unusable crux reply. `null` means at least one usable summary.
+ * With `requested`, a summary only counts when its id is one we asked for: enrich
+ * looks results up by node id, so a summary under any other id is never applied.
+ */
+export function classifyCruxMiss(
+  res: ChatResponse,
+  parsed: NodeCrux[],
+  requested?: readonly string[],
+): CruxMiss | null {
   const finishReason = res.stopReason;
-  if (parsed.some((p) => p.summary.trim())) return null;
+  const wanted = requested ? new Set(requested) : undefined;
+  const matched = wanted ? parsed.filter((p) => wanted.has(p.id)) : parsed;
+  if (matched.some((p) => p.summary.trim())) return null;
   if (hitOutputCap(res)) return { kind: "truncated", finishReason };
+  if (parsed.length > 0 && matched.length === 0) {
+    return { kind: "id-mismatch", finishReason, returned: parsed.length, firstId: parsed[0].id };
+  }
   if (parsed.length > 0) return { kind: "empty-parsed", finishReason };
   const emptyTools = res.toolCalls.length === 0;
   const emptyText = !res.text?.trim();
@@ -82,7 +103,27 @@ export function classifyCruxMiss(res: ChatResponse, parsed: NodeCrux[]): CruxMis
 /** Per-file error text: miss class + the provider's finish_reason (#235). */
 export function formatCruxMiss(kind: CruxMissKind, finishReason: string | null): string {
   const fr = finishReason == null || finishReason === "" ? "null" : finishReason;
+  if (kind === "id-mismatch") {
+    return `model returned summaries but no id matched a requested target [${kind}, finish_reason=${fr}]`;
+  }
   return `model returned no usable symbol summaries [${kind}, finish_reason=${fr}]`;
+}
+
+/** Longest echoed id shown in an error; a whole echoed row can carry a long signature. */
+const MAX_SHOWN_ID_CHARS = 200;
+
+/**
+ * The model's text for an `id-mismatch`, kept apart from {@link formatCruxMiss}:
+ * the failure gate matches words like "quota" in the error message, and a
+ * returned id can carry any source text, so it must never reach the gate.
+ */
+export function formatCruxMissDetail(miss: CruxMiss | null | undefined): string {
+  if (miss?.kind !== "id-mismatch" || miss.firstId === undefined) return "";
+  const id =
+    miss.firstId.length > MAX_SHOWN_ID_CHARS
+      ? `${miss.firstId.slice(0, MAX_SHOWN_ID_CHARS)}…`
+      : miss.firstId;
+  return `first of ${miss.returned ?? 1} returned id(s): ${JSON.stringify(id)}`;
 }
 
 const SYSTEM_PROMPT = `You explain code definitions for a code graph that helps engineers navigate a codebase.
@@ -155,27 +196,76 @@ function numberLines(source: string, nodes: readonly NodeRef[]): string {
   return out.join("\n");
 }
 
+/**
+ * `id=` is the LAST field of a target line, so the id ends where the line does.
+ * With the id first nothing terminated it, and models asked for the id
+ * "verbatim" copied the whole row — `a.cs#Level | variable | lines L58-L58 | sig`
+ * — into `id` (#259). {@link resolveTargetId} still repairs echoes of either layout.
+ */
 function userContent(input: FileCruxInput): string {
   const targets = input.nodes
     .map(
       (n) =>
-        `- id=${n.id} | ${n.kind} | lines L${n.startLine}-L${n.endLine}` +
-        (n.signature ? ` | ${n.signature}` : ""),
+        `- ${n.kind} | lines L${n.startLine}-L${n.endLine}` +
+        (n.signature ? ` | ${n.signature}` : "") +
+        ` | id=${n.id}`,
     )
     .join("\n");
   const n = input.nodes.length;
   return `FILE: ${input.path}\n\n${numberLines(input.source, input.nodes)}\n\nTARGETS (${n} — return all ${n}, one entry per id):\n${targets}`;
 }
 
-/** Normalize the tool's parsed argument object into a {@link NodeCrux} list. */
-function parseResults(obj: { symbols?: unknown } | undefined): NodeCrux[] {
+/** The longest requested id `test` accepts, or null. */
+function longestMatch(requested: readonly string[], test: (id: string) => boolean): string | null {
+  let best: string | null = null;
+  for (const id of requested) if (test(id) && (best === null || id.length > best.length)) best = id;
+  return best;
+}
+
+/**
+ * Map an id the model returned onto one of the ids we asked for, or null.
+ *
+ * Models echo decorated target rows instead of the bare id (#259, #298, #486).
+ * Rather than cut the string at a guessed delimiter, every rule compares against
+ * the requested ids, so the result is always an id we asked for — never a
+ * fragment of a hallucinated one — and no rule assumes which characters an id
+ * may contain. In order:
+ *   1. exact match;
+ *   2. a requested id followed by ` | ` (the row echoed from the id onwards);
+ *   3. the same two with a leading `id=` removed;
+ *   4. a row ending in ` | id=<requested id>` (the current layout echoed whole).
+ * When several requested ids qualify, the longest wins.
+ */
+export function resolveTargetId(raw: string, requested: readonly string[]): string | null {
+  const trimmed = raw.trim();
+  if (requested.includes(trimmed)) return trimmed;
+  // The list marker a target row starts with (`- `), echoed along with the row.
+  const id = trimmed.replace(/^[-*\u2022]\s+/, "");
+  if (requested.includes(id)) return id;
+  const echoed = longestMatch(requested, (r) => id.startsWith(`${r} | `));
+  if (echoed) return echoed;
+  if (id.startsWith("id=")) {
+    const bare = id.slice(3).trim();
+    if (requested.includes(bare)) return bare;
+    const bareEchoed = longestMatch(requested, (r) => bare.startsWith(`${r} | `));
+    if (bareEchoed) return bareEchoed;
+  }
+  return longestMatch(requested, (r) => id.endsWith(` | id=${r}`));
+}
+
+/**
+ * Normalize the tool's parsed argument object into a {@link NodeCrux} list. Ids
+ * are resolved against `requested`; one that matches nothing keeps its raw text
+ * so {@link classifyCruxMiss} can report what the model actually sent.
+ */
+function parseResults(obj: { symbols?: unknown } | undefined, requested: readonly string[]): NodeCrux[] {
   if (!obj || !Array.isArray(obj.symbols)) return [];
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0);
   return obj.symbols
     .map((s) => s as Record<string, unknown>)
     .filter((s) => typeof s.id === "string")
     .map((s) => ({
-      id: s.id as string,
+      id: resolveTargetId(s.id as string, requested) ?? (s.id as string),
       summary: typeof s.summary === "string" ? s.summary.trim() : "",
       crux_start: num(s.crux_start),
       crux_end: num(s.crux_end),
@@ -214,46 +304,17 @@ function argsFromResponse(
 }
 
 /**
- * Map a returned `id` back onto a real target id.
- *
- * The targets are listed to the model as `- id=<id> | <kind> | lines L1-L14 | <sig>`,
- * and some models echo that whole descriptor line back as the id instead of the
- * bare value. Exact-matching those entries drops them, and a file where EVERY
- * entry is echoed that way then looks like a total miss — enrich reports "model
- * returned no usable symbol summaries", the failure gate counts the file, and a
- * run of them aborts the whole `--deep` pass, discarding summaries that were
- * perfectly good. Recover the intended target instead: strip an `id=` prefix and
- * anything from the first field separator on. Null when it still matches nothing,
- * so a genuinely hallucinated id is still dropped.
- */
-export function resolveTargetId(raw: string, valid: ReadonlySet<string>): string | null {
-  const direct = raw.trim();
-  if (valid.has(direct)) return direct;
-  // Peel one layer at a time, re-checking after each: the list marker `userContent`
-  // writes (`- `), then the `id=` label, then the trailing ` | kind | lines …`
-  // fields. Checking between steps means an id that legitimately contains one of
-  // these characters is matched before the next peel can corrupt it.
-  let s = direct.replace(/^[-*\u2022]\s+/, "");
-  if (valid.has(s)) return s;
-  s = s.replace(/^id\s*=\s*/, "");
-  if (valid.has(s)) return s;
-  const bar = s.indexOf("|");
-  if (bar >= 0) s = s.slice(0, bar);
-  s = s.trim();
-  return valid.has(s) ? s : null;
-}
-
-/**
- * Resolve every parsed entry onto a real target id, dropping what cannot be
- * matched and keeping the first usable entry per target.
+ * The usable entries of a parse whose ids {@link parseResults} already resolved:
+ * only ids we asked for (a hallucinated one is dropped), and the first usable
+ * entry per target.
  */
 function reconcileTargets(parsed: NodeCrux[], nodes: readonly { id: string }[]): NodeCrux[] {
   const valid = new Set(nodes.map((n) => n.id));
   const seen = new Set<string>();
   const out: NodeCrux[] = [];
   for (const entry of parsed) {
-    const id = resolveTargetId(entry.id, valid);
-    if (!id || seen.has(id)) continue;
+    const id = entry.id;
+    if (!valid.has(id) || seen.has(id)) continue;
     // A blank summary is not a result — enrich leaves such a node `pending`
     // (#172). Do NOT claim the target id for one: `collectFileCrux` keys its
     // re-ask off `results.has(id)`, so claiming it here would silently spend
@@ -296,12 +357,14 @@ export class ChatCruxSummarizer implements CruxSummarizer {
     // different questions and must not be collapsed: `classifyCruxMiss` grades
     // the RESPONSE (did the model say anything usable — `empty-parsed` means it
     // returned entries whose summaries were all blank, which is distinct from
-    // `unparseable`), while reconciliation grades the IDS. Reconciling first
-    // would delete the blank entries that are the sole evidence for
-    // `empty-parsed`, silently reclassifying it as `unparseable`.
+    // `unparseable`, and `id-mismatch` that no id was one we asked for), while
+    // reconciliation grades the IDS. Reconciling first would delete the entries
+    // that are the sole evidence for those kinds, silently reclassifying them
+    // as `unparseable`.
+    const requested = input.nodes.map((n) => n.id);
     const capped = hitOutputCap(res);
     const splittable = capped && input.nodes.length > MIN_SPLIT_TARGETS;
-    const raw = parseResults(argsFromResponse(res, { quiet: splittable, capped }));
+    const raw = parseResults(argsFromResponse(res, { quiet: splittable, capped }), requested);
     const got = reconcileTargets(raw, input.nodes);
     if (splittable && got.length < input.nodes.length) {
       // The reply ran out of output budget: ask again for the rest in two halves.
@@ -314,7 +377,7 @@ export class ChatCruxSummarizer implements CruxSummarizer {
       }
       return out;
     }
-    this.lastMiss = classifyCruxMiss(res, raw);
+    this.lastMiss = classifyCruxMiss(res, raw, requested);
     return got;
   }
 }

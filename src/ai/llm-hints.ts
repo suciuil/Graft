@@ -81,19 +81,18 @@ export function rankModelsForHint(ids: string[]): string[] {
   return [...chat.filter((id) => !isTopTierModel(id)), ...chat.filter(isTopTierModel)];
 }
 
-/** The id to put in the `GRAFT_MODEL=` example: a mid-tier one when there is one. */
 /**
  * The model to recommend, in this order of preference:
- *   1. the latest Gemini Flash (a full Flash, not Flash-Lite),
- *   2. the latest GPT terra,
- *   3. the latest Claude Sonnet,
+ *   1. the latest Claude Sonnet (the family of graft's default model),
+ *   2. the latest Gemini Flash (a full Flash, not Flash-Lite),
+ *   3. the latest GPT terra,
  * then any other mid-tier model, then any non-top-tier one.
  */
 export function suggestModel(ranked: string[]): string | undefined {
   const families: ((id: string) => boolean)[] = [
+    (id) => /claude/i.test(id) && /sonnet/i.test(id),
     (id) => /gemini/i.test(id) && /flash/i.test(id) && !/lite/i.test(id),
     (id) => /gpt/i.test(id) && /terra/i.test(id),
-    (id) => /claude/i.test(id) && /sonnet/i.test(id),
   ];
   for (const inFamily of families) {
     const latest = latestModel(ranked.filter(inFamily));
@@ -313,7 +312,7 @@ export async function llmFailureHints(messages: (string | undefined)[], ctx: Hin
       const which =
         s.flag || s.env
           ? `"${cfg.model}" (${fromText(s, "GRAFT_MODEL")})`
-          : `"${cfg.model}" (graft's default for the ${cfg.provider} provider — GRAFT_MODEL is not set)`;
+          : `"${cfg.model}" (graft's default model — GRAFT_MODEL is not set)`;
       lines.push(`• Model ${which} was not found at ${url}.`);
       let ranked: string[] = [];
       let listError: string | undefined;

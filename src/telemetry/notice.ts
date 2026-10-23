@@ -15,7 +15,7 @@
  * shown itself, since that user has just read what they agreed to.
  */
 import { patchState, readState } from './identity.js';
-import { explainOff, offReason, userCanEnable } from './gate.js';
+import { doNotTrack, explainOff, offReason, userCanEnable } from './gate.js';
 import { peek } from './queue.js';
 import { buildBatch } from './send.js';
 import { posthogHost } from './key.js';
@@ -25,7 +25,7 @@ export const TELEMETRY_DOC_URL = 'https://github.com/trailhq/Trail-Code/blob/mai
 
 export const NOTICE = [
   '· graft collects anonymous usage stats (no code, no file paths, no queries).',
-  `  What exactly: ${TELEMETRY_DOC_URL} — turn it off with \`graft telemetry disable\`.`,
+  `  What exactly: ${TELEMETRY_DOC_URL}. Turn it off with \`graft telemetry disable\`.`,
 ].join('\n');
 
 /**
@@ -49,18 +49,19 @@ export function firstRunNotice(home?: string, env?: NodeJS.ProcessEnv): string |
 export function formatStatus(home?: string, env?: NodeJS.ProcessEnv): string {
   const reason = offReason(home, env);
   if (reason === 'unavailable') {
-    return [
-      `telemetry: ${explainOff(reason)}`,
-      `  inspect:   ${cmd('graft telemetry debug')}   (shows the local queue: always empty)`,
-    ].join('\n');
+    const lines = [`telemetry: ${explainOff(reason)}`];
+    if (doNotTrack(env)) lines.push('  update check: off — DO_NOT_TRACK is set');
+    lines.push(`  inspect:   ${cmd('graft telemetry debug')}   (shows the local queue: always empty)`);
+    return lines.join('\n');
   }
   const pending = peek(home).length;
   const lines = [
     reason === null
-      ? 'telemetry: on — anonymous, aggregate-only'
+      ? 'telemetry: on, anonymous and aggregate-only'
       : `telemetry: ${explainOff(reason)}`,
     `  contract:  ${TELEMETRY_DOC_URL}`,
   ];
+  if (doNotTrack(env)) lines.push('  update check: off — DO_NOT_TRACK is set');
   if (reason === null || userCanEnable(reason)) {
     lines.push(`  endpoint:  ${posthogHost()}`);
     lines.push(`  queued:    ${pending} event${pending === 1 ? '' : 's'} waiting for the next daily flush`);
@@ -85,16 +86,16 @@ export function formatDebug(home?: string): string {
   if (events.length === 0) {
     return [
       'telemetry: nothing queued.',
-      '  Run a graft command first — events are written locally and flushed once a day.',
+      '  Run a graft command first: events are written locally and flushed once a day.',
     ].join('\n');
   }
   // A literal placeholder, never the key itself. This output is written to be
   // pasted into an issue; the project key is not the user's to share and is not
   // needed to audit what graft sends.
-  const body = { api_key: '<omitted — graft\'s own ingestion key>', ...buildBatch(events) };
+  const body = { api_key: '<omitted: graft\'s own ingestion key>', ...buildBatch(events) };
   return [
     `telemetry: ${events.length} event(s) queued. This is the exact body a flush would POST`,
-    `to ${posthogHost()}/batch/ — running this command sends nothing.`,
+    `to ${posthogHost()}/batch/. Running this command sends nothing.`,
     '',
     JSON.stringify(body, null, 2),
   ].join('\n');

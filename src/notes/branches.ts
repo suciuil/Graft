@@ -21,6 +21,8 @@ import { join } from "node:path";
 import { brand } from "../brand.js";
 import { graftCliPath } from "../claude/paths.js";
 import { cacheDir, readJson, writeJsonAtomic } from "../util/state.js";
+import { fetchDisabled } from "../util/privacy-switches.js";
+import { flatLine } from "./flatten.js";
 import { LEARNINGS_DIR } from "./repo-trail.js";
 
 /** How old the cache may get before the next command refreshes it in the
@@ -76,8 +78,31 @@ function cachePath(repo: string): string {
   return join(cacheDir(repo), "trail-branches.json");
 }
 
+/**
+ * The cache as trail wrote it. It's a file anyone on the machine could have
+ * edited, and what's in it reaches what the agent reads, so only branches and
+ * learnings of the shape `refreshBranches` writes come back; the rest is
+ * dropped rather than allowed to break every command that reads learnings.
+ */
 export function readBranchCache(repo: string): BranchCache | null {
-  return readJson<BranchCache>(cachePath(repo));
+  const raw = readJson<Partial<BranchCache>>(cachePath(repo));
+  if (!raw || typeof raw !== "object") return null;
+  const branches: PushedBranch[] = [];
+  for (const b of Array.isArray(raw.branches) ? (raw.branches as unknown[]) : []) {
+    if (!b || typeof b !== "object") continue;
+    const { ref, author, at, files, learnings } = b as Partial<PushedBranch>;
+    if (typeof ref !== "string" || safeRef(ref) !== ref || typeof at !== "number" || !Array.isArray(files) || !Array.isArray(learnings)) continue;
+    branches.push({
+      ref,
+      author: typeof author === "string" && firstName(author) === author ? author : "",
+      at,
+      files: files.filter((f): f is string => typeof f === "string").slice(0, MAX_FILES),
+      learnings: learnings
+        .filter((l): l is PushedBranch["learnings"][number] => !!l && typeof l.name === "string" && SAFE_LEARNING_NAME.test(l.name) && typeof l.text === "string" && l.text.length <= MAX_LEARNING_BYTES)
+        .slice(0, MAX_LEARNINGS),
+    });
+  }
+  return { ...raw, fetchedAt: typeof raw.fetchedAt === "number" ? raw.fetchedAt : 0, base: typeof raw.base === "string" ? raw.base : null, branches };
 }
 
 function git(repo: string, args: string[], timeout = 15_000): string | null {
@@ -180,8 +205,8 @@ export function refreshBranches(
   opts: { fetch?: boolean; now?: number; fetchTimeoutMs?: number; prs?: boolean; closed?: ClosedHeads } = {},
 ): BranchCache {
   const now = opts.now ?? Date.now();
-  // TRAIL_NO_FETCH: tests, and anyone who'd rather fetch themselves.
-  const online = opts.fetch !== false && !process.env.TRAIL_NO_FETCH;
+  // Off by default in this fork: only TRAIL_NO_FETCH=0 lets Trail fetch (util/privacy-switches.ts).
+  const online = opts.fetch !== false && !fetchDisabled();
   if (online) git(repo, ["fetch", "--quiet", "--prune", "origin"], opts.fetchTimeoutMs ?? 30_000);
   const closed = opts.closed ?? (online && opts.prs ? closedPrHeads(repo) : null) ?? readBranchCache(repo)?.closed ?? {};
   const base = defaultRef(repo);
@@ -323,9 +348,10 @@ export function overlapMark(): string {
   return `🔀 ${brand()}`;
 }
 
-/** `🔀 trail · Kumar's branch kumar/jitter also changes client.go (pushed today 14:20)`. */
+/** `🔀 trail · Kumar's branch kumar/jitter also changes client.go (pushed today 14:20)`. File names are the teammate's, so each is one line. */
 export function formatOverlap(o: Overlap, now = Date.now()): string {
   const branch = o.ref.replace(/^origin\//, "");
-  const files = o.shared.length <= 2 ? o.shared.join(" and ") : `${o.shared.slice(0, 2).join(", ")} and ${o.shared.length - 2} more`;
+  const shared = o.shared.map((f) => flatLine(f, 200));
+  const files = shared.length <= 2 ? shared.join(" and ") : `${shared.slice(0, 2).join(", ")} and ${shared.length - 2} more`;
   return `${overlapMark()} · ${o.author}'s branch ${branch} also changes ${files} (pushed ${pushedWhen(o.at, now)})`;
 }

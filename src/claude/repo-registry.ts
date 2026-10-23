@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { readJson, writeJsonAtomic } from '../util/state.js';
+import { anyProfileMapDirFor } from '../context/profile-store.js';
 
 /** One folder graft has recorded a saving in. */
 export interface RegisteredRepo {
@@ -131,15 +132,22 @@ export function resetRegistryMemo(): void {
 
 /**
  * Where a registered folder's ledger may be now, most likely first: where it was
- * last seen, then the two layouts a map can have (`graft/` and, for a repo on
- * trail, `.trail/cache/`).
+ * last seen, then the layouts a map can have (`graft/`, `.trail/cache/` for a
+ * repo on trail, and the folder's map in the profile store).
  *
  * Deliberately not `ledgerPath(root)`: that resolves through `mapDirFor`, which
  * can MOVE a map on disk, and through `GRAFT_DIR` in the current environment,
  * which belongs to the repo the command was run in, not to every repo listed.
  */
 export function ledgerCandidates(r: RegisteredRepo): string[] {
-  const out = [r.ledger, join(r.root, 'graft', '.cache', 'savings.json'), join(r.root, '.trail', 'cache', '.cache', 'savings.json')];
+  const out = [
+    r.ledger,
+    join(r.root, 'graft', '.cache', 'savings.json'),
+    join(r.root, '.trail', 'cache', '.cache', 'savings.json'),
+    // The profile store's map for this folder (context/profile-store.ts), found from
+    // the folder's path whether or not the store is on in this environment.
+    join(anyProfileMapDirFor(r.root), '.cache', 'savings.json'),
+  ];
   const seen = new Set<string>();
   return out.filter((p) => {
     const k = pathKey(p);

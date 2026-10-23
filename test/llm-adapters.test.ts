@@ -222,6 +222,34 @@ test("openai: a model that refuses every forcing tool_choice gets the tool with 
   assert.equal(calls[2].tool_choice, "auto");
 });
 
+test("openai: after a refused forced tool_choice, a reply without the tool goes to the last rung once, not once per forced rung", async () => {
+  const REFUSED = '{"message":"tool_choice: type \\"tool\\" and \\"any\\" are not supported for this model."}';
+  const calls: any[] = [];
+  const prose = { choices: [{ message: { content: "Sure, here is a summary." }, finish_reason: "stop" }] };
+  const hit = { choices: [{ message: { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "record", arguments: '{"summary":"ok"}' } }] }, finish_reason: "tool_calls" }] };
+  const client = {
+    chat: {
+      completions: {
+        create: async (params: any) => {
+          calls.push(params);
+          if (params.tool_choice !== "auto") throw new OpenAI.APIError(400, { message: REFUSED }, REFUSED, new Headers());
+          // The first auto answer forgets the tool; the one with the prompt nudge delivers it.
+          return calls.filter((c) => c.tool_choice === "auto").length === 1 ? prose : hit;
+        },
+      },
+    },
+  } as unknown as OpenAI;
+  const m = new OpenAIChatModel({ apiKey: "x", model: "databricks-claude-sonnet-5-5-rungs", client });
+  const req = {
+    messages: [{ role: "user" as const, content: "go" }],
+    tools: [{ name: "record", description: "d", parameters: { type: "object" } }],
+    responseFormat: { kind: "tool" as const, name: "record" },
+  };
+  const res = await m.create(req);
+  assert.deepEqual(res.toolCalls.map((c) => c.args), [{ summary: "ok" }]);
+  assert.deepEqual(calls.map((c) => c.tool_choice), [{ type: "function", function: { name: "record" } }, "auto", "auto"], "refused, the rewritten auto, then the last rung: no repeat for \"required\"");
+});
+
 test("openai: baseUrlCandidates keeps the configured URL first, then toggles /v1", () => {
   assert.deepEqual(baseUrlCandidates("https://gw.example/v1"), ["https://gw.example/v1", "https://gw.example"]);
   assert.deepEqual(baseUrlCandidates("https://gw.example/v1/"), ["https://gw.example/v1/", "https://gw.example"]);
@@ -292,8 +320,11 @@ test("resolveConfig: any provider-prefixed model gets its bare id as a fallback"
   for (const k of keys) delete process.env[k];
   try {
     const def = resolveConfig({ provider: "openai" });
-    assert.equal(def.model, DEFAULT_MODELS.openai);
-    assert.deepEqual(def.modelFallbacks, [DEFAULT_MODELS.openai.slice(DEFAULT_MODELS.openai.lastIndexOf("/") + 1)]);
+    assert.equal(def.model, "claude-sonnet-5-5", "the default model on every provider");
+    assert.equal(DEFAULT_MODELS.openai, "claude-sonnet-5-5");
+    assert.equal(DEFAULT_MODELS.anthropic, "claude-sonnet-5-5");
+    assert.deepEqual(def.modelFallbacks, ["claude-sonnet-5.5"], "the default also tries its dotted spelling");
+    assert.deepEqual(resolveConfig({ provider: "litellm" }).modelFallbacks, ["claude-sonnet-5-5", "claude-sonnet-5.5"]);
     assert.deepEqual(resolveConfig({ provider: "openai", model: "vendor/custom" }).modelFallbacks, ["custom"]);
     process.env.GRAFT_MODEL = "google/gemini-x";
     assert.deepEqual(resolveConfig({ provider: "openai" }).modelFallbacks, ["gemini-x"]);
@@ -483,6 +514,59 @@ async function captureStderr(fn: () => Promise<void>): Promise<{ err: string[] }
   }
   return { err };
 }
+
+test("openai: array-of-parts message.content is concatenated to plain text", async () => {
+  const { client } = fakeOpenAI(
+    openAiResp({
+      choices: [
+        {
+          message: { content: [{ type: "text", text: "hello " }, { type: "text", text: "there" }], tool_calls: [] },
+          finish_reason: "stop",
+        },
+      ],
+    }),
+  );
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client });
+  const res = await m.create({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal(res.text, "hello there");
+  assert.equal(res.assistant.content, "hello there");
+});
+
+test("openai: non-text parts in an array content are dropped, not stringified", async () => {
+  const { client } = fakeOpenAI(
+    openAiResp({
+      choices: [
+        {
+          message: {
+            content: [{ type: "image_url", image_url: { url: "x" } }, { type: "text", text: "caption" }],
+            tool_calls: [],
+          },
+          finish_reason: "stop",
+        },
+      ],
+    }),
+  );
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client });
+  const res = await m.create({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal(res.text, "caption");
+});
+
+test("openai: null message.content becomes an empty string", async () => {
+  const { client } = fakeOpenAI(
+    openAiResp({ choices: [{ message: { content: null, tool_calls: [] }, finish_reason: "stop" }] }),
+  );
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client });
+  const res = await m.create({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal(res.text, "");
+});
+
+test("openai: an unrecognized message.content shape throws instead of silently stringifying", async () => {
+  const { client } = fakeOpenAI(
+    openAiResp({ choices: [{ message: { content: { weird: true }, tool_calls: [] }, finish_reason: "stop" }] }),
+  );
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client });
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), /Unsupported message\.content type/);
+});
 
 // --- Anthropic adapter ------------------------------------------------------
 

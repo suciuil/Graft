@@ -9,6 +9,34 @@
  * from the code; only the prose and the examples live here.
  */
 import type { Argument, Command, Help, Option } from "commander";
+import { choices, ENV_GROUPS, ENV_VARS } from "./env-cli.js";
+
+/**
+ * The help entries of the environment-variable commands (`files store`, `refresh
+ * auto`, …) and of their new groups, written from the same table that registers
+ * them (env-cli.ts), so a variable's command and its help can't disagree.
+ */
+function envVarHelp(): Record<string, CommandHelp> {
+  const out: Record<string, CommandHelp> = {};
+  for (const [name, g] of Object.entries(ENV_GROUPS)) {
+    out[name] = {
+      description: g.help,
+      examples: ENV_VARS.filter((v) => v.command.startsWith(`${name} `)).map((v) => v.examples[0]!),
+    };
+  }
+  for (const v of ENV_VARS) {
+    if (v.builtin) continue;
+    out[v.command] = {
+      description:
+        `${v.help}\n` +
+        `Sets ${v.name}, saved as a user environment variable for every new terminal (HKCU\\Environment on Windows, ` +
+        `~/.graft/env.sh on macOS/Linux). Without a value it shows the value in this terminal and the saved one; ` +
+        `--unset removes the saved one. When not set: ${v.unset}. Accepts: ${choices(v)}.`,
+      examples: v.examples,
+    };
+  }
+  return out;
+}
 
 type GlobalGroup = "dir" | "agent-model" | "llm";
 
@@ -208,6 +236,42 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft deep-threshold", "graft deep-threshold 25", "graft deep-threshold 50 --global"],
     globals: ["dir"],
   },
+  env: {
+    description:
+      "Every environment variable graft reads that you might want to set has its own command (`graft files store`, " +
+      "`graft refresh auto`, `graft api retries`, …), the way `graft api key` and `graft model` have theirs; " +
+      "`graft env list` shows them all with the variable each one sets. `graft env get|set|unset <NAME>` does the " +
+      "same by the variable's name. Values are saved as user environment variables, so new terminals, IDEs (once " +
+      "restarted), hooks and MCP servers see them: HKCU\\Environment on Windows, ~/.graft/env.sh (sourced from your " +
+      "shell profile) on macOS/Linux. A value set in a terminal still wins there. Each change also prints the line " +
+      "that applies it to the current terminal, which a child process cannot change.",
+    examples: ["graft env list", "graft env list --set", "graft env get GRAFT_PROFILE_STORE"],
+  },
+  "env list": {
+    description:
+      "Show every variable graft reads, grouped by the command that sets it: what it does, what applies when it is " +
+      "not set, and its value in this terminal and saved. Switches read as on or off, as graft will act on them. " +
+      "--set shows only the ones that have a value.",
+    examples: ["graft env list", "graft env list --set", "graft env list --json"],
+  },
+  "env get": {
+    description:
+      "Show one variable by its name: what it does, its value in this terminal and saved (and why they differ, if they " +
+      "do), what applies when it is not set, what it accepts, and its own command.",
+    examples: ["graft env get GRAFT_PROFILE_STORE"],
+  },
+  "env set": {
+    description:
+      "Save a variable by its name, exactly as its own command would with that value. A switch takes on/off for the " +
+      "feature its command names, not for the variable: `graft env set GRAFT_NO_REFRESH off` turns automatic refresh " +
+      "off, the same as `graft refresh auto off`. Names are case-insensitive.",
+    examples: ["graft env set GRAFT_PROFILE_STORE off", "graft env set GRAFT_LLM_RETRIES 8", "graft env set GRAFT_API_KEY"],
+  },
+  "env unset": {
+    description: "Remove a saved variable by its name, so what applies when it is not set comes back in new terminals.",
+    examples: ["graft env unset GRAFT_DIR"],
+  },
+  ...envVarHelp(),
   grep: {
     description:
       "Search the indexed files for a regular expression (or plain text with --fixed). Unlike plain grep, every " +
@@ -257,7 +321,7 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Show or change GRAFT_MODEL, the model `graft build --deep` uses. Run without an id in a terminal to pick from " +
       "the models the endpoint serves, mid-tier first: a top-tier model is not needed for summaries. Saved as a user " +
       "environment variable, then checked against the endpoint.",
-    examples: ["graft model", "graft model gemini-3.8-flash", "graft model --list"],
+    examples: ["graft model", "graft model claude-sonnet-5-5", "graft model --list"],
   },
   models: {
     description:
@@ -282,8 +346,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   savings: {
     description:
       "Show the tokens graft saved in this repo, per model, and their dollar value where a price is known: all time, " +
-      "or for one year, month or day. A model with no known price is reported in tokens only, never at a guessed rate.",
-    examples: ["graft savings", "graft savings 2026", "graft savings 2026-09", "graft savings 2026-09-08"],
+      "or for one year, month or day. A model with no known price is reported in tokens only, never at a guessed rate. " +
+      "--last prints the latest turn's graft calls and the tally to report, for when a savings line was cut out of the output.",
+    examples: ["graft savings", "graft savings 2026", "graft savings 2026-09", "graft savings 2026-09-08", "graft savings --last"],
   },
   skeleton: {
     description:
@@ -322,6 +387,16 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   version: {
     description: "Show the installed version and the latest version published on npm.",
     examples: ["graft version"],
+  },
+  where: {
+    description:
+      "Show where graft keeps the files of the current folder, or of each folder given: the map (cards, INDEX.md, " +
+      "the graph and its caches) and the settings file. For a repo whose files are in your profile store " +
+      "(~/.graft/repos/<folder>-<hash of the repo path>/, the default for new repos) it names that folder, which " +
+      "you can't guess from the repo's name. A folder of several git repos lists each repo. --all lists every folder " +
+      "in the profile store with the repo it belongs to, and marks the ones whose repo is gone.",
+    examples: ["graft where", "graft where . ../other-repo", "graft where --all", "graft where --json"],
+    globals: ["dir"],
   },
   viz: {
     description:

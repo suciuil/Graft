@@ -186,8 +186,8 @@ test("#235: blank parsed summaries name empty-parsed and stay pending", async ()
 });
 
 /**
- * `userContent` lists targets as `- id=<id> | <kind> | lines L1-L3 | <sig>`, and
- * some models echo that whole line back as the id. Exact-matching drops those
+ * Some models echo a whole target row back as the id (the list marker, an `id=`
+ * label, the trailing ` | kind | lines …` fields). Exact-matching drops those
  * entries, so a file where every entry is echoed reads as a total miss and the
  * failure gate counts a file whose summaries were perfectly good.
  */
@@ -201,7 +201,7 @@ test("an echoed descriptor line is recovered back onto the real target id", asyn
           args: {
             symbols: [
               {
-                id: "- id=f0.ts#run | function | lines L1-L3 | run()",
+                id: "- function | lines L1-L3 | run() | id=f0.ts#run",
                 summary: "Runs the thing.",
                 crux_start: 2,
                 crux_end: 2,
@@ -230,7 +230,7 @@ test("a hallucinated id is still dropped, and a duplicate never overwrites the f
           args: {
             symbols: [
               { id: "f0.ts#run", summary: "First wins.", crux_start: 2, crux_end: 2 },
-              { id: "- id=f0.ts#run | function", summary: "Duplicate loses.", crux_start: 2, crux_end: 2 },
+              { id: "id=f0.ts#run | function", summary: "Duplicate loses.", crux_start: 2, crux_end: 2 },
               { id: "f0.ts#neverExisted", summary: "Hallucinated.", crux_start: 1, crux_end: 1 },
             ],
           },
@@ -241,4 +241,30 @@ test("a hallucinated id is still dropped, and a duplicate never overwrites the f
   );
   const { nodes } = await oneFile(summarizer);
   assert.equal(nodes[0].summary, "First wins.");
+});
+
+test("#259: unmatched ids name id-mismatch with the returned id, and never reach the gate", async () => {
+  // A returned id can hold any source text; "Quota" here must not read as a quota error.
+  const invented = "f0.ts#Quota | function | lines L1-L3";
+  const summarizer = new ChatCruxSummarizer(
+    new CannedModel({
+      toolCalls: [
+        {
+          id: "1",
+          name: "record_symbols",
+          args: { symbols: [{ id: invented, summary: "runs it", crux_start: 0, crux_end: 0 }] },
+        },
+      ],
+      stopReason: "tool_calls",
+    }),
+  );
+  const { stats, nodes } = await oneFile(summarizer);
+  assert.equal(stats.failedFiles, 1);
+  assert.equal(stats.fatal, undefined);
+  assert.equal(
+    stats.errors[0],
+    "f0.ts: model returned summaries but no id matched a requested target [id-mismatch, finish_reason=tool_calls]" +
+      `\n    first of 1 returned id(s): ${JSON.stringify(invented)}`,
+  );
+  assert.equal(nodes[0].summary_state, "pending");
 });

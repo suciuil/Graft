@@ -9,10 +9,13 @@
  * on top of each other. `claude/state.ts` re-exports all of this, so nothing
  * outside had to change when it moved.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync, openSync, writeSync, closeSync, fchmodSync, constants } from 'node:fs';
 import { homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { join, dirname, isAbsolute } from 'node:path';
 import { mapDirFor } from '../context/map-dir.js';
+import { renameReplacing } from './rename-replacing.js';
+import { isOutside, noteProfileRepo, profileConfigPathFor } from '../context/profile-store.js';
 
 export interface Stats {
   nodeCount: number; edgeCount: number; languages: string[];
@@ -70,12 +73,23 @@ export function readJson<T>(p: string): T | null {
  */
 export function writeJsonAtomic(p: string, value: unknown, compact = false, mode?: number): void {
   mkdirSync(dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
+  // A name no one can guess, opened new-only and never through a link: a link
+  // planted where the temp file goes is neither written through nor renamed
+  // into place (D85).
+  const tmp = `${p}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
     // `mode` applies to the new file before it's renamed into place, so a
     // secret is never readable by others even for a moment.
-    writeFileSync(tmp, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), mode === undefined ? undefined : { mode });
-    renameSync(tmp, p);
+    const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), mode ?? 0o666);
+    try {
+      if (mode !== undefined && process.platform !== 'win32') fchmodSync(fd, mode);
+      const buf = Buffer.from(compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), 'utf8');
+      for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
+    } finally {
+      closeSync(fd);
+    }
+    // Retried on Windows while a scanner briefly holds the target (see rename-replacing.ts).
+    renameReplacing(tmp, p);
   } catch (e) {
     try { rmSync(tmp, { force: true }); } catch { /* nothing more we can do */ }
     throw e;
@@ -126,11 +140,29 @@ export interface BuildConfig {
  * custom `--dir` builds cannot erase or redirect the persisted choice. */
 export const BUILD_CONFIG_DIR = '.graft';
 
-export function buildConfigPath(d: string): string { return join(d, BUILD_CONFIG_DIR, 'config.json'); }
+/** `<repo>/.graft/config.json`, where the settings have always lived. */
+export function repoBuildConfigPath(d: string): string { return join(d, BUILD_CONFIG_DIR, 'config.json'); }
+
+/**
+ * Where repo `d`'s settings are read from and written to: `.graft/config.json`
+ * in the repo when that file exists, or when the profile store is off (the
+ * historical place). With the store on and no file in the repo, the repo's
+ * folder in the profile store (context/profile-store.ts), so the repo is never
+ * written to.
+ */
+export function buildConfigPath(d: string): string {
+  const inRepo = repoBuildConfigPath(d);
+  if (existsSync(inRepo)) return inRepo;
+  return profileConfigPathFor(d) ?? inRepo;
+}
 
 /** Keep local build configuration out of Git without coupling it to the
- * generated graph directory. Best-effort, matching graph-cache ignore setup. */
+ * generated graph directory. Best-effort, matching graph-cache ignore setup.
+ * Nothing to do when the settings live in the profile store, outside the repo. */
 function ensureBuildConfigIgnored(d: string): void {
+  if (isOutside(d, buildConfigPath(d))) return;
+  const noGitignore = process.env.GRAFT_NO_GITIGNORE;
+  if (noGitignore && noGitignore !== '0' && noGitignore !== 'false') return;
   const path = join(d, '.gitignore');
   let current = '';
   try { current = readFileSync(path, 'utf8'); } catch { /* no .gitignore yet */ }
@@ -205,6 +237,7 @@ export function ensureDefaultBuildConfig(d: string): string | null {
   const path = buildConfigPath(d);
   ensureBuildConfigIgnored(d);
   writeJsonAtomic(path, next);
+  if (isOutside(d, path)) noteProfileRepo(d, dirname(path));
   return path;
 }
 
@@ -219,7 +252,9 @@ export function missingBuildConfigPath(d: string): string | null {
 export function readBuildConfig(d: string): BuildConfig | null { return readJson<BuildConfig>(buildConfigPath(d)); }
 export function writeBuildConfig(d: string, c: BuildConfig): void {
   ensureBuildConfigIgnored(d);
-  writeJsonAtomic(buildConfigPath(d), c);
+  const path = buildConfigPath(d);
+  writeJsonAtomic(path, c);
+  if (isOutside(d, path)) noteProfileRepo(d, dirname(path));
 }
 
 /** Merge explicit CLI choices into the existing local config, so updating one
@@ -269,6 +304,11 @@ export function isValidDeepStaleThreshold(v: unknown): v is number {
  * a repo, that path would be the repo config too. */
 export interface GlobalSettings {
   deepStaleThreshold?: number;
+  /** Where repos that have no map or settings inside them yet keep them: absent
+   * or `true` → `~/.graft/repos` (the default), an absolute folder → there,
+   * `false` → in the repo as before. Read by context/profile-store.ts;
+   * `GRAFT_PROFILE_STORE` overrides it. */
+  profileStore?: boolean | string;
 }
 
 export function globalSettingsPath(home: string = homedir()): string {

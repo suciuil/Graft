@@ -228,7 +228,7 @@ export function sessionInputRate(dir: string): InputRate | null {
 
 export function formatSessionStats(s: SessionSummary | null, rate: InputRate | null = null): string {
   if (s === null) {
-    return `${cmd('graft stats')}: no session recorded yet — use ${brand()} in an agent session, then look again.`;
+    return `${cmd('graft stats')}: no session recorded yet. Use ${brand()} in an agent session, then look again.`;
   }
   const graft = s.graftReads ?? 0;
   const source = s.sourceReads ?? 0;
@@ -237,7 +237,7 @@ export function formatSessionStats(s: SessionSummary | null, rate: InputRate | n
   const mix =
     total === 0 ? 'no retrieval yet' : `${Math.round((graft / total) * 100)}% graft`;
   const lines = [
-    `${cmd('graft stats')} — session ${s.id}`,
+    `${cmd('graft stats')}: session ${s.id}`,
     `  graft reads:   ${graft}`,
     `  source reads:  ${source}   (Read / Grep / Glob)`,
     `  mix:           ${mix}`,
@@ -248,9 +248,9 @@ export function formatSessionStats(s: SessionSummary | null, rate: InputRate | n
   // named its model, a made-up rate would be worse than the silence.
   const value = valueSaved(saved, blendedRate(s.inputCostMicros, s.inputTokensBilled) ?? rate);
   if (value !== null) {
-    const note = value.measured ? '' : '   (list rate — this host reports no billing)';
+    const note = value.measured ? '' : '   (list rate: this host reports no billing)';
     lines.push(`  value saved:   ~${formatDollars(value.usd)}${note}`);
   }
-  if (s.lastQuery) lines.push(`  last query:    ${s.lastQuery}`);
+  if (s.promptAsks) lines.push(`  prompts asked: ${s.promptAsks}`);
   return lines.join('\n');
 }

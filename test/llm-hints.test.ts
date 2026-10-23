@@ -65,14 +65,14 @@ test("llmProblems: a file path prefix is not read as part of the message", () =>
 test("rankModelsForHint: chat models only, top tier last; suggestion is mid-tier", () => {
   const ranked = rankModelsForHint(["claude-opus-5", "text-embedding-3", "gpt-6-sol", "gemini-3.8-flash", "claude-sonnet-5.5", "gemini-3.8-flash"]);
   assert.deepEqual(ranked, ["gemini-3.8-flash", "claude-sonnet-5.5", "claude-opus-5", "gpt-6-sol"]);
-  assert.equal(suggestModel(ranked), "gemini-3.8-flash");
+  assert.equal(suggestModel(ranked), "claude-sonnet-5.5");
   assert.ok(isTopTierModel("gpt-6-astra"));
   assert.ok(isTopTierModel("google/gemini-3-pro"));
   assert.ok(!isTopTierModel("gpt-5.5-terra"));
   assert.ok(!isTopTierModel("solar-mini"));
 });
 
-test("suggestModel: latest Gemini Flash, else latest GPT terra, else latest Claude Sonnet", () => {
+test("suggestModel: latest Claude Sonnet, else latest Gemini Flash, else latest GPT terra", () => {
   // From a real gateway list: Flash-Lite used to win only because it came first.
   const gateway = [
     "grok-4.3-2",
@@ -87,11 +87,16 @@ test("suggestModel: latest Gemini Flash, else latest GPT terra, else latest Clau
     "gemini-2.5-flash-preview-05-20",
     "claude-haiku-4-5-20251001",
   ];
-  assert.equal(suggestModel(rankModelsForHint(gateway)), "gemini-3.8-flash");
-  const noGemini = gateway.filter((id) => !/gemini-\d\.\d-flash$|flash-preview/.test(id));
+  assert.equal(suggestModel(rankModelsForHint(gateway)), "claude-5-0-sonnet-v1:0");
+  const noSonnet = gateway.filter((id) => !/sonnet/.test(id));
+  assert.equal(suggestModel(rankModelsForHint(noSonnet)), "gemini-3.8-flash");
+  const noGemini = noSonnet.filter((id) => !/gemini-\d\.\d-flash$|flash-preview/.test(id));
   assert.equal(suggestModel(rankModelsForHint(noGemini)), "gpt-5.6-terra", "Flash-Lite does not count as a Flash");
-  const noTerra = noGemini.filter((id) => !/terra/.test(id));
-  assert.equal(suggestModel(rankModelsForHint(noTerra)), "claude-5-0-sonnet-v1:0");
+  // The gateway from the bug report: Sonnet 5.5 over GPT terra.
+  assert.equal(
+    suggestModel(rankModelsForHint(["gpt-5-6-terra", "claude-sonnet-5-5", "claude-sonnet-5-0", "claude-sonnet-4-6-20250514", "claude-sonnet-5-5-latest"])),
+    "claude-sonnet-5-5",
+  );
   assert.equal(suggestModel(["anthropic/claude-sonnet-4-5-20250929", "anthropic/claude-sonnet-5.5", "claude-3-7-sonnet-20250219"]), "anthropic/claude-sonnet-5.5");
   assert.equal(suggestModel(["gemini-3.8-flash-preview", "google/gemini-3.8-flash"]), "google/gemini-3.8-flash", "a tie goes to the plain id");
   assert.equal(suggestModel(["claude-opus-5", "gpt-5-mini"]), "gpt-5-mini", "none of the three: any mid-tier model");
@@ -150,13 +155,13 @@ test("hints: unknown model lists what the endpoint serves and suggests a mid-tie
   ).join("\n");
   assert.match(lines, /Model "nope" \(from GRAFT_MODEL\) was not found/);
   assert.match(lines, /Models this endpoint serves: claude-sonnet-5\.5, gpt-5\.5-terra, claude-opus-5/);
-  assert.match(lines, /export GRAFT_MODEL="gpt-5\.5-terra"/, "no Gemini Flash here, so the GPT terra");
+  assert.match(lines, /export GRAFT_MODEL="claude-sonnet-5\.5"/, "the Claude Sonnet is recommended first");
   assert.match(lines, /top-tier model .* is not necessary/);
 });
 
 test("hints: unknown default model, listing unavailable → example ids", async () => {
   const lines = (
-    await llmFailureHints(["404 The model `gemini-3.8-flash` does not exist"], {
+    await llmFailureHints(["404 The model `claude-sonnet-5-5` does not exist"], {
       config: {},
       env,
       platform: "linux",
@@ -165,7 +170,7 @@ test("hints: unknown default model, listing unavailable → example ids", async 
       },
     })
   ).join("\n");
-  assert.match(lines, /graft's default for the openai provider — GRAFT_MODEL is not set/);
+  assert.match(lines, /Model "claude-sonnet-5-5" \(graft's default model — GRAFT_MODEL is not set\)/);
   assert.match(lines, /Could not list the models this endpoint serves \(404 Not Found\)/);
   assert.match(lines, /claude-sonnet-5\.5, gpt-5\.5-terra, gemini-3\.8-flash/);
   assert.match(lines, /top-tier model .* is not necessary/);

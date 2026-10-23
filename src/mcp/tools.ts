@@ -3,7 +3,7 @@
  * `callTool` never throws — hosts get soft errors as isError content.
  */
 import { Graft } from '../engine.js';
-import { formatAsk, skeleton, formatSkeleton } from '../ask/ask.js';
+import { formatAsk, formatAskWithSaved, skeleton, formatSkeleton } from '../ask/ask.js';
 import { formatCheckReport } from '../context/check.js';
 import { formatGraphCheckReport } from '../graph/check.js';
 import { loadGraphCached } from '../graph/load.js';
@@ -11,7 +11,8 @@ import { deepDueFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters } from '../context/savings.js';
+import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters, setCompactNudge, claimedSummary, tallyWarnings } from '../context/savings.js';
+import { calledRecently, recordRecentCall } from '../context/recent-calls.js';
 import { initDueReason } from '../hosts/drift.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
@@ -21,6 +22,7 @@ import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel, setHostM
 import { hostModelFor } from '../hosts/host-model.js';
 import { grepGraph } from '../search/grep.js';
 import { formatGrepResult, zeroHitNote } from '../search/grep-cli.js';
+import { ignoredCode } from '../search/ignored-code.js';
 import { buildRepoMap, formatRepoMap } from '../graph/map.js';
 import {
   federateAsk,
@@ -31,6 +33,7 @@ import {
   readWorkspace,
 } from '../graph/workspace.js';
 import type { NodeV1 } from '../graph/types.js';
+import { recordLookup } from '../cloud/lookup-activity.js';
 import { canonicalToolName } from './tool-names.js';
 import { cmd } from '../brand.js';
 
@@ -331,6 +334,9 @@ async function callToolScoped(
     // session record above, since one exact figure beats a menu.
     const named = currentModel(root, latestSession(root)?.model) !== UNKNOWN_MODEL;
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
+    // A call a few minutes after another one in this repo gets the short savings
+    // nudge: the agent has just read the long one (see `savingsTurnNudge`).
+    setCompactNudge(calledRecently(root));
     let note: string | null = null;
     let deep: string | null = null;
     setDeepDue(null);
@@ -349,7 +355,7 @@ async function callToolScoped(
     }
     const fed = ws ? await callWorkspaceTool(root, dirOverride, name, args) : null;
     const res = fed ?? (await callSingleTool(root, name, args, dirOverride));
-    recordMcpSavings(root, res);
+    recordMcpSavings(root, res, name);
     // The nudge goes LAST: a result must still open with what the tool produced
     // (its savings line, or e.g. `repo map — …`), and it may fire on every call.
     let text = note ? `${note}\n${res.text}` : res.text;
@@ -375,14 +381,19 @@ async function callToolScoped(
  * The footer we just wrote is the source of the number, so no host cooperation
  * is needed to read it back.
  */
-function recordMcpSavings(root: string, res: { text: string; isError: boolean }): void {
+function recordMcpSavings(root: string, res: { text: string; isError: boolean }, tool: string): void {
   // No accumulator reset needed: each call runs in its own scope (see
   // `runInCallScope` above), so its claimed-token counter starts at zero and
   // dies with the call. This used to be a manual `resetClaimedSavings()`, which
   // worked only because calls were assumed never to overlap.
   if (res.isError) return;
   const saved = sumSavingsFooters(res.text);
-  if (saved > 0) recordSavedTokens(root, currentModel(root, latestSession(root)?.model), saved);
+  if (saved <= 0) return;
+  recordSavedTokens(root, currentModel(root, latestSession(root)?.model), saved);
+  // What `graft savings --last` reads back, and what makes the next call's
+  // nudge short.
+  const s = claimedSummary(saved);
+  recordRecentCall(root, { command: tool, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
 }
 
 /** The single-graph path: every tool, answered from one repo's graph. */
@@ -400,7 +411,11 @@ async function callSingleTool(
         const engine = new Graft({ contextDir: dirOverride });
         const inArg = typeof args.in === 'string' && args.in ? args.in : undefined;
         const r = engine.ask(root, query, { limit, source: true, full: args.full === true, in: inArg });
-        return { text: formatAsk(r), isError: false };
+        // Same event the CLI's `ask` reports: the learnings shown and the tokens saved.
+        // One render serves both the answer and the saving the event reports.
+        const { text, savedTokens } = formatAskWithSaved(r);
+        recordLookup(r, root, undefined, savedTokens);
+        return { text, isError: false };
       }
       case 'graft_file_api': {
         const file = String(args.file ?? '');
@@ -455,7 +470,7 @@ async function callSingleTool(
           fixed: typeof args.fixed === 'boolean' ? args.fixed : undefined,
           in: typeof args.in === 'string' && args.in ? args.in : undefined,
         });
-        if (result.totalHits === 0) return { text: zeroHitNote(result), isError: false };
+        if (result.totalHits === 0) return { text: zeroHitNote(result, ignoredCode(root)), isError: false };
         return { text: formatGrepResult(result), isError: false };
       }
       case 'graft_repo_map': {

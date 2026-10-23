@@ -5,7 +5,8 @@
  * `graft build --deep` aborted, and the 5 batches already paid for were bought
  * again on the re-run. Each batch is now caught, every successful batch is
  * checkpointed to the cache, and an incomplete synthesis leaves the concept nodes
- * already on disk alone.
+ * already on disk alone. Tests that count calls in order run the batches one at a
+ * time (`synthConcurrency: 1`); the concurrent pass is context-synth-concurrency.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -73,7 +74,7 @@ test("each successful synthesis batch is checkpointed before the next one runs",
   try {
     const synth = new FlakySynthesizer(new Set(), undefined, dir);
     const r = await quiet(() =>
-      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth }),
+      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth, synthConcurrency: 1 }),
     );
     assert.equal(r.batches, 3);
     // Before batch 2 runs, batch 1 is on disk; before batch 3, batches 1-2.
@@ -91,7 +92,7 @@ test("a failing batch is caught: the build returns, reports it, and keeps the fi
     // A non-terminal failure on batch 2 only: the pass continues past it.
     const synth = new FlakySynthesizer(new Set([2]), "500 upstream hiccup");
     const r = await quiet(() =>
-      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth }),
+      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth, synthConcurrency: 1 }),
     );
     assert.equal(synth.calls, 4, "every batch is attempted after a non-terminal failure");
     assert.equal(r.failedBatches, 1);
@@ -103,7 +104,7 @@ test("a failing batch is caught: the build returns, reports it, and keeps the fi
     // The re-run pays only for the batch that failed.
     const rerun = new FlakySynthesizer(new Set());
     const second = await quiet(() =>
-      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: rerun }),
+      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: rerun, synthConcurrency: 1 }),
     );
     assert.equal(rerun.calls, 1, "only the missing batch is synthesized again");
     assert.equal(second.failedBatches, 0);
@@ -119,7 +120,7 @@ test("a relay balance error that outlived its backoff stops the pass; remaining 
   try {
     const synth = new FlakySynthesizer(new Set([2]));
     const r = await quiet(() =>
-      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth }),
+      buildContext(dir, { model: "fake", summarizer: new PassthroughSummarizer(), synthesizer: synth, synthConcurrency: 1 }),
     );
     assert.equal(synth.calls, 2, "no calls after the relay reports no balance");
     assert.equal(r.failedBatches, 1);

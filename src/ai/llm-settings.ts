@@ -44,8 +44,71 @@ export interface UserEnvStore {
   /** Human-readable location, e.g. `HKCU\Environment` or `~/.graft/env.sh`. */
   readonly where: string;
   read(name: string): string | undefined;
+  /** Several variables in one lookup (one `reg query` on Windows); falls back to {@link read} per name when absent. */
+  readMany?(names: readonly string[]): Record<string, string>;
   /** `undefined` removes the variable. */
   write(name: string, value: string | undefined): void;
+}
+
+/** The variables `graft api url` / `graft api key` / `graft model` save. */
+export const SAVED_SETTING_NAMES = ["GRAFT_BASE_URL", "GRAFT_API_KEY", "GRAFT_MODEL"] as const;
+
+/** Set in the environment to ignore saved settings (the test runner sets it, so a developer's own setup never leaks in). */
+export const NO_SAVED_SETTINGS_ENV = "GRAFT_NO_SAVED_SETTINGS";
+
+/** The saved values of `names`; a store that cannot be read yields nothing. */
+export function readSaved(store: UserEnvStore, names: readonly string[]): Record<string, string> {
+  try {
+    if (store.readMany) return store.readMany(names);
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const name of names) {
+    try {
+      const v = store.read(name);
+      if (v !== undefined && v !== "") out[name] = v;
+    } catch {
+      // unreadable: treated as not saved
+    }
+  }
+  return out;
+}
+
+/**
+ * `env` with every saved setting it does not define filled in from `store`.
+ *
+ * A saved setting reaches new terminals only: one opened before `graft model`
+ * ran (or an IDE that was not restarted) still lacks it, and graft silently fell
+ * back to its default model even though `graft model` reported the saved value.
+ * A value this process does define (shell, `.env`) still wins, exactly as it
+ * would in a fresh terminal.
+ */
+export function withSavedSettings(
+  env: NodeJS.ProcessEnv,
+  store: UserEnvStore,
+): { env: NodeJS.ProcessEnv; applied: string[] } {
+  if (env[NO_SAVED_SETTINGS_ENV]) return { env, applied: [] };
+  const missing = SAVED_SETTING_NAMES.filter((n) => !env[n]);
+  if (missing.length === 0) return { env, applied: [] };
+  const saved = readSaved(store, missing);
+  const applied = missing.filter((n) => saved[n]);
+  if (applied.length === 0) return { env, applied };
+  const next: NodeJS.ProcessEnv = { ...env };
+  for (const n of applied) next[n] = saved[n];
+  return { env: next, applied };
+}
+
+/** Fill this process's environment from the saved settings, in place; best effort. */
+export function applySavedSettings(env: NodeJS.ProcessEnv = process.env, store?: UserEnvStore): string[] {
+  if (env[NO_SAVED_SETTINGS_ENV]) return [];
+  try {
+    const { env: filled, applied } = withSavedSettings(env, store ?? userEnvStore());
+    for (const n of applied) env[n] = filled[n];
+    return applied;
+  } catch {
+    return [];
+  }
 }
 
 export type Runner = (
@@ -73,6 +136,16 @@ export function windowsUserEnv(run: Runner = defaultRunner): UserEnvStore {
     read(name) {
       const r = run("reg", ["query", "HKCU\\Environment", "/v", name]);
       return r.status === 0 ? parseRegQuery(r.stdout, name) : undefined;
+    },
+    readMany(names) {
+      const r = run("reg", ["query", "HKCU\\Environment"]);
+      const out: Record<string, string> = {};
+      if (r.status !== 0) return out;
+      for (const name of names) {
+        const v = parseRegQuery(r.stdout, name);
+        if (v !== undefined && v !== "") out[name] = v;
+      }
+      return out;
     },
     write(name, value) {
       // Name and value travel in the child's environment, never on its command line,
@@ -155,11 +228,20 @@ export function posixUserEnv(opts: { home?: string; shell?: string; platform?: N
   return {
     where: fish ? file.replace(home, "~") : `${file.replace(home, "~")} (sourced from ${profile.replace(home, "~")})`,
     read: (name) => readAll().get(name),
+    readMany(names) {
+      const vars = readAll();
+      const out: Record<string, string> = {};
+      for (const name of names) {
+        const v = vars.get(name);
+        if (v !== undefined && v !== "") out[name] = v;
+      }
+      return out;
+    },
     write(name, value) {
       const vars = readAll();
       if (value === undefined) vars.delete(name);
       else vars.set(name, value);
-      const header = "# Written by `graft api url` / `graft api key` / `graft model`. Edit with those commands.\n";
+      const header = "# Written by `graft env`, `graft api url` / `graft api key` / `graft model`. Edit with those commands.\n";
       const body = [...vars]
         .map(([k, v]) => (fish ? `set -gx ${k} ${fishQuote(v)}` : `export ${k}=${shQuote(v)}`))
         .join("\n");
@@ -293,16 +375,23 @@ function validate(kind: SettingKind, value: string): string | null {
   return null;
 }
 
+/** `env` as `graft build --deep` sees it: the saved settings fill what this process does not set. */
+function effectiveEnv(deps: SettingDeps, env: NodeJS.ProcessEnv = deps.env): NodeJS.ProcessEnv {
+  return withSavedSettings(env, deps.store).env;
+}
+
 /** What `build --deep` would use right now, and where it comes from. */
 function effective(kind: SettingKind, deps: SettingDeps, env: NodeJS.ProcessEnv): string {
-  const cfg = resolveConfig(deps.config, env);
-  const s = settingSource(kind, deps.config, cfg, env);
-  const from = s.flag ? `from ${s.flag}` : s.env ? `from ${s.env}` : "";
+  const { env: full, applied } = withSavedSettings(env, deps.store);
+  const cfg = resolveConfig(deps.config, full);
+  const s = settingSource(kind, deps.config, cfg, full);
+  const savedNote = s.env && applied.includes(s.env) ? `saved ${s.env}` : "";
+  const from = s.flag ? `from ${s.flag}` : savedNote ? `from the ${savedNote}` : s.env ? `from ${s.env}` : "";
   if (kind === "url") {
     return from ? `${cfg.baseUrl} (${from})` : `${cfg.baseUrl ?? defaultBaseUrl(cfg.provider)} (graft's default for the ${cfg.provider} provider)`;
   }
   if (kind === "key") return cfg.apiKey ? `${maskSecret(cfg.apiKey)} (${from || "from the environment"})` : "none — `graft build --deep` falls back to the structural build";
-  return from ? `${cfg.model} (${from})` : `${cfg.model} (graft's default for the ${cfg.provider} provider)`;
+  return from ? `${cfg.model} (${from})` : `${cfg.model} (graft's default model)`;
 }
 
 function printStatus(kind: SettingKind, deps: SettingDeps, saved: string | undefined): void {
@@ -339,7 +428,7 @@ function printModelList(deps: SettingDeps, ids: string[], numbered: boolean): vo
 /** Interactive input for `kind`; `undefined` = keep the current value. */
 async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter): Promise<string | undefined> {
   if (kind === "key") {
-    if (resolveConfig(deps.config, deps.env).databricks) deps.out(`${databricksTokenHint()}.`);
+    if (resolveConfig(deps.config, effectiveEnv(deps)).databricks) deps.out(`${databricksTokenHint()}.`);
     const v = (await prompt.askHidden("New API key (input hidden; Enter keeps the current one): ")).trim();
     return v || undefined;
   }
@@ -347,7 +436,7 @@ async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter)
     const v = (await prompt.ask("New base URL, e.g. https://my-gateway.example.com/v1 (Enter keeps the current one): ")).trim();
     return v || undefined;
   }
-  const cfg = resolveConfig(deps.config, deps.env);
+  const cfg = resolveConfig(deps.config, effectiveEnv(deps));
   deps.out(`Asking ${cfg.baseUrl ?? defaultBaseUrl(cfg.provider)} which models it serves…`);
   const { ids, error } = await fetchModels(deps, cfg);
   if (ids.length > 0) {
@@ -370,7 +459,7 @@ async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter)
 
 /** One cheap `GET /models` with the new value in place; warnings only, the value is saved either way. */
 async function verifySetting(kind: SettingKind, deps: SettingDeps, env: NodeJS.ProcessEnv): Promise<void> {
-  const cfg = resolveConfig(deps.config, env);
+  const cfg = resolveConfig(deps.config, effectiveEnv(deps, env));
   const url = cfg.baseUrl ?? defaultBaseUrl(cfg.provider);
   if (!cfg.apiKey) {
     deps.out(`  not verified: no API key yet — set one with \`${cmd(SETTINGS.key.command)}\`.`);
@@ -424,7 +513,7 @@ export async function runSettingCommand(
   const command = cmd(SETTINGS[kind].command);
 
   if (opts.list) {
-    const cfg = resolveConfig(deps.config, deps.env);
+    const cfg = resolveConfig(deps.config, effectiveEnv(deps));
     const { ids, error } = await fetchModels(deps, cfg);
     if (ids.length === 0) {
       deps.err(`✗ could not list the models of ${cfg.baseUrl ?? defaultBaseUrl(cfg.provider)}: ${error ?? "it listed none"}`);

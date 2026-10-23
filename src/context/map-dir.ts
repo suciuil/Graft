@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { repoWiredForTrail } from "../brand.js";
 import { ignoreInTrailDir } from "../notes/repo-trail.js";
+import { looksLikeMap, profileMapDirFor } from "./profile-store.js";
 
 /** The map's folder in a repo on trail, relative to the repo. */
 export const TRAIL_MAP_DIR = join(".trail", "cache");
@@ -27,13 +28,34 @@ export const GRAFT_MAP_DIR = "graft";
  * Absolute path of `root`'s code map folder. A repo is on trail once its
  * hooks say so or it has `.trail/learnings/`, which `trail init` makes before
  * anything else, so nothing it writes lands in `graft/` first.
+ *
+ * With the profile store on (context/profile-store.ts, the default), a repo
+ * that has no map inside it yet gets one in the user's profile instead, keyed
+ * by the repo's path. A map already in the repo always wins, so the store never
+ * moves or hides one.
  */
 export function mapDirFor(root: string): string {
   const trail = join(root, TRAIL_MAP_DIR);
   if (existsSync(trail)) return trail;
-  if (!existsSync(join(root, ".trail", "learnings")) && !repoWiredForTrail(root)) return join(root, GRAFT_MAP_DIR);
+  const graft = join(root, GRAFT_MAP_DIR);
+  if (!existsSync(join(root, ".trail", "learnings")) && !repoWiredForTrail(root)) {
+    if (looksLikeMap(graft)) return graft;
+    return profileMapDirFor(root) ?? graft;
+  }
+  // On trail: an old in-repo `graft/` map moves to `.trail/cache/` as before.
+  // With nothing in the repo to keep, the profile store takes the map.
+  if (!hasOldMap(root)) {
+    const profile = profileMapDirFor(root);
+    if (profile) return profile;
+  }
   moveOldMap(root, trail);
   return trail;
+}
+
+/** Whether `root` holds a map in `graft/` from before the repo was on trail. */
+function hasOldMap(root: string): boolean {
+  const from = join(root, GRAFT_MAP_DIR);
+  return existsSync(join(from, "INDEX.md")) || existsSync(join(from, ".graph"));
 }
 
 /** Whether `dir` is a repo's trail map folder, which `.trail/.gitignore` keeps out of git. */
@@ -48,7 +70,7 @@ export function isTrailMapDir(root: string, dir: string): boolean {
  */
 function moveOldMap(root: string, to: string): void {
   const from = join(root, GRAFT_MAP_DIR);
-  if (!existsSync(join(from, "INDEX.md")) && !existsSync(join(from, ".graph"))) return;
+  if (!hasOldMap(root)) return;
   try {
     execFileSync("git", ["ls-files", "--error-unmatch", "--", "graft/INDEX.md"], { cwd: root, stdio: "ignore", timeout: 3000 });
     return;
