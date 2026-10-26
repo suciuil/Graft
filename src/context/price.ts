@@ -124,7 +124,36 @@ export function normalizeModelId(model: string): string {
   const trimmed = model.trim();
   const routed = trimmed.slice(trimmed.lastIndexOf('/') + 1).trim();
   const entry = routed.split('#')[0].trim();
-  return entry.replace(/^[A-Za-z]+\s*:\s*/, '').replace(/[\s_]+/g, '-');
+  const id = entry.replace(/^[A-Za-z]+\s*:\s*/, '');
+  return (gatewayModelAlias(id) ?? id).replace(/[\s_]+/g, '-');
+}
+
+/** A Databricks endpoint name for a vendor model: `databricks-claude-opus-5-5`, `databricks-gpt-6-astra`. */
+const DATABRICKS_ENDPOINT_RE = /^databricks-((?:claude|gpt|gemini|codex|o\d)\b.*)$/i;
+/** A Databricks AI Gateway service id: `model_service.models.1adp-opus-5-5`, `model_service.models.1adp-gpt-6-1-sol`. */
+const DATABRICKS_SERVICE_RE = /^model_service\.models\.[a-z0-9]+-(.+)$/i;
+
+/**
+ * The vendor's id for a model a Databricks workspace names its own way, or null
+ * for any other id.
+ *
+ * The Databricks AI Gateway serves one model under up to three names — the
+ * vendor's (`claude-opus-5-5`), a service id (`model_service.models.1adp-opus-5-5`,
+ * which drops the `claude-` of a Claude model) and a serving endpoint name
+ * (`databricks-claude-opus-5-5`) — and a host config may use any of them. None
+ * matches an anchored price pattern, so each went unpriced, and each filed its
+ * own ledger row for what is one model. Mapped back to the vendor's id, they
+ * price and file as that model.
+ *
+ * Endpoint names are mapped only for vendor families with a published price
+ * (Claude, GPT, Gemini, Codex, the o-series): a model Databricks hosts itself
+ * (`databricks-meta-llama-…`, `databricks-dbrx-…`) is priced by Databricks, so
+ * its endpoint name stays its id.
+ */
+export function gatewayModelAlias(id: string): string | null {
+  const service = DATABRICKS_SERVICE_RE.exec(id)?.[1];
+  if (service) return /^(opus|sonnet|haiku)\b/i.test(service) ? `claude-${service}` : service;
+  return DATABRICKS_ENDPOINT_RE.exec(id)?.[1] ?? null;
 }
 
 /**

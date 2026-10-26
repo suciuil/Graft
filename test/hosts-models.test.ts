@@ -153,6 +153,37 @@ test('5.x: the current profile is the default, and other id fields are read', ()
   assert.equal(h.models.length, 2, 'a profile naming no model contributes none');
 });
 
+test('5.x: a fork\'s secrets file in VS Code Insiders storage, keyed by the fork\'s own id, is read', () => {
+  const profiles = JSON.stringify({
+    currentApiConfigName: 'default',
+    apiConfigs: { default: { openAiModelId: 'model_service.models.1adp-gpt-6-1-sol' } },
+  });
+  const home = kiloHome(
+    { 'automotive.kilo-code': { roo_cline_config_api_config: profiles } },
+    ['AppData', 'Roaming', 'Code - Insiders', 'User', 'globalStorage', 'automotive.kilo-code', 'secrets.json'],
+  );
+  const h = readHostModels({ home })!;
+  assert.ok(h, 'the fork\'s secrets file must be found');
+  assert.deepEqual(h.models.map((m) => m.id), ['model_service.models.1adp-gpt-6-1-sol']);
+  assert.equal(h.models[0]!.usdPerMtok, 2, 'a Databricks service id prices as the vendor model');
+  assert.equal(h.models[0]!.isDefault, true);
+});
+
+test('7.x: Databricks names for one model collapse to one priced row', () => {
+  const home = kiloHome({
+    provider: {
+      'aumovio-databricks': { models: {
+        'claude-opus-5-5': { name: 'Claude Opus 5.5' },
+        'model_service.models.1adp-opus-5-5': { name: 'Opus 5.5 (service)' },
+        'databricks-gpt-6-astra': { name: 'GPT 6 Astra' },
+      } },
+    },
+  });
+  const h = readHostModels({ home })!;
+  assert.deepEqual(h.models.map((m) => m.id), ['claude-opus-5-5', 'databricks-gpt-6-astra']);
+  assert.equal(h.models[1]!.usdPerMtok, 10);
+});
+
 test('both generations installed side by side yield ONE de-duplicated list', () => {
   // A user mid-upgrade has both files. The same model reached by two routes is
   // one row: the reply is about what a saving cost, not about config archaeology.

@@ -20,6 +20,7 @@ import {
   databricksRouteUrl,
   isDatabricksGatewayUrl,
   listDatabricksModels,
+  listOpenAiGatewayModels,
   listServingEndpoints,
   parseDatabricksRoot,
   type DatabricksLister,
@@ -237,7 +238,7 @@ test("listEndpointModels: routes that will not list fall back to their known ids
 });
 
 test("serving route: databricks-* ids go to <root>/serving-endpoints over the OpenAI wire, without the provider header", () => {
-  for (const id of ["databricks-gpt-5-4-nano", "databricks-claude-sonnet-5-5", "databricks-gemini-3-8-flash", "databricks-qwen35-122b-a10b"]) {
+  for (const id of ["databricks-claude-sonnet-5-5", "databricks-gemini-3-8-flash", "databricks-qwen35-122b-a10b", "databricks-meta-llama-3-3-70b-instruct"]) {
     assert.equal(databricksRoute(id), "serving", id);
   }
   assert.equal(databricksRoute("claude-sonnet-5-5"), "anthropic");
@@ -259,9 +260,10 @@ test("listServingEndpoints: ready chat endpoints the key may query, minus those 
     if (url.endsWith("/api/2.0/serving-endpoints")) {
       return json({
         endpoints: [
-          { name: "databricks-gpt-5-4-nano", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
-          { name: "databricks-gpt-6-1-sol", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
+          { name: "databricks-claude-sonnet-5-5", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
+          { name: "databricks-qwen35-122b-a10b", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
           { name: "databricks-gemini-3-8-flash", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
+          { name: "databricks-gpt-6-1-sol", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
           { name: "databricks-gte-large-en", task: "llm/v1/embeddings", state: { ready: "READY" }, permission_level: "CAN_QUERY" },
           { name: "databricks-llama-4-maverick", task: "llm/v1/chat", state: { ready: "NOT_READY" }, permission_level: "CAN_QUERY" },
           { name: "databricks-view-only", task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_VIEW" },
@@ -269,16 +271,17 @@ test("listServingEndpoints: ready chat endpoints the key may query, minus those 
         ],
       });
     }
-    if (url.endsWith("/databricks-gpt-6-1-sol")) {
+    if (url.endsWith("/databricks-qwen35-122b-a10b")) {
       return json({ ai_gateway: { rate_limits: [{ calls: 0, key: "endpoint", renewal_period: "minute" }] } });
     }
     if (url.endsWith("/databricks-gemini-3-8-flash")) return new Response("boom", { status: 500 });
     return json({ ai_gateway: { rate_limits: [{ calls: 100, key: "user", renewal_period: "minute" }] } });
   }) as typeof fetch;
   const ids = await listServingEndpoints(DATABRICKS_BASE_URL, "dapi1", fake, 0);
-  assert.deepEqual(ids, ["databricks-gpt-5-4-nano"], "a record that cannot be read is dropped: it may be blocked");
+  assert.deepEqual(ids, ["databricks-claude-sonnet-5-5"], "a record that cannot be read is dropped: it may be blocked");
   assert.equal(urls[0], `${DATABRICKS_BASE_URL}/api/2.0/serving-endpoints`);
   assert.equal(urls.filter((u) => u.endsWith("/databricks-gemini-3-8-flash")).length, 4, "a 5xx is retried before giving up");
+  assert.ok(!urls.some((u) => u.endsWith("/databricks-gpt-6-1-sol")), "a GPT endpoint is the openai route's, not read here");
   assert.deepEqual([...auth], ["Bearer dapi1"]);
 
   const denied = (async () => new Response('{"error_code":"PERMISSION_DENIED"}', { status: 403 })) as typeof fetch;
@@ -311,6 +314,91 @@ test("listServingEndpoints: reads records a few at a time and retries a 429 inst
   const ids = await listServingEndpoints(DATABRICKS_BASE_URL, "dapi1", fake, 0);
   assert.deepEqual(ids, ["databricks-model-3"], "every endpoint rate-limited to 0 stays out, even after a 429");
   assert.ok(peak <= 4, `at most 4 records read at once (saw ${peak})`);
+});
+
+test("openai route: databricks-gpt-* ids go to <root>/ai-gateway/openai/v1, and each GPT name falls back to the other", () => {
+  for (const id of ["databricks-gpt-6-astra", "databricks-gpt-5-mini", "databricks-gpt-oss-120b", "databricks-gpt-5-5-pro"]) {
+    assert.equal(databricksRoute(id), "openai", id);
+  }
+  const c = resolveConfig({ baseUrl: `${DATABRICKS_BASE_URL}/ai-gateway`, apiKey: "dapi1", model: "databricks-gpt-6-astra" }, env());
+  assert.equal(c.provider, "openai");
+  assert.equal(c.baseUrl, `${DATABRICKS_BASE_URL}/ai-gateway/openai/v1`);
+  assert.deepEqual(c.databricks, { root: DATABRICKS_BASE_URL, route: "openai" });
+  assert.equal(c.modelHeaders, undefined);
+  assert.deepEqual(c.modelFallbacks, ["model_service.models.1adp-gpt-6-astra"]);
+
+  assert.deepEqual(databricksModelFallbacks("model_service.models.1adp-gpt-5-5"), ["databricks-gpt-5-5"]);
+  assert.deepEqual(databricksModelFallbacks("databricks-gpt-5-5"), ["model_service.models.1adp-gpt-5-5"]);
+  assert.equal(databricksModelFallbacks("databricks-gemini-3-8-flash"), undefined, "a serving endpoint has no other name");
+  assert.deepEqual(databricksModelFallbacks("claude-sonnet-5-5"), ["model_service.models.1adp-sonnet-5-5"]);
+});
+
+test("listOpenAiGatewayModels: GPT endpoints in the registry, each asked for free by its service id, then its endpoint name", async () => {
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const probed: { url: string; model: string; messages: unknown; tags: string | null }[] = [];
+  let inFlight = 0;
+  let peak = 0;
+  const throttled = new Set<string>();
+  const fake = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/2.0/serving-endpoints")) {
+      return json(200, {
+        endpoints: [
+          ...["gpt-6-1-sol", "gpt-6-astra", "gpt-5-5", "gpt-5-5-pro", "gpt-5-mini", "gpt-oss-120b", "gpt-5-4-nano"].map((n) => ({
+            name: `databricks-${n}`, task: "llm/v1/chat", state: { ready: "READY" }, permission_level: "CAN_QUERY",
+          })),
+          { name: "databricks-gpt-5-6-terra", task: "llm/v1/chat", state: { ready: "NOT_READY" } },
+          { name: "databricks-claude-sonnet-5-5", task: "llm/v1/chat", state: { ready: "READY" } },
+        ],
+      });
+    }
+    const body = JSON.parse(String(init?.body));
+    probed.push({ url, model: body.model, messages: body.messages, tags: new Headers(init?.headers).get("databricks-ai-gateway-request-tags") });
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    await new Promise((r) => setTimeout(r, 1));
+    inFlight--;
+    const missing = { error_code: "RESOURCE_DOES_NOT_EXIST", message: `Model ${body.model} does not exist.` };
+    const usable = { error: { message: "Missing required parameter: 'messages'.", type: "invalid_request_error" } };
+    switch (body.model) {
+      case "model_service.models.1adp-gpt-6-1-sol":
+      case "model_service.models.1adp-gpt-5-5":
+        return json(400, usable);
+      case "databricks-gpt-6-astra":
+        if (!throttled.has(body.model)) {
+          throttled.add(body.model);
+          return json(429, { error_code: "RESOURCE_EXHAUSTED" });
+        }
+        return json(400, usable);
+      case "databricks-gpt-5-mini":
+        return json(400, usable);
+      case "databricks-gpt-5-5-pro":
+        return json(400, { error: { message: "Model databricks-gpt-5-5-pro only supports the Responses API." } });
+      case "databricks-gpt-oss-120b":
+        return json(403, { error_code: "PERMISSION_DENIED", message: "This user's rate limit is set to 0." });
+      case "databricks-gpt-5-4-nano":
+        return new Response("boom", { status: 503 });
+      default:
+        return json(404, missing);
+    }
+  }) as typeof fetch;
+  const ids = await listOpenAiGatewayModels(DATABRICKS_BASE_URL, "dapi1", fake, 0);
+  assert.deepEqual(ids, [
+    "model_service.models.1adp-gpt-6-1-sol",
+    "databricks-gpt-6-astra",
+    "model_service.models.1adp-gpt-5-5",
+    "databricks-gpt-5-mini",
+  ]);
+  assert.ok(probed.every((p) => p.url === `${DATABRICKS_BASE_URL}/ai-gateway/openai/v1/chat/completions`));
+  assert.ok(probed.every((p) => Array.isArray(p.messages) && p.messages.length === 0), "a probe sends no messages: it costs no tokens");
+  assert.ok(probed.every((p) => p.tags !== null), "a probe carries the gateway's request tags");
+  assert.ok(!probed.some((p) => p.model === "databricks-gpt-5-5"), "the endpoint name is tried only when the service id is not served");
+  assert.ok(!probed.some((p) => /terra|claude/.test(p.model)), "a not-ready or non-GPT endpoint is not probed");
+  assert.equal(probed.filter((p) => p.model === "databricks-gpt-5-4-nano").length, 4, "a 5xx is retried before giving up");
+  assert.ok(peak <= 4, `at most 4 probes at once (saw ${peak})`);
+
+  const denied = (async () => new Response('{"error_code":"PERMISSION_DENIED"}', { status: 401 })) as typeof fetch;
+  await assert.rejects(listOpenAiGatewayModels(DATABRICKS_BASE_URL, "dapi1", denied, 0), /401/, "a rejected key is reported, not listed as empty");
 });
 
 // --- GRAFT_MODEL → the request that actually goes out ------------------------
@@ -542,7 +630,7 @@ test("deep model choice: other endpoints and an explicit --model are left alone"
 test("deep model choice: not on a terminal, nothing is asked", async () => {
   const d = deps({ env: env({ GRAFT_API_KEY: "dapi1" }), lister: rejecting });
   assert.deepEqual(await chooseDatabricksDeepModel(d), { config: {} });
-  assert.match(d.lines.join("\n"), /using claude-sonnet-5-5/);
+  assert.match(d.lines.join("\n"), /using claude-haiku-5-5/);
 });
 
 test("deep model choice: asks for a missing key first, then lists every route and takes a number", async () => {
@@ -576,7 +664,7 @@ test("deep model choice: a rejected key is reported and a new one asked for", as
   const lister: DatabricksLister = async (route, url, key) => {
     calls++;
     if (key === "gAAAA-old") return rejecting(route, url, key);
-    return route === "anthropic" ? ["claude-sonnet-5-5"] : [];
+    return route === "anthropic" ? ["claude-haiku-5-5"] : [];
   };
   const p = scriptedPrompter(["dapi-good", ""]);
   const store = memoryStore();
@@ -585,7 +673,7 @@ test("deep model choice: a rejected key is reported and a new one asked for", as
   assert.match(d.lines.join("\n"), /rejected .*from GRAFT_API_KEY/);
   assert.match(d.lines.join("\n"), /https:\/\/dbx\.1adp\.automotive\.cloud\/login/, "the rejection points at the token page");
   assert.equal(p.hidden.length, 1);
-  assert.deepEqual(r, { config: { model: "claude-sonnet-5-5", apiKey: "dapi-good" } });
+  assert.deepEqual(r, { config: { model: "claude-haiku-5-5", apiKey: "dapi-good" } });
   assert.equal(p.asked.length, 1, "only whether to save the typed key: the default model is served, so no model is asked");
   assert.equal(store.vars.get("GRAFT_MODEL"), undefined);
   assert.equal(calls, 8, "two keys × four routes");
@@ -593,14 +681,14 @@ test("deep model choice: a rejected key is reported and a new one asked for", as
 
 test("deep model choice: the model already set is used without asking when the gateway serves it", async () => {
   const lister: DatabricksLister = async (route) =>
-    route === "anthropic" ? ["model_service.models.1adp-sonnet-5-5", "claude-opus-5-5"] : route === "openai" ? ["model_service.models.1adp-gpt-6-1-sol"] : [];
+    route === "anthropic" ? ["model_service.models.1adp-haiku-5-5", "claude-opus-5-5"] : route === "openai" ? ["model_service.models.1adp-gpt-6-1-sol"] : [];
 
   // The default, listed under its service id.
   const p1 = scriptedPrompter([]);
   const d1 = deps({ env: env({ GRAFT_API_KEY: "dapi1" }), prompt: p1, store: memoryStore(), lister });
-  assert.deepEqual(await chooseDatabricksDeepModel(d1), { config: { model: "claude-sonnet-5-5" } });
+  assert.deepEqual(await chooseDatabricksDeepModel(d1), { config: { model: "claude-haiku-5-5" } });
   assert.equal(p1.asked.length + p1.hidden.length, 0, "nothing asked");
-  assert.match(d1.lines.join("\n"), /→ claude-sonnet-5-5 \(from graft's default\) via .*ai-gateway\/anthropic/);
+  assert.match(d1.lines.join("\n"), /→ claude-haiku-5-5 \(from graft's default\) via .*ai-gateway\/anthropic/);
 
   // GRAFT_MODEL, on another route.
   const p2 = scriptedPrompter([]);
@@ -621,7 +709,7 @@ test("deep model choice: a default the gateway does not serve is not used silent
   const p = scriptedPrompter(["", "n"]);
   const d = deps({ env: env({ GRAFT_API_KEY: "dapi1" }), prompt: p, store: memoryStore(), lister });
   await chooseDatabricksDeepModel(d);
-  assert.match(d.lines.join("\n"), /claude-sonnet-5-5 \(from graft's default\) is not among the models/);
+  assert.match(d.lines.join("\n"), /claude-haiku-5-5 \(from graft's default\) is not among the models/);
   assert.match(d.lines.join("\n"), /Which model should/);
 });
 

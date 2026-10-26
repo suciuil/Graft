@@ -79,16 +79,29 @@ function kilo7Candidates(home: string): string[] {
  * — the id has been spelled both with a dot and with a space across releases, so
  * both are accepted rather than pinned. `~/.kilocode/` is the extension's own
  * data dir; the VS Code `globalStorage` path is the fallback for installs that
- * never migrated out of it.
+ * never migrated out of it — in stable VS Code or Insiders, for the official
+ * extension (`kilocode.kilo-code`) or a fork published under another id
+ * (`automotive.kilo-code`).
  */
 function kilo5Candidates(home: string): string[] {
-  return [
-    join(home, '.kilocode', 'secrets.json'),
-    join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'secrets.json'),
-    join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'secrets.json'),
-    join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'secrets.json'),
+  const roots = [
+    join(home, 'AppData', 'Roaming'),
+    join(home, '.config'),
+    join(home, 'Library', 'Application Support'),
   ];
+  const storage = roots.flatMap((root) =>
+    VSCODE_FLAVOURS.flatMap((flavour) =>
+      KILO_EXTENSION_IDS.map((ext) => join(root, flavour, 'User', 'globalStorage', ext, 'secrets.json')),
+    ),
+  );
+  return [join(home, '.kilocode', 'secrets.json'), ...storage];
 }
+
+/** The VS Code builds whose `globalStorage` may hold a Kilo extension's data. */
+const VSCODE_FLAVOURS = ['Code', 'Code - Insiders'];
+
+/** Extension ids Kilo Code ships under: the official one, then known forks. */
+const KILO_EXTENSION_IDS = ['kilocode.kilo-code', 'automotive.kilo-code'];
 
 /** Parse strict JSON, then JSONC. Null on anything unreadable — a table is never
  * worth failing a command over. */
@@ -149,8 +162,8 @@ function readKilo7(cfg: Record<string, any>): { models: RawModel[]; defaultId: s
   return { models, defaultId };
 }
 
-/** The extension-id keys Kilo 5.x's secrets file has shipped under. */
-const KILO5_EXTENSION_KEYS = ['kilo code.kilo-code', 'kilocode.kilo-code'];
+/** The extension-id keys Kilo 5.x's secrets file has shipped under (a fork keys it by its own id). */
+const KILO5_EXTENSION_KEYS = ['kilo code.kilo-code', ...KILO_EXTENSION_IDS];
 
 /**
  * Kilo 5.x: one API profile per configured model, under a JSON-encoded string.

@@ -291,6 +291,29 @@ test("openai: an unknown prefixed model falls back to the bare id, and sticks", 
   assert.ok(err.some((l) => /not available; retrying as "gemini-x"/.test(l)));
 });
 
+test("openai: a model refused with 'rate limit set to 0' falls back to its other name; another 403 does not", async () => {
+  const calls: any[] = [];
+  const refused = "This user's rate limit is set to 0.";
+  const make = routedClient((_b, p) => {
+    if (p.model === "databricks-gpt-5-5") throw new OpenAI.APIError(403, { message: refused }, refused, new Headers());
+    return openAiResp();
+  }, calls);
+  const m = new OpenAIChatModel({
+    apiKey: "x",
+    model: "databricks-gpt-5-5",
+    modelFallbacks: ["model_service.models.1adp-gpt-5-5"],
+    client: make("u/v1"),
+  });
+  await captureStderr(() => m.create({ messages: [{ role: "user", content: "hi" }] }));
+  assert.deepEqual(calls.map((c) => c.model), ["databricks-gpt-5-5", "model_service.models.1adp-gpt-5-5"]);
+
+  const forbidden = routedClient(() => {
+    throw new OpenAI.APIError(403, { message: "Invalid access token" }, "Invalid access token", new Headers());
+  }, []);
+  const f = new OpenAIChatModel({ apiKey: "x", model: "a", modelFallbacks: ["b"], client: forbidden("u/v1") });
+  await assert.rejects(f.create({ messages: [{ role: "user", content: "hi" }] }), /Invalid access token/);
+});
+
 test("openai: a route 404 on the configured base URL retries with /v1 added, and sticks", async () => {
   const calls: any[] = [];
   const make = routedClient((b) => {
@@ -320,11 +343,11 @@ test("resolveConfig: any provider-prefixed model gets its bare id as a fallback"
   for (const k of keys) delete process.env[k];
   try {
     const def = resolveConfig({ provider: "openai" });
-    assert.equal(def.model, "claude-sonnet-5-5", "the default model on every provider");
-    assert.equal(DEFAULT_MODELS.openai, "claude-sonnet-5-5");
-    assert.equal(DEFAULT_MODELS.anthropic, "claude-sonnet-5-5");
-    assert.deepEqual(def.modelFallbacks, ["claude-sonnet-5.5"], "the default also tries its dotted spelling");
-    assert.deepEqual(resolveConfig({ provider: "litellm" }).modelFallbacks, ["claude-sonnet-5-5", "claude-sonnet-5.5"]);
+    assert.equal(def.model, "claude-haiku-5-5", "the default model on every provider");
+    assert.equal(DEFAULT_MODELS.openai, "claude-haiku-5-5");
+    assert.equal(DEFAULT_MODELS.anthropic, "claude-haiku-5-5");
+    assert.deepEqual(def.modelFallbacks, ["claude-haiku-5.5"], "the default also tries its dotted spelling");
+    assert.deepEqual(resolveConfig({ provider: "litellm" }).modelFallbacks, ["claude-haiku-5-5", "claude-haiku-5.5"]);
     assert.deepEqual(resolveConfig({ provider: "openai", model: "vendor/custom" }).modelFallbacks, ["custom"]);
     process.env.GRAFT_MODEL = "google/gemini-x";
     assert.deepEqual(resolveConfig({ provider: "openai" }).modelFallbacks, ["gemini-x"]);

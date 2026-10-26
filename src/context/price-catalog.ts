@@ -27,7 +27,7 @@ import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readJson, writeJsonAtomic } from '../util/state.js';
-import { canonicalModelKey } from './price.js';
+import { canonicalModelKey, gatewayModelAlias } from './price.js';
 import { BUNDLED_PRICE_CATALOG } from './price-catalog-bundled.js';
 
 export const LITELLM_PRICES_URL =
@@ -213,6 +213,11 @@ export function parseLiteLlmCatalog(json: unknown, fetchedAt: string, url: strin
     // `ft:gpt-4o` is a fine-tune of the model, priced differently, and would
     // otherwise normalise onto the base model's key.
     if (/^[A-Za-z]+\s*:/.test(name.trim())) continue;
+    // `databricks/databricks-claude-opus-5-5` names the vendor model under the
+    // workspace's endpoint name, which graft maps to the vendor's own id
+    // (`gatewayModelAlias`). Its gateway price would only make the vendor id's
+    // routed entries disagree and leave it unpriced; the vendor's own entry prices it.
+    if (gatewayModelAlias(name.trim().slice(name.trim().lastIndexOf('/') + 1).trim())) continue;
     const e = entry as Record<string, unknown>;
     if (typeof e.mode !== 'string' || !PRICED_MODES.has(e.mode)) continue;
     const input = perMtok(e.input_cost_per_token);

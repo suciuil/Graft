@@ -24,7 +24,7 @@ import { callClaude, claudeBin, type ClaudeFailure } from './claude-call.js';
 import type { InitCandidate } from './types.js';
 
 /** The model init's calls use (phase 0's look-back model). */
-export const NAME_MODEL = 'claude-sonnet-5-5';
+export const NAME_MODEL = 'claude-haiku-5-5';
 const NAME_MS = 60_000;
 const NAME_MAX = 40;
 const DESC_MAX = 120;

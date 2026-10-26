@@ -30,7 +30,7 @@ import { cmd } from "../brand.js";
 export type LlmProblem = "unreachable" | "auth" | "model";
 
 /** Shown when the endpoint will not list its models. Mid-tier on purpose. */
-export const EXAMPLE_MODELS = ["claude-sonnet-5.5", "gpt-5.5-terra", "gemini-3.8-flash"];
+export const EXAMPLE_MODELS = ["claude-haiku-5.5", "gpt-5.5-terra", "gemini-3.8-flash"];
 
 const MODEL_NOT_FOUND_RE =
   /model_not_found|not_found_error|(does not exist|not found|invalid model|not a valid model|no such model|unknown model|unsupported model|not available|no available (channel|provider))/i;
@@ -83,13 +83,15 @@ export function rankModelsForHint(ids: string[]): string[] {
 
 /**
  * The model to recommend, in this order of preference:
- *   1. the latest Claude Sonnet (the family of graft's default model),
- *   2. the latest Gemini Flash (a full Flash, not Flash-Lite),
- *   3. the latest GPT terra,
+ *   1. the latest Claude Haiku (the family of graft's default model),
+ *   2. the latest Claude Sonnet,
+ *   3. the latest Gemini Flash (a full Flash, not Flash-Lite),
+ *   4. the latest GPT terra,
  * then any other mid-tier model, then any non-top-tier one.
  */
 export function suggestModel(ranked: string[]): string | undefined {
   const families: ((id: string) => boolean)[] = [
+    (id) => /claude/i.test(id) && /haiku/i.test(id),
     (id) => /claude/i.test(id) && /sonnet/i.test(id),
     (id) => /gemini/i.test(id) && /flash/i.test(id) && !/lite/i.test(id),
     (id) => /gpt/i.test(id) && /terra/i.test(id),
@@ -104,12 +106,16 @@ export function suggestModel(ranked: string[]): string | undefined {
 /**
  * The version numbers in a model id, for ordering one family's releases:
  * `google/gemini-3.8-flash` → [3, 8], `claude-sonnet-5-5` → [5, 5],
- * `claude-4-6-sonnet-v1:0` → [4, 6]. The routing prefix, a Bedrock-style
- * `-v1:0` suffix and an 8-digit release date are not part of the version.
+ * `claude-4-6-sonnet-v1:0` → [4, 6]. The routing prefix, a Databricks service
+ * or endpoint prefix (`model_service.models.1adp-gpt-5-6-terra`,
+ * `databricks-gpt-5-6-terra` → [5, 6]), a Bedrock-style `-v1:0` suffix and an
+ * 8-digit release date are not part of the version.
  */
 export function modelVersion(id: string): number[] {
   const bare = id
     .slice(id.lastIndexOf("/") + 1)
+    .replace(/^model_service\.models\.[a-z0-9]+-/i, "")
+    .replace(/^databricks-/i, "")
     .replace(/-v\d+(:\d+)?$/i, "")
     .replace(/[-@]\d{8}$/, "");
   // The first run of numbers is the version; later ones are dates or preview tags.
