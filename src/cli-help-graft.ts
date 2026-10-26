@@ -321,7 +321,7 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Show or change GRAFT_MODEL, the model `graft build --deep` uses. Run without an id in a terminal to pick from " +
       "the models the endpoint serves, mid-tier first: a top-tier model is not needed for summaries. Saved as a user " +
       "environment variable, then checked against the endpoint.",
-    examples: ["graft model", "graft model claude-sonnet-5-5", "graft model --list"],
+    examples: ["graft model", "graft model claude-haiku-5-5", "graft model --list"],
   },
   models: {
     description:

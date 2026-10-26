@@ -97,16 +97,42 @@
 
 ### Changed
 
-- **The default model is `claude-sonnet-5-5` on every provider.** When neither
+- **The default model is `claude-haiku-5-5` on every provider.** When neither
   `--model` nor `GRAFT_MODEL` names one, `graft build --deep` uses
-  `claude-sonnet-5-5` (falling back to the `claude-sonnet-5.5` spelling when a
+  `claude-haiku-5-5` (falling back to the `claude-haiku-5.5` spelling when a
   gateway does not serve the first), instead of `google/gemini-3.8-flash` on
   OpenAI-compatible endpoints. `graft model` and the failure hints now recommend
-  the latest Claude Sonnet an endpoint serves first, then Gemini Flash, then GPT
-  terra.
+  the latest Claude Haiku an endpoint serves first, then Claude Sonnet, then
+  Gemini Flash, then GPT terra, and give `claude-haiku-5.5` as the first example
+  id. `graft init`'s look-back, its skill-naming call and the PR-review read use
+  `claude-haiku-5-5` too.
 
 ### Fixed
 
+- **Databricks GPT models without a `model_service.models.1adp-*` id work.**
+  `databricks-gpt-*` ids (for example `databricks-gpt-6-astra` and
+  `databricks-gpt-5-mini`, which have no service id) now go to the gateway's
+  OpenAI route (`/ai-gateway/openai/v1`). Before, they went to
+  `/serving-endpoints`, which refuses them with "rate limit set to 0". Each GPT
+  model's two names now fall back to each other, including when the gateway
+  refuses one of them with a 403 "rate limit set to 0" (as it does for
+  `databricks-gpt-5-5`). `graft model` now lists the OpenAI route's models. The
+  route has no working model list, so graft takes the GPT endpoints from the
+  workspace's serving registry and checks each one with a request that has no
+  messages, so no tokens are spent. Models that only support the Responses API
+  are left out.
+- **Databricks model ids are priced and grouped as the vendor's model.**
+  `model_service.models.1adp-opus-5-5`, `databricks-claude-opus-5-5` and
+  `claude-opus-5-5` are now priced as Claude Opus 5.5 and recorded as one
+  ledger row. Previously the first two were unpriced and each got its own row.
+  This applies to Claude, GPT, Gemini, Codex and o-series models. Models that
+  Databricks hosts itself (`databricks-meta-llama-…`) keep their own id and price.
+  Picking the latest model also no longer reads the `1` of `1adp` as the version.
+- **Forks of Kilo Code are recognised.** graft now also looks for a Kilo 5.x
+  `secrets.json` under VS Code Insiders' storage and under the
+  `automotive.kilo-code` extension id. The CLI also reads the running model
+  from Kilo's session when it runs in a shell started by Kilo's agent
+  (`KILO=1`), not only over MCP.
 - **A Claude Code tool call no longer hangs when the host leaves stdin open.**
   The `pre-tool` hook (the gate before every Read, Grep and shell call) read its
   payload with a blocking read that never returned when stdin wasn't closed, so
@@ -158,7 +184,7 @@
 - **`graft build --deep` no longer asks for a model on every run.** On the
   Databricks AI Gateway it used to list every model and ask which to use each
   time, even with `GRAFT_MODEL` set. It now uses the model already set —
-  `--model`, `GRAFT_MODEL`, or the default (`claude-sonnet-5-5`) — whenever the
+  `--model`, `GRAFT_MODEL`, or the default (`claude-haiku-5-5`) — whenever the
   gateway serves it for your key, and says which one and where it came from
   (`graft model` picks another). It asks only when that model is not among the
   ones the gateway lists, or when the default cannot be checked because its

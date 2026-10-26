@@ -72,7 +72,7 @@ test("rankModelsForHint: chat models only, top tier last; suggestion is mid-tier
   assert.ok(!isTopTierModel("solar-mini"));
 });
 
-test("suggestModel: latest Claude Sonnet, else latest Gemini Flash, else latest GPT terra", () => {
+test("suggestModel: latest Claude Haiku, else latest Claude Sonnet, else latest Gemini Flash, else latest GPT terra", () => {
   // From a real gateway list: Flash-Lite used to win only because it came first.
   const gateway = [
     "grok-4.3-2",
@@ -87,8 +87,14 @@ test("suggestModel: latest Claude Sonnet, else latest Gemini Flash, else latest 
     "gemini-2.5-flash-preview-05-20",
     "claude-haiku-4-5-20251001",
   ];
-  assert.equal(suggestModel(rankModelsForHint(gateway)), "claude-5-0-sonnet-v1:0");
-  const noSonnet = gateway.filter((id) => !/sonnet/.test(id));
+  assert.equal(suggestModel(rankModelsForHint(gateway)), "claude-haiku-4-5-20251001", "Haiku, the default's family, comes first");
+  assert.equal(
+    suggestModel(rankModelsForHint(["claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5-latest"])),
+    "claude-haiku-5-5",
+  );
+  const noHaiku = gateway.filter((id) => !/haiku/.test(id));
+  assert.equal(suggestModel(rankModelsForHint(noHaiku)), "claude-5-0-sonnet-v1:0");
+  const noSonnet = noHaiku.filter((id) => !/sonnet/.test(id));
   assert.equal(suggestModel(rankModelsForHint(noSonnet)), "gemini-3.8-flash");
   const noGemini = noSonnet.filter((id) => !/gemini-\d\.\d-flash$|flash-preview/.test(id));
   assert.equal(suggestModel(rankModelsForHint(noGemini)), "gpt-5.6-terra", "Flash-Lite does not count as a Flash");
@@ -108,6 +114,17 @@ test("modelVersion reads the version, not dates or provider suffixes", () => {
   assert.deepEqual(modelVersion("claude-4-6-sonnet-v1:0"), [4, 6]);
   assert.deepEqual(modelVersion("claude-3-7-sonnet-20250219"), [3, 7]);
   assert.deepEqual(modelVersion("gemini-2.5-flash-preview-05-20"), [2, 5]);
+});
+
+test("modelVersion: a Databricks service or endpoint prefix is not the version", () => {
+  assert.deepEqual(modelVersion("model_service.models.1adp-gpt-5-6-terra"), [5, 6]);
+  assert.deepEqual(modelVersion("databricks-gpt-5-6-terra"), [5, 6]);
+  assert.deepEqual(modelVersion("model_service.models.1adp-qwen3-5-122b"), [3, 5, 122]);
+  assert.equal(
+    suggestModel(["model_service.models.1adp-gpt-5-6-terra", "databricks-gpt-6-2-terra", "model_service.models.1adp-gpt-6-1-sol"]),
+    "databricks-gpt-6-2-terra",
+    "the latest terra, whichever name the gateway knows it by",
+  );
 });
 
 test("envSetExample matches the user's shell", () => {
@@ -161,7 +178,7 @@ test("hints: unknown model lists what the endpoint serves and suggests a mid-tie
 
 test("hints: unknown default model, listing unavailable → example ids", async () => {
   const lines = (
-    await llmFailureHints(["404 The model `claude-sonnet-5-5` does not exist"], {
+    await llmFailureHints(["404 The model `claude-haiku-5-5` does not exist"], {
       config: {},
       env,
       platform: "linux",
@@ -170,9 +187,9 @@ test("hints: unknown default model, listing unavailable → example ids", async 
       },
     })
   ).join("\n");
-  assert.match(lines, /Model "claude-sonnet-5-5" \(graft's default model — GRAFT_MODEL is not set\)/);
+  assert.match(lines, /Model "claude-haiku-5-5" \(graft's default model — GRAFT_MODEL is not set\)/);
   assert.match(lines, /Could not list the models this endpoint serves \(404 Not Found\)/);
-  assert.match(lines, /claude-sonnet-5\.5, gpt-5\.5-terra, gemini-3\.8-flash/);
+  assert.match(lines, /claude-haiku-5\.5, gpt-5\.5-terra, gemini-3\.8-flash/);
   assert.match(lines, /top-tier model .* is not necessary/);
 });
 

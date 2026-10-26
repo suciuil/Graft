@@ -77,18 +77,28 @@ function isKilo(name: string | null | undefined): boolean {
 }
 
 /**
+ * A shell Kilo spawned for its agent: Kilo (the official extension, its CLI, and
+ * forks such as `automotive.kilo-code`) exports `KILO=1` and `KILO_PID` to every
+ * command its agent runs. That is the CLI's only evidence of Kilo — no handshake
+ * happens there, and Kilo sets no `TERM_PROGRAM`.
+ */
+export function inKiloShell(env: NodeJS.ProcessEnv): boolean {
+  return env.KILO === '1' || /^\d+$/.test(env.KILO_PID?.trim() ?? '');
+}
+
+/**
  * The sources, in priority order.
  *
  * Kilo first because it is the more specific claim: it is only consulted when
- * the MCP handshake actually said "Kilo", whereas the VS Code reader applies to
- * any terminal inside the editor. The two barely overlap in practice — Kilo
- * reaches graft over MCP and Copilot through the CLI — but when they do, the
- * host that named itself wins over the one merely inferred from an env var.
+ * the MCP handshake actually said "Kilo", or the CLI runs in a shell Kilo's
+ * agent spawned, whereas the VS Code reader applies to any terminal inside the
+ * editor — and Kilo's agent shell, running inside VS Code, can look like one.
+ * The host that named itself wins over the one merely inferred from the editor.
  */
 export const HOST_MODEL_SOURCES: HostModelSource[] = [
   {
     id: 'kilo',
-    applies: () => false, // MCP-only; enabled per call via `mcpClient` below.
+    applies: (env) => inKiloShell(env), // the CLI in Kilo's agent shell; over MCP, `mcpClient` below.
     read: (repo, opts) => kiloSessionModel(repo, opts),
   },
   {
@@ -112,10 +122,16 @@ export const HOST_MODEL_SOURCES: HostModelSource[] = [
 export function hostModelFor(repo: string, opts: HostModelOpts = {}): string | null {
   const env = opts.env ?? process.env;
   for (const source of HOST_MODEL_SOURCES) {
-    // Kilo is gated on the handshake rather than the environment: its server is
-    // spawned by the client that just named itself, and that name is the only
-    // evidence graft has of which host it is serving.
-    const applies = source.id === 'kilo' ? isKilo(opts.mcpClient) : source.applies(env);
+    // Over MCP, Kilo is gated on the handshake rather than the environment: its
+    // server is spawned by the client that just named itself, and that name is
+    // the evidence of which host it is serving. Off MCP (the CLI) the shell Kilo
+    // spawned says so instead (`inKiloShell`).
+    const applies =
+      source.id === 'kilo'
+        ? opts.mcpClient != null
+          ? isKilo(opts.mcpClient)
+          : source.applies(env)
+        : source.applies(env);
     if (!applies) continue;
     try {
       const model = source.read(repo, opts);

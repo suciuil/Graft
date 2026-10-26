@@ -21,6 +21,7 @@ import {
   kiloSessionModel,
   parseSessionModel,
 } from '../src/hosts/kilo-session.js';
+import { hostModelFor, inKiloShell } from '../src/hosts/host-model.js';
 import { tmpRepo } from './helpers.js';
 
 /** `node:sqlite` is Node >=22.5 and this package supports >=20. */
@@ -115,6 +116,23 @@ test('the live session for a directory names its model', { skip: noSqlite }, () 
     'vertex_ai/claude-opus-5',
     'matched on the directory, not on recency alone',
   );
+});
+
+test('the CLI in Kilo\'s agent shell reads Kilo\'s session; a plain shell or another MCP client does not', { skip: noSqlite }, () => {
+  const home = tmpRepo('kilo-db-shell');
+  const now = Date.now();
+  const repo = 'D:/work/VED-ChAIR';
+  kiloDb(home, [{ dir: repo, model: { id: 'aumovio-databricks/claude-opus-5-5' }, updated: now - 1000 }]);
+  // What Kilo (and its forks, e.g. automotive.kilo-code) exports to its agent's commands.
+  const kiloShell = { KILO: '1', KILO_PID: '4242', KILO_APP_NAME: 'kilo-code' };
+  assert.equal(inKiloShell(kiloShell), true);
+  assert.equal(inKiloShell({ KILO_PID: '4242' }), true);
+  assert.equal(inKiloShell({}), false);
+  assert.equal(inKiloShell({ KILO: '0', KILO_PID: 'x' }), false);
+  assert.equal(hostModelFor(repo, { home, env: kiloShell, now }), 'aumovio-databricks/claude-opus-5-5');
+  assert.equal(hostModelFor(repo, { home, env: {}, now }), null, 'a plain shell on a machine that has Kilo');
+  assert.equal(hostModelFor(repo, { home, env: kiloShell, now, mcpClient: 'Cursor' }), null, 'the handshake outranks the env');
+  assert.equal(hostModelFor(repo, { home, env: {}, now, mcpClient: 'kilo' }), 'aumovio-databricks/claude-opus-5-5');
 });
 
 test('a directory Kilo has never opened names nothing', { skip: noSqlite }, () => {

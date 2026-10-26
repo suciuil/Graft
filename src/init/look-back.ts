@@ -34,7 +34,7 @@ export interface Finding {
 }
 
 /** The model phase 0's look-back used, and the naming call uses (name-call.ts). */
-export const COLD_START_MODEL = "claude-sonnet-5-5";
+export const COLD_START_MODEL = "claude-haiku-5-5";
 
 interface RawFinding {
   title?: string;

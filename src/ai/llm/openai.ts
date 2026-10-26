@@ -300,6 +300,16 @@ export function isModelNotFound(err: unknown): boolean {
   );
 }
 
+/**
+ * The endpoint knows the model but will not run it for this key: Databricks
+ * answers 403 "This user's rate limit is set to 0." (or "Endpoint has a rate
+ * limit set to 0.") for a model name it blocks, while serving the same model
+ * under its other name. Only a model fallback can get past it.
+ */
+export function isModelRefused(err: unknown): boolean {
+  return err instanceof OpenAI.APIError && err.status === 403 && /rate limit (is )?set to 0/i.test(String(err.message ?? ""));
+}
+
 /** A 404/405 that is not about the model: the base URL points at the wrong path. */
 function isRouteNotFound(err: unknown): boolean {
   return (
@@ -701,8 +711,9 @@ export class OpenAIChatModel implements ChatModel {
 
   /**
    * Walks the base-URL and model fallbacks: a route-level 404/405 advances to
-   * the next base URL, an unknown-model error to the next model id. Each step
-   * only moves forward, so the loop is bounded by the two candidate lists.
+   * the next base URL, an unknown or refused model ({@link isModelRefused}) to
+   * the next model id. Each step only moves forward, so the loop is bounded by
+   * the two candidate lists.
    */
   private async createChatCompletion(params: ChatParams): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     for (;;) {
@@ -711,7 +722,7 @@ export class OpenAIChatModel implements ChatModel {
       try {
         return await this.sendWithCompat(this.clientAt(ri), { ...params, model: this.models[mi]! });
       } catch (err) {
-        if (isModelNotFound(err) && mi + 1 < this.models.length) {
+        if ((isModelNotFound(err) || isModelRefused(err)) && mi + 1 < this.models.length) {
           if (this.modelIdx === mi) {
             this.modelIdx = mi + 1;
             console.error(`⚠ model "${this.models[mi]}" not available; retrying as "${this.models[mi + 1]}"`);

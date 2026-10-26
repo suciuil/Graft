@@ -76,6 +76,21 @@ test('parse: keeps text models, prefers the vendor key, and leaves disagreements
   assert.equal(c.fetchedAt, '2026-10-20T00:00:00.000Z');
 });
 
+test('parse: a Databricks endpoint name for a vendor model does not unprice the vendor id', () => {
+  const c = parseLiteLlmCatalog(
+    {
+      'vertex_ai/zeta-gemini-9': { mode: 'chat', input_cost_per_token: 0.000001 },
+      'databricks/databricks-gemini-9': { mode: 'chat', input_cost_per_token: 0.00000100001 },
+      'vertex_ai/gemini-9': { mode: 'chat', input_cost_per_token: 0.000001 },
+      'databricks/databricks-meta-llama-9': { mode: 'chat', input_cost_per_token: 5e-7 },
+    },
+    '2026-10-20T00:00:00.000Z',
+  );
+  assert.deepEqual(c.models['gemini-9'], { input: 1 }, 'the gateway copy is not a second, disagreeing price');
+  assert.equal(c.models['databricks-gemini-9'], undefined);
+  assert.deepEqual(c.models['databricks-meta-llama-9'], { input: 0.5 }, 'a model Databricks hosts keeps its own price');
+});
+
 test('parse: rejects what is not a catalog', () => {
   assert.throws(() => parseLiteLlmCatalog([], 'x'), /not a JSON object/);
   assert.throws(() => parseLiteLlmCatalog({ a: { mode: 'embedding', input_cost_per_token: 1e-6 } }, 'x'), /no priced text models/);

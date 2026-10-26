@@ -81,13 +81,13 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1";
 
 /** The model graft uses whenever none is configured (GRAFT_MODEL / --model), on every provider. */
-export const DEFAULT_MODEL = "claude-sonnet-5-5";
+export const DEFAULT_MODEL = "claude-haiku-5-5";
 
 /**
  * Other spellings of {@link DEFAULT_MODEL}, tried in order when an endpoint does
  * not serve it: gateways disagree on the version separator (`5-5` vs `5.5`).
  */
-const DEFAULT_MODEL_ALIASES = ["claude-sonnet-5.5"];
+const DEFAULT_MODEL_ALIASES = ["claude-haiku-5.5"];
 
 /** Per-provider default model: {@link DEFAULT_MODEL}, routing-prefixed where the gateway needs it. */
 export const DEFAULT_MODELS: Record<ProviderKind, string> = {

@@ -318,7 +318,7 @@ program
   )
   .optionsGroup("LLM options (used by `build --deep`; or set the env vars once):")
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter | llm-incubator (env GRAFT_PROVIDER)")
-  .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL; default claude-sonnet-5-5)")
+  .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL; default claude-haiku-5-5)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN)")
   .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL; default: the Databricks AI Gateway)")
   // graft's own help (installGraftHelp, below) carries examples on every command.
@@ -1390,7 +1390,7 @@ grouped(program.command("model"), GROUP.setup)
   .description(
     `Show or set GRAFT_MODEL, the model \`graft build --deep\` uses — in a terminal, pick from the models the endpoint serves; ${SAVED_WHERE}`,
   )
-  .argument("[id]", "new model id, e.g. claude-sonnet-5.5 (omit to show it, and to pick one in a terminal)")
+  .argument("[id]", "new model id, e.g. claude-haiku-5.5 (omit to show it, and to pick one in a terminal)")
   .option("--list", "list the models the endpoint serves (mid-tier first) and exit")
   .option("--unset", "remove the saved value")
   .option("--no-verify", "skip the check against the endpoint after saving")

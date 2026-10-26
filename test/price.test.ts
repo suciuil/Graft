@@ -194,6 +194,23 @@ test('inputUsdPerMtok: a provider routing prefix names the server, not the model
   assert.equal(inputUsdPerMtok('claude-opus-5/'), null, 'nothing after the slash is no model at all');
 });
 
+test('a Databricks service id or endpoint name prices and files as the vendor model', () => {
+  assert.equal(inputUsdPerMtok('model_service.models.1adp-opus-5-5'), 4);
+  assert.equal(inputUsdPerMtok('aumovio-databricks/model_service.models.1adp-opus-5-5'), 4);
+  assert.equal(inputUsdPerMtok('databricks-claude-opus-5-5'), 4);
+  assert.equal(inputUsdPerMtok('model_service.models.1adp-gpt-6-1-sol'), 2);
+  assert.equal(inputUsdPerMtok('databricks-gpt-6-astra'), 10);
+  assert.equal(inputUsdPerMtok('databricks-gpt-5-mini'), 0.25);
+  assert.equal(inputUsdPerMtok('databricks-gemini-3-8-flash'), 0.75);
+  for (const id of ['model_service.models.1adp-opus-5-5', 'databricks-claude-opus-5-5', 'Claude-Opus-5.5']) {
+    assert.equal(canonicalModelKey(id), 'claude-opus-5-5', `${id}: one ledger row`);
+  }
+  assert.equal(canonicalModelKey('model_service.models.1adp-haiku-4-5'), 'claude-haiku-4-5');
+  // A model Databricks hosts itself is priced by Databricks: its endpoint name stays its id.
+  assert.equal(canonicalModelKey('databricks-meta-llama-3-3-70b-instruct'), 'databricks-meta-llama-3-3-70b-instruct');
+  assert.equal(inputUsdPerMtok('databricks-some-future-model'), null);
+});
+
 test('a `#` config-entry suffix names the entry, not the model', () => {
   // A host whose model list is a MAP needs distinct keys to offer one model
   // twice under different settings, so it appends a discriminator: Kilo writes

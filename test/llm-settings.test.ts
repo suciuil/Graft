@@ -182,10 +182,10 @@ test("a saved model is in effect even when this terminal predates it", async () 
   assert.match(out, /in effect:\s+gpt-5-6-terra \(from the saved GRAFT_MODEL\)/);
 });
 
-test("nothing set or saved: the default model is claude-sonnet-5-5", async () => {
+test("nothing set or saved: the default model is claude-haiku-5-5", async () => {
   const d = deps({ env: { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" } });
   assert.equal(await runSettingCommand("model", undefined, {}, d), 0);
-  assert.match(d.lines.join("\n"), /in effect:\s+claude-sonnet-5-5 \(graft's default model\)/);
+  assert.match(d.lines.join("\n"), /in effect:\s+claude-haiku-5-5 \(graft's default model\)/);
 });
 
 test("withSavedSettings: fills only what the process lacks; the process value wins", () => {
