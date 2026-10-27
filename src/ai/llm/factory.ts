@@ -49,6 +49,15 @@ export interface ChatModelConfig {
   providerFallback?: { provider: ProviderKind; model: string };
   /** Send the key as `Authorization: Bearer` on the Anthropic wire (an ANTHROPIC_AUTH_TOKEN), not `x-api-key`. */
   bearerAuth?: boolean;
+  /** Thinking / reasoning effort level (`GRAFT_REASONING_EFFORT`); unset leaves it to the model. */
+  reasoningEffort?: string;
+  /** Throw when the endpoint refuses `reasoningEffort` instead of dropping it (the `graft effort` probe). */
+  strictEffort?: boolean;
+  /**
+   * `reasoningEffort` is graft's default, not the user's choice: any 400 that
+   * remains after the other remedies drops it, quietly, for the rest of the run.
+   */
+  effortOptional?: boolean;
 }
 
 /** Rejections that say "wrong wire format / endpoint", not "bad request" or "unknown model".
@@ -123,6 +132,7 @@ export function createChatModel(cfg: ChatModelConfig): ChatModel {
 }
 
 function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
+  const effort = { reasoningEffort: cfg.reasoningEffort, strictEffort: cfg.strictEffort, effortOptional: cfg.effortOptional };
   switch (cfg.provider) {
     case "anthropic":
       return new AnthropicChatModel({
@@ -133,6 +143,7 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         baseUrl: cfg.baseUrl,
         headers: cfg.headers,
         modelHeaders: cfg.modelHeaders,
+        ...effort,
       });
     case "openai":
       return new OpenAIChatModel({
@@ -141,6 +152,7 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         modelFallbacks: cfg.modelFallbacks,
         baseUrl: cfg.baseUrl,
         headers: cfg.headers,
+        ...effort,
       });
     case "litellm":
       return new LiteLLMChatModel({
@@ -149,6 +161,7 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         modelFallbacks: cfg.modelFallbacks,
         baseUrl: cfg.baseUrl,
         headers: cfg.headers,
+        ...effort,
       });
     case "orcarouter":
       return new OrcaRouterChatModel({
@@ -157,6 +170,7 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         modelFallbacks: cfg.modelFallbacks,
         baseUrl: cfg.baseUrl,
         headers: cfg.headers,
+        ...effort,
       });
     case "llm-incubator":
       // No built-in URL: without one the OpenAI SDK would silently reach api.openai.com.
@@ -170,6 +184,7 @@ function createSingleChatModel(cfg: ChatModelConfig): ChatModel {
         baseUrl: cfg.baseUrl,
         headers: cfg.headers,
         label: `llm-incubator:${cfg.model}`,
+        ...effort,
       });
     default: {
       const _exhaustive: never = cfg.provider;

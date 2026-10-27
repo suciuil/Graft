@@ -159,6 +159,8 @@ export class Graft {
         modelHeaders: this.cfg.modelHeaders,
         providerFallback: this.cfg.providerFallback,
         bearerAuth: this.cfg.bearerAuth,
+        reasoningEffort: this.cfg.reasoningEffort,
+        effortOptional: this.cfg.reasoningEffortDefaulted,
       }),
       { waiter },
     );

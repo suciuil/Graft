@@ -236,6 +236,16 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft deep-threshold", "graft deep-threshold 25", "graft deep-threshold 50 --global"],
     globals: ["dir"],
   },
+  effort: {
+    description:
+      "Show or change GRAFT_REASONING_EFFORT, the thinking / reasoning effort `graft build --deep` asks the model for " +
+      "(none, minimal, low, medium, high, xhigh, max). Which levels exist depends on the model, so graft asks the model " +
+      "with one tiny request per level and offers only the ones it accepts; run without a level in a terminal to pick " +
+      "one. Sent as reasoning_effort to OpenAI-compatible endpoints and as output_config.effort to Anthropic's. While " +
+      "it is not set, graft asks for high, and a model that does not take high runs at its own default; " +
+      "`graft effort default` sends no effort at all. Saved as a user environment variable.",
+    examples: ["graft effort", "graft effort low", "graft effort default", "graft effort --list", "graft effort --unset"],
+  },
   env: {
     description:
       "Every environment variable graft reads that you might want to set has its own command (`graft files store`, " +
@@ -320,7 +330,8 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     description:
       "Show or change GRAFT_MODEL, the model `graft build --deep` uses. Run without an id in a terminal to pick from " +
       "the models the endpoint serves, mid-tier first: a top-tier model is not needed for summaries. Saved as a user " +
-      "environment variable, then checked against the endpoint.",
+      "environment variable, then checked against the endpoint. In a terminal, graft then asks the model which " +
+      "thinking efforts it accepts and lets you pick one (see `graft effort`).",
     examples: ["graft model", "graft model claude-haiku-5-5", "graft model --list"],
   },
   models: {

@@ -10,6 +10,7 @@ import {
   parseRegQuery,
   posixUserEnv,
   PromptCancelled,
+  runEffortCommand,
   runSettingCommand,
   windowsUserEnv,
   type Prompter,
@@ -38,6 +39,8 @@ function deps(over: Partial<SettingDeps> = {}): SettingDeps & { lines: string[] 
     out: (l) => lines.push(l),
     err: (l) => lines.push(l),
     listModels: async () => ["claude-opus-5", "claude-sonnet-5.5", "gemini-3.8-flash"],
+    // Never the network: by default the model takes every level it is asked about.
+    probeEfforts: async (_cfg, levels) => ({ results: levels.map((level) => ({ level, verdict: "accepted" as const })) }),
     ...over,
     lines,
   };
@@ -250,4 +253,206 @@ test("--unset removes the saved value; --list prints models", async () => {
   const l = deps({ env: { GRAFT_API_KEY: "k" } });
   assert.equal(await runSettingCommand("model", undefined, { list: true }, l), 0);
   assert.match(l.lines.join("\n"), /claude-sonnet-5\.5/);
+});
+
+// ── thinking effort ──
+
+/** A probe stub: the model takes `accepts` and refuses every other level; records what was asked. */
+function probeAccepting(accepts: string[]) {
+  const asked: string[][] = [];
+  const probeEfforts: SettingDeps["probeEfforts"] = async (_cfg, levels) => {
+    asked.push([...levels]);
+    return {
+      results: levels.map((level) =>
+        accepts.includes(level)
+          ? { level, verdict: "accepted" as const }
+          : { level, verdict: "rejected" as const, detail: `400 reasoning effort '${level}' is not supported` },
+      ),
+    };
+  };
+  return { asked, probeEfforts };
+}
+
+const ENDPOINT = { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" };
+
+test("interactive model: after the model, offers only the effort levels it accepts", async () => {
+  const probe = probeAccepting(["low", "medium", "high"]);
+  const prompt = scripted(["1", "2"]);
+  const d = deps({ env: ENDPOINT, prompt, probeEfforts: probe.probeEfforts });
+  assert.equal(await runSettingCommand("model", undefined, {}, d), 0);
+  assert.equal(d.store.read("GRAFT_MODEL"), "claude-sonnet-5.5");
+  // Claude: low…max asked about; xhigh and max refused, so not offered.
+  assert.deepEqual(probe.asked, [["low", "medium", "high", "xhigh", "max"]]);
+  const out = d.lines.join("\n");
+  assert.match(out, /1\. low .*\n.*2\. medium .*\n.*3\. high /);
+  assert.doesNotMatch(out, /\d\. (xhigh|max) /);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "medium");
+  assert.match(out, /✓ saved GRAFT_REASONING_EFFORT = medium/);
+});
+
+test("interactive model: Ctrl+C at the effort step keeps the model and the effort", async () => {
+  const d = deps({ env: ENDPOINT, prompt: scripted(["1"]) });
+  assert.equal(await runSettingCommand("model", undefined, {}, d), 0);
+  assert.equal(d.store.read("GRAFT_MODEL"), "claude-sonnet-5.5");
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), undefined);
+  assert.match(d.lines.join("\n"), /Thinking effort unchanged\./);
+});
+
+test("interactive model with --no-verify: no effort step, no probe", async () => {
+  const probe = probeAccepting(["low"]);
+  const d = deps({ env: ENDPOINT, prompt: scripted(["1"]), probeEfforts: probe.probeEfforts });
+  assert.equal(await runSettingCommand("model", undefined, { verify: false }, d), 0);
+  assert.deepEqual(probe.asked, []);
+});
+
+test("model without a terminal: a saved effort the new model refuses is flagged", async () => {
+  const probe = probeAccepting(["low", "medium", "high"]);
+  const d = deps({
+    store: memoryStore({ GRAFT_REASONING_EFFORT: "max" }),
+    env: ENDPOINT,
+    probeEfforts: probe.probeEfforts,
+  });
+  assert.equal(await runSettingCommand("model", "gemini-3.8-flash", {}, d), 0);
+  assert.deepEqual(probe.asked, [["max"]]);
+  assert.match(d.lines.join("\n"), /⚠ gemini-3\.8-flash refused reasoning effort "max"/);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "max", "nothing is changed without asking");
+});
+
+test("model without a terminal and no effort: one hint about graft's default, no probe", async () => {
+  const probe = probeAccepting([]);
+  const d = deps({ env: ENDPOINT, probeEfforts: probe.probeEfforts });
+  assert.equal(await runSettingCommand("model", "claude-sonnet-5.5", {}, d), 0);
+  assert.deepEqual(probe.asked, []);
+  assert.match(
+    d.lines.join("\n"),
+    /Thinking effort: graft's default, "high" where the model takes it, else the model's own default\. Pick a level with `graft effort`/,
+  );
+
+  // A saved "default" sends no effort: nothing to check either.
+  const none = deps({ store: memoryStore({ GRAFT_REASONING_EFFORT: "default" }), env: ENDPOINT, probeEfforts: probe.probeEfforts });
+  assert.equal(await runSettingCommand("model", "claude-sonnet-5.5", {}, none), 0);
+  assert.deepEqual(probe.asked, []);
+  assert.match(none.lines.join("\n"), /Thinking effort: the model's default\. Pick a level with `graft effort`/);
+});
+
+test("graft effort status: graft's default while nothing is set; a saved default sends none", async () => {
+  const d = deps({ env: ENDPOINT });
+  assert.equal(await runEffortCommand(undefined, {}, d), 0);
+  assert.match(d.lines.join("\n"), /in effect:\s+not set — graft's default: "high" where the model takes it, else the model's own default/);
+
+  const none = deps({ store: memoryStore({ GRAFT_REASONING_EFFORT: "default" }), env: ENDPOINT });
+  assert.equal(await runEffortCommand(undefined, {}, none), 0);
+  assert.match(none.lines.join("\n"), /in effect:\s+none sent — the model's own default \(from the saved GRAFT_REASONING_EFFORT\)/);
+});
+
+test("interactive graft effort with nothing set: high is marked graft's default; a model without high gets a note", async () => {
+  const env = { ...ENDPOINT, GRAFT_MODEL: "claude-sonnet-5.5" };
+  const keep = deps({ env, prompt: scripted([""]), probeEfforts: probeAccepting(["low", "medium", "high"]).probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, keep), 0);
+  const out = keep.lines.join("\n");
+  assert.match(out, /high — .*\(current, graft's default\)/);
+  assert.doesNotMatch(out, /0\. default .*\(current\)/);
+  assert.equal(keep.store.read("GRAFT_REASONING_EFFORT"), undefined, "Enter keeps graft's default: nothing saved");
+
+  const noHigh = deps({ env, prompt: scripted([""]), probeEfforts: probeAccepting(["low"]).probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, noHigh), 0);
+  assert.match(noHigh.lines.join("\n"), /note: claude-sonnet-5\.5 does not take graft's default "high"/);
+  assert.doesNotMatch(noHigh.lines.join("\n"), /⚠/);
+
+  const unset = deps({ env, store: memoryStore({ GRAFT_REASONING_EFFORT: "low" }), prompt: scripted(["unset"]), probeEfforts: probeAccepting(["low"]).probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, unset), 0);
+  assert.equal(unset.store.read("GRAFT_REASONING_EFFORT"), undefined, "typing unset goes back to graft's default");
+});
+
+test("graft effort <level>: saved when the model accepts it, refused otherwise", async () => {
+  const probe = probeAccepting(["low", "high"]);
+  const d = deps({ env: { ...ENDPOINT, GRAFT_MODEL: "gpt-5-6-terra" }, probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand("High", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "high");
+  assert.match(d.lines.join("\n"), /✓ gpt-5-6-terra accepts reasoning effort "high"/);
+  assert.match(d.lines.join("\n"), /export GRAFT_REASONING_EFFORT="high"/);
+
+  assert.equal(await runEffortCommand("minimal", {}, d), 1);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "high", "a refused level is not saved");
+  assert.match(d.lines.join("\n"), /✗ gpt-5-6-terra refused reasoning effort "minimal".*nothing saved/);
+
+  assert.equal(await runEffortCommand("minimal", { verify: false }, d), 0, "--no-verify saves without asking");
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "minimal");
+  assert.deepEqual(probe.asked, [["high"], ["minimal"]]);
+});
+
+test("graft effort: aliases, default, --unset, and bad names", async () => {
+  const d = deps({ env: ENDPOINT });
+  assert.equal(await runEffortCommand("off", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "none");
+  // "default" is saved as is: send no effort, unlike removing it (graft's default, high).
+  assert.equal(await runEffortCommand("default", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "default");
+  assert.match(d.lines.join("\n"), /sends no effort; the model uses its own default/);
+  assert.equal(await runEffortCommand("high", {}, d), 0);
+  assert.equal(await runEffortCommand("low", { unset: true }, d), 1, "a level and --unset together");
+  assert.equal(await runEffortCommand(undefined, { unset: true }, d), 0);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), undefined);
+  assert.match(d.lines.join("\n"), /uses graft's default: "high" where the model takes it/);
+  assert.equal(await runEffortCommand("low", {}, d), 0);
+  assert.equal(await runEffortCommand("unset", {}, d), 0, "the word unset is --unset");
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), undefined);
+  assert.equal(await runEffortCommand("very much", {}, d), 1);
+  assert.match(d.lines.join("\n"), /"very much" is not a level name/);
+});
+
+test("graft effort without an API key: saved, marked not verified, no probe", async () => {
+  const probe = probeAccepting([]);
+  const d = deps({ env: { GRAFT_BASE_URL: "https://gw.example/v1" }, probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand("low", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_REASONING_EFFORT"), "low");
+  assert.deepEqual(probe.asked, []);
+  assert.match(d.lines.join("\n"), /not verified: no API key yet/);
+});
+
+test("graft effort --list: asks the model and marks each level", async () => {
+  const probe = probeAccepting(["low", "medium"]);
+  const d = deps({ env: { ...ENDPOINT, GRAFT_MODEL: "o4-mini" }, probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand(undefined, { list: true }, d), 0);
+  assert.deepEqual(probe.asked, [["low", "medium", "high"]]);
+  const out = d.lines.join("\n");
+  assert.match(out, /low\s+✓ accepted/);
+  assert.match(out, /high\s+✗ refused/);
+
+  const broken = deps({
+    env: ENDPOINT,
+    probeEfforts: async (_c, levels) => ({
+      baselineError: "401 invalid key",
+      results: levels.map((level) => ({ level, verdict: "unknown" as const })),
+    }),
+  });
+  assert.equal(await runEffortCommand(undefined, { list: true }, broken), 1);
+  assert.match(broken.lines.join("\n"), /could not ask .*401 invalid key/);
+});
+
+test("graft effort without a terminal: status only, nothing asked or saved", async () => {
+  const d = deps({ store: memoryStore({ GRAFT_REASONING_EFFORT: "high" }), env: ENDPOINT });
+  assert.equal(await runEffortCommand(undefined, {}, d), 0);
+  const out = d.lines.join("\n");
+  assert.match(out, /saved:\s+high/);
+  assert.match(out, /in effect:\s+high \(from the saved GRAFT_REASONING_EFFORT\)/);
+});
+
+test("interactive graft effort: pick by number or name; 0 is the model's default; Ctrl+C cancels", async () => {
+  const probe = probeAccepting(["low", "medium", "high"]);
+  const env = { ...ENDPOINT, GRAFT_MODEL: "claude-sonnet-5.5" };
+  const pick = deps({ env, prompt: scripted(["3"]), probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, pick), 0);
+  assert.equal(pick.store.read("GRAFT_REASONING_EFFORT"), "high");
+
+  const refused = deps({ env, prompt: scripted(["max"]), probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, refused), 1);
+  assert.match(refused.lines.join("\n"), /does not accept "max"/);
+
+  const clear = deps({ env, store: memoryStore({ GRAFT_REASONING_EFFORT: "low" }), prompt: scripted(["0"]), probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, clear), 0);
+  assert.equal(clear.store.read("GRAFT_REASONING_EFFORT"), "default");
+
+  const cancel = deps({ env, prompt: scripted([]), probeEfforts: probe.probeEfforts });
+  assert.equal(await runEffortCommand(undefined, {}, cancel), 130);
 });

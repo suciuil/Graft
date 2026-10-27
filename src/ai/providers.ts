@@ -4,6 +4,7 @@ import type { CruxSummarizer } from "./crux.js";
 import type { ChatModel } from "./llm/types.js";
 import type { ProviderKind } from "./llm/factory.js";
 import { bareModelFallbacks, DEFAULT_BASE_URL } from "./llm/factory.js";
+import { DEFAULT_REASONING_EFFORT, normalizeEffort } from "./llm/effort.js";
 import {
   DATABRICKS_DEFAULT_MODEL,
   databricksHeaders,
@@ -39,6 +40,12 @@ export interface EngineConfig {
   model?: string;
   /** Base URL of the endpoint. Env: GRAFT_BASE_URL, then ANTHROPIC_BASE_URL. Default: the Databricks AI Gateway. */
   baseUrl?: string;
+  /**
+   * Thinking / reasoning effort level for LLM calls. Env: GRAFT_REASONING_EFFORT.
+   * Default: "high" where the model takes it, else the model's own default;
+   * "default" sends no effort at all.
+   */
+  reasoningEffort?: string;
 
   // --- advanced: bring your own components ---
   /** Override the whole transport (skips provider/apiKey/baseUrl). */
@@ -71,6 +78,10 @@ export interface ResolvedConfig {
   bearerAuth?: boolean;
   /** True when the key came from the deprecated OPENROUTER_* fallback. */
   usedLegacyEnv: boolean;
+  /** Thinking / reasoning effort level, normalized; undefined sends none (the model's own default). */
+  reasoningEffort?: string;
+  /** True when {@link reasoningEffort} is graft's default, not the user's: a model that refuses it runs at its own default, quietly. */
+  reasoningEffortDefaulted?: boolean;
   chatModel?: ChatModel;
   synthesizer?: Synthesizer;
   summarizer?: Summarizer;
@@ -114,6 +125,11 @@ export const DEFAULTS = {
 
 /** Merge user config with environment variables and defaults. */
 export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
+  // Nothing set: graft's default level, sent only where the model takes it. A
+  // set value, even "default" (no effort sent), is the user's choice.
+  const rawEffort = config.reasoningEffort ?? env.GRAFT_REASONING_EFFORT;
+  const reasoningEffortDefaulted = !rawEffort?.trim() || rawEffort.trim().toLowerCase() === "unset" || undefined;
+  const reasoningEffort = reasoningEffortDefaulted ? DEFAULT_REASONING_EFFORT : normalizeEffort(rawEffort);
   const providerDefaulted = !config.provider && !env.GRAFT_PROVIDER;
   const provider = config.provider ?? (env.GRAFT_PROVIDER as ProviderKind | undefined) ?? DEFAULTS.provider;
 
@@ -158,6 +174,8 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
       // Databricks takes its personal access token as a Bearer token on every route.
       bearerAuth: apiKey ? true : undefined,
       usedLegacyEnv,
+      reasoningEffort,
+      reasoningEffortDefaulted,
       chatModel: config.chatModel,
       synthesizer: config.synthesizer,
       summarizer: config.summarizer,
@@ -197,6 +215,8 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
     providerFallback,
     bearerAuth: anthropicToken ? true : undefined,
     usedLegacyEnv,
+    reasoningEffort,
+    reasoningEffortDefaulted,
     chatModel: config.chatModel,
     synthesizer: config.synthesizer,
     summarizer: config.summarizer,

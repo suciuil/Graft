@@ -287,6 +287,7 @@ export async function nameReport(
     namer = new ChatNamer(createChatModel({
       provider: cfg.provider, apiKey: cfg.apiKey, model: cfg.model, modelFallbacks: cfg.modelFallbacks,
       baseUrl: cfg.baseUrl, headers: cfg.headers, modelHeaders: cfg.modelHeaders, providerFallback: cfg.providerFallback, bearerAuth: cfg.bearerAuth,
+      reasoningEffort: cfg.reasoningEffort, effortOptional: cfg.reasoningEffortDefaulted,
     }));
   }
 

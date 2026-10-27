@@ -17,7 +17,15 @@ import { fileURLToPath } from "node:url";
 import { Graft } from "./engine.js";
 import { resolveConfig, type EngineConfig } from "./ai/providers.js";
 import { printLlmFailureHints } from "./ai/llm-hints.js";
-import { applySavedSettings, runSettingCommand, terminalPrompter, userEnvStore, type SettingDeps, type SettingOptions } from "./ai/llm-settings.js";
+import {
+  applySavedSettings,
+  runEffortCommand,
+  runSettingCommand,
+  terminalPrompter,
+  userEnvStore,
+  type SettingDeps,
+  type SettingOptions,
+} from "./ai/llm-settings.js";
 import { startProgressLine } from "./util/progress-line.js";
 import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
 import { databricksTokenHint } from "./ai/llm/databricks.js";
@@ -1345,7 +1353,7 @@ flagCommand(
   "index nested Git clones this repo's index does not track into one graph",
 );
 
-/** What the `api url` / `api key` / `model` commands read and write through. */
+/** What the `api url` / `api key` / `model` / `effort` commands read and write through. */
 function settingDeps(): SettingDeps {
   return {
     store: userEnvStore(),
@@ -1388,14 +1396,26 @@ apiCommand
 
 grouped(program.command("model"), GROUP.setup)
   .description(
-    `Show or set GRAFT_MODEL, the model \`graft build --deep\` uses — in a terminal, pick from the models the endpoint serves; ${SAVED_WHERE}`,
+    `Show or set GRAFT_MODEL, the model \`graft build --deep\` uses — in a terminal, pick from the models the endpoint serves, then a thinking effort it accepts; ${SAVED_WHERE}`,
   )
   .argument("[id]", "new model id, e.g. claude-haiku-5.5 (omit to show it, and to pick one in a terminal)")
   .option("--list", "list the models the endpoint serves (mid-tier first) and exit")
   .option("--unset", "remove the saved value")
-  .option("--no-verify", "skip the check against the endpoint after saving")
+  .option("--no-verify", "skip the checks against the endpoint after saving (and the thinking effort step)")
   .action(async (value: string | undefined, opts: SettingOptions) => {
     process.exitCode = await runSettingCommand("model", value, opts, settingDeps());
+  });
+
+grouped(program.command("effort"), GROUP.setup)
+  .description(
+    `Show or set GRAFT_REASONING_EFFORT, the thinking / reasoning effort \`graft build --deep\` asks the model for — in a terminal, pick from the levels the model accepts; ${SAVED_WHERE}`,
+  )
+  .argument("[level]", "none, minimal, low, medium, high, xhigh or max — the model decides which it takes; \"default\" sends none, the model's own default (omit to show it, and to pick one in a terminal)")
+  .option("--list", "ask the model which levels it accepts and exit")
+  .option("--unset", "remove the saved value: graft's default, high where the model takes it, else the model's own default")
+  .option("--no-verify", "save without asking the model whether it accepts the level")
+  .action(async (value: string | undefined, opts: SettingOptions) => {
+    process.exitCode = await runEffortCommand(value, opts, settingDeps());
   });
 
 // `graft env`: every environment variable graft reads that a person would set,
