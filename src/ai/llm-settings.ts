@@ -1,7 +1,8 @@
 /**
- * `graft api url`, `graft api key`, `graft model`: show, pick, and persist the
- * three settings `graft build --deep` needs (GRAFT_BASE_URL, GRAFT_API_KEY,
- * GRAFT_MODEL) as USER environment variables, so every new terminal, IDE and
+ * `graft api url`, `graft api key`, `graft model`, `graft effort`: show, pick,
+ * and persist the settings `graft build --deep` uses (GRAFT_BASE_URL,
+ * GRAFT_API_KEY, GRAFT_MODEL, and the optional GRAFT_REASONING_EFFORT) as USER
+ * environment variables, so every new terminal, IDE and
  * MCP host sees them — not just the current shell, which a child process can
  * never change.
  *
@@ -34,6 +35,17 @@ import {
 } from "./llm-hints.js";
 import { bareModelFallbacks } from "./llm/factory.js";
 import { databricksTokenHint } from "./llm/databricks.js";
+import {
+  candidateEfforts,
+  describeEffort,
+  EFFORT_LEVELS,
+  isEffortName,
+  normalizeEffort,
+  REASONING_EFFORT_ENV,
+  DEFAULT_REASONING_EFFORT,
+  MODEL_DEFAULT_EFFORT,
+} from "./llm/effort.js";
+import { acceptedEfforts, probeEfforts, type EffortProbe } from "./llm-effort.js";
 import { cmd } from "../brand.js";
 
 // ---------------------------------------------------------------------------
@@ -50,8 +62,8 @@ export interface UserEnvStore {
   write(name: string, value: string | undefined): void;
 }
 
-/** The variables `graft api url` / `graft api key` / `graft model` save. */
-export const SAVED_SETTING_NAMES = ["GRAFT_BASE_URL", "GRAFT_API_KEY", "GRAFT_MODEL"] as const;
+/** The variables `graft api url` / `graft api key` / `graft model` / `graft effort` save. */
+export const SAVED_SETTING_NAMES = ["GRAFT_BASE_URL", "GRAFT_API_KEY", "GRAFT_MODEL", REASONING_EFFORT_ENV] as const;
 
 /** Set in the environment to ignore saved settings (the test runner sets it, so a developer's own setup never leaks in). */
 export const NO_SAVED_SETTINGS_ENV = "GRAFT_NO_SAVED_SETTINGS";
@@ -327,6 +339,8 @@ export interface SettingDeps {
   /** Absent when stdin/stdout is not a terminal: nothing is asked. */
   prompt?: Prompter;
   listModels?: (cfg: ResolvedConfig) => Promise<string[]>;
+  /** Asks the endpoint which effort levels the model accepts (tests inject a stub). */
+  probeEfforts?: (cfg: ResolvedConfig, levels: readonly string[]) => Promise<EffortProbe>;
 }
 
 export interface SettingOptions {
@@ -597,6 +611,329 @@ export async function runSettingCommand(
     const env: NodeJS.ProcessEnv = { ...deps.env, [name]: value };
     deps.out("Checking the endpoint…");
     await verifySetting(kind, deps, env);
+    // A new model takes its own set of effort levels: offer them now, or check the saved one still fits.
+    if (kind === "model") await effortAfterModelChange(deps, env);
   }
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Thinking effort: `graft effort`, and the last step of `graft model`
+// ---------------------------------------------------------------------------
+
+const EFFORT_COMMAND = "graft effort";
+
+type EffortChoice = { action: "keep" } | { action: "invalid" } | { action: "set"; level: string | undefined };
+
+function readSavedValue(store: UserEnvStore, name: string): string | undefined {
+  try {
+    return store.read(name);
+  } catch {
+    return undefined;
+  }
+}
+
+/** What graft does with no effort set, in words. */
+const GRAFT_DEFAULT_EFFORT_TEXT = `"${DEFAULT_REASONING_EFFORT}" where the model takes it, else the model's own default`;
+
+/**
+ * The effort `build --deep` would use with `env` (undefined: none sent), where
+ * it comes from, whether it is graft's default rather than the user's choice,
+ * and the config it resolves to.
+ */
+function effortInEffect(
+  deps: SettingDeps,
+  env: NodeJS.ProcessEnv = deps.env,
+): { level?: string; from: string; defaulted: boolean; cfg: ResolvedConfig } {
+  const { env: full, applied } = withSavedSettings(env, deps.store);
+  const cfg = resolveConfig(deps.config, full);
+  const defaulted = !!cfg.reasoningEffortDefaulted;
+  const from = defaulted
+    ? "graft's default"
+    : deps.config.reasoningEffort !== undefined
+      ? "the config"
+      : applied.includes(REASONING_EFFORT_ENV)
+        ? `the saved ${REASONING_EFFORT_ENV}`
+        : REASONING_EFFORT_ENV;
+  return { level: cfg.reasoningEffort, from, defaulted, cfg };
+}
+
+function effortCandidates(cfg: ResolvedConfig): string[] {
+  return candidateEfforts(cfg.model, cfg.provider === "anthropic" ? "anthropic" : "openai");
+}
+
+function runEffortProbe(deps: SettingDeps, cfg: ResolvedConfig, levels: readonly string[]): Promise<EffortProbe> {
+  return (deps.probeEfforts ?? probeEfforts)(cfg, levels);
+}
+
+function printEffortStatus(deps: SettingDeps, saved: string | undefined): void {
+  const { level, from, defaulted, cfg } = effortInEffect(deps);
+  deps.out(`${REASONING_EFFORT_ENV} — thinking / reasoning effort used by \`graft build --deep\``);
+  deps.out(`  current:       ${deps.env[REASONING_EFFORT_ENV] || "not set"}  [this process: shell environment or ./.env]`);
+  deps.out(`  saved:         ${saved || "not set"}  [${deps.store.where}]`);
+  deps.out(
+    `  in effect:     ${
+      defaulted
+        ? `not set — graft's default: ${GRAFT_DEFAULT_EFFORT_TEXT}`
+        : level
+          ? `${level} (from ${from})`
+          : `none sent — the model's own default (from ${from})`
+    }`,
+  );
+  deps.out(`  for model:     ${cfg.model}`);
+}
+
+/**
+ * Interactive pick of an effort level for `cfg.model`: probe the levels its
+ * family usually takes, list the ones the endpoint accepted, and ask.
+ * Throws {@link PromptCancelled} on Ctrl+C.
+ */
+async function chooseEffort(
+  deps: SettingDeps,
+  cfg: ResolvedConfig,
+  prompt: Prompter,
+  current: string | undefined,
+  defaulted = false,
+): Promise<EffortChoice> {
+  const candidates = effortCandidates(cfg);
+  let offered = candidates;
+  let unverified = new Set(candidates);
+  if (!cfg.apiKey) {
+    deps.out(`Not verified (no API key yet). Levels models like ${cfg.model} usually take:`);
+  } else {
+    deps.out(`Asking ${cfg.model} which thinking effort levels it accepts (${candidates.length + 1} tiny requests)…`);
+    const probe = await runEffortProbe(deps, cfg, candidates);
+    if (probe.baselineError) {
+      deps.out(`  could not verify: ${probe.baselineError}`);
+      deps.out(`  Levels models like ${cfg.model} usually take:`);
+    } else {
+      offered = probe.results.filter((r) => r.verdict !== "rejected").map((r) => r.level);
+      unverified = new Set(probe.results.filter((r) => r.verdict === "unknown").map((r) => r.level));
+      if (offered.length === 0) {
+        deps.out(`  ${cfg.model} accepts no thinking effort setting: it always runs at its own default.`);
+        if (!current || defaulted) return { action: "keep" };
+        deps.err(`⚠ the current effort "${current}" would be dropped at build time with a warning.`);
+        const yes = (await prompt.ask(`Use the model's own default instead (${REASONING_EFFORT_ENV}=${MODEL_DEFAULT_EFFORT})? [Y/n] `))
+          .trim()
+          .toLowerCase();
+        return yes === "" || yes.startsWith("y") ? { action: "set", level: MODEL_DEFAULT_EFFORT } : { action: "keep" };
+      }
+      if (acceptedEfforts(probe).length === 0) deps.out("  none could be confirmed; the levels below are unverified.");
+    }
+  }
+
+  const explicitDefault = !current && !defaulted;
+  deps.out("Thinking effort levels:");
+  deps.out(`    0. default — let the model decide (no effort sent)${explicitDefault ? "  (current)" : ""}`);
+  offered.forEach((level, i) => {
+    const tags = [
+      level === current ? (defaulted ? "current, graft's default" : "current") : "",
+      unverified.has(level) && cfg.apiKey ? "not verified" : "",
+    ].filter(Boolean);
+    deps.out(`  ${String(i + 1).padStart(3)}. ${level} — ${describeEffort(level)}${tags.length ? `  (${tags.join(", ")})` : ""}`);
+  });
+  const verified = !!cfg.apiKey && offered.some((l) => !unverified.has(l));
+  if (current && verified && !offered.includes(current)) {
+    if (defaulted) {
+      deps.out(`  note: ${cfg.model} does not take graft's default "${current}"; it runs at its own default unless you pick a level.`);
+    } else {
+      deps.err(`⚠ the current effort "${current}" is not accepted by ${cfg.model}; pick another level, or 0 for the model's default.`);
+    }
+  }
+
+  const keeps = defaulted ? `graft's default (${GRAFT_DEFAULT_EFFORT_TEXT})` : current ? `"${current}"` : "the model's default";
+  const answer = (await prompt.ask(`Pick a number or type a level; Enter keeps ${keeps}: `)).trim();
+  if (!answer) return { action: "keep" };
+  if (/^\d+$/.test(answer)) {
+    const n = Number(answer);
+    if (n === 0) return { action: "set", level: MODEL_DEFAULT_EFFORT };
+    if (n >= 1 && n <= offered.length) return { action: "set", level: offered[n - 1] };
+    deps.err(`✗ ${answer} is not in the list.`);
+    return { action: "invalid" };
+  }
+  // "unset" goes back to graft's default; "default" / "auto" send no effort at all.
+  if (answer.toLowerCase() === "unset") return { action: "set", level: undefined };
+  const level = normalizeEffort(answer);
+  if (level === undefined) return { action: "set", level: MODEL_DEFAULT_EFFORT };
+  if (!isEffortName(level)) {
+    deps.err(`✗ "${answer}" is not a level name (expected one of ${EFFORT_LEVELS.join(", ")}).`);
+    return { action: "invalid" };
+  }
+  if (verified && !offered.includes(level)) {
+    deps.err(`✗ ${cfg.model} does not accept "${level}" — nothing changed.`);
+    return { action: "invalid" };
+  }
+  return { action: "set", level };
+}
+
+/**
+ * Save the effort and say how this terminal picks it up. `undefined` removes
+ * the variable (graft's default applies again); {@link MODEL_DEFAULT_EFFORT}
+ * is saved as is and means "send no effort".
+ */
+function saveEffort(deps: SettingDeps, level: string | undefined): number {
+  const name = REASONING_EFFORT_ENV;
+  try {
+    deps.store.write(name, level);
+  } catch (err) {
+    deps.err(`✗ ${cmd(EFFORT_COMMAND)}: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  deps.out(
+    level === undefined
+      ? `✓ removed ${name} from ${deps.store.where} — \`graft build --deep\` uses graft's default: ${GRAFT_DEFAULT_EFFORT_TEXT}.`
+      : level === MODEL_DEFAULT_EFFORT
+        ? `✓ saved ${name} = ${level} to ${deps.store.where} — \`graft build --deep\` sends no effort; the model uses its own default.`
+        : `✓ saved ${name} = ${level} to ${deps.store.where}.`,
+  );
+  deps.out(`  New terminals see it; restart your IDE so its terminals and MCP servers do too. For this terminal run:`);
+  deps.out(
+    `    ${level === undefined ? (deps.platform === "win32" ? `Remove-Item Env:${name}` : `unset ${name}`) : envSetExample(name, level, deps.platform)}`,
+  );
+  if (dotenvDefines(deps.cwd, name)) deps.out(`  note: ./.env also sets ${name}; an environment variable takes precedence over it.`);
+  return 0;
+}
+
+/**
+ * After `graft model` saved a new model: in a terminal, offer the effort levels
+ * it accepts; otherwise check that a saved effort still fits it.
+ */
+async function effortAfterModelChange(deps: SettingDeps, env: NodeJS.ProcessEnv): Promise<void> {
+  const { level: current, defaulted, cfg } = effortInEffect(deps, env);
+  if (!cfg.apiKey) return;
+  if (deps.prompt) {
+    deps.out("");
+    try {
+      const choice = await chooseEffort(deps, cfg, deps.prompt, current, defaulted);
+      if (choice.action === "set") saveEffort(deps, choice.level);
+      else
+        deps.out(
+          defaulted
+            ? `Kept graft's default thinking effort (${GRAFT_DEFAULT_EFFORT_TEXT}).`
+            : current
+              ? `Kept thinking effort "${current}".`
+              : "Kept the model's default thinking effort.",
+        );
+    } catch (err) {
+      if (!(err instanceof PromptCancelled)) throw err;
+      deps.out("Thinking effort unchanged.");
+    }
+    return;
+  }
+  // Graft's default needs no check: a model that does not take it runs at its own default.
+  if (defaulted) {
+    deps.out(`  Thinking effort: graft's default, ${GRAFT_DEFAULT_EFFORT_TEXT}. Pick a level with \`${cmd(EFFORT_COMMAND)}\`.`);
+    return;
+  }
+  if (!current) {
+    deps.out(`  Thinking effort: the model's default. Pick a level with \`${cmd(EFFORT_COMMAND)}\`.`);
+    return;
+  }
+  const r = (await runEffortProbe(deps, cfg, [current])).results[0];
+  if (r?.verdict === "rejected") {
+    deps.err(
+      `⚠ ${cfg.model} refused reasoning effort "${current}" (${REASONING_EFFORT_ENV}); \`graft build --deep\` would drop it. Run \`${cmd(EFFORT_COMMAND)}\` to pick a level it accepts.`,
+    );
+  } else if (r?.verdict === "accepted") {
+    deps.out(`  ✓ ${cfg.model} accepts reasoning effort "${current}".`);
+  }
+}
+
+/**
+ * `graft effort [level]`: show, pick (interactive), set after checking the
+ * model accepts it, list, or unset. Returns the process exit code.
+ */
+export async function runEffortCommand(levelArg: string | undefined, opts: SettingOptions, deps: SettingDeps): Promise<number> {
+  const command = cmd(EFFORT_COMMAND);
+  const { cfg, defaulted } = effortInEffect(deps);
+
+  if (opts.list) {
+    const candidates = effortCandidates(cfg);
+    if (opts.verify === false || !cfg.apiKey) {
+      deps.out(`Levels models like ${cfg.model} usually take (not verified${cfg.apiKey ? "" : ": no API key yet"}):`);
+      for (const l of candidates) deps.out(`  ${l} — ${describeEffort(l)}`);
+      return 0;
+    }
+    const probe = await runEffortProbe(deps, cfg, candidates);
+    if (probe.baselineError) {
+      deps.err(`✗ could not ask ${cfg.model}: ${probe.baselineError}`);
+      deps.err(`  Levels models like it usually take: ${candidates.join(", ")}.`);
+      return 1;
+    }
+    deps.out(`Thinking effort levels for ${cfg.model}:`);
+    for (const r of probe.results) {
+      const mark = r.verdict === "accepted" ? "✓ accepted" : r.verdict === "rejected" ? "✗ refused" : `? not verified (${r.detail ?? "no answer"})`;
+      deps.out(`  ${r.level.padEnd(8)} ${mark}  — ${describeEffort(r.level)}`);
+    }
+    if (!probe.results.some((r) => r.verdict !== "rejected")) {
+      deps.out(`${cfg.model} accepts no thinking effort setting: it always runs at its own default.`);
+    }
+    return 0;
+  }
+
+  if (opts.unset && levelArg !== undefined) {
+    deps.err(`${command}: pass a level or --unset, not both`);
+    return 1;
+  }
+  if (opts.unset) return saveEffort(deps, undefined);
+
+  if (levelArg === undefined) {
+    printEffortStatus(deps, readSavedValue(deps.store, REASONING_EFFORT_ENV));
+    if (!deps.prompt) {
+      deps.out(
+        `Set it with \`${command} <level>\` (${EFFORT_LEVELS.join(", ")} — which ones depend on the model; \`${command} --list\` asks it), \`${command} default\` to send none, or \`${command} --unset\` for graft's default (${GRAFT_DEFAULT_EFFORT_TEXT}).`,
+      );
+      return 0;
+    }
+    deps.out("");
+    let choice: EffortChoice;
+    try {
+      choice = await chooseEffort(deps, cfg, deps.prompt, cfg.reasoningEffort, defaulted);
+    } catch (err) {
+      if (err instanceof PromptCancelled) {
+        deps.out("Cancelled — nothing changed.");
+        return 130;
+      }
+      throw err;
+    }
+    if (choice.action === "invalid") return 1;
+    if (choice.action === "keep") {
+      deps.out("Kept the current value.");
+      return 0;
+    }
+    return saveEffort(deps, choice.level);
+  }
+
+  // "unset" is --unset spelled as a level: back to graft's default.
+  if (levelArg.trim().toLowerCase() === "unset") return saveEffort(deps, undefined);
+  const level = normalizeEffort(levelArg);
+  if (level === undefined) return saveEffort(deps, MODEL_DEFAULT_EFFORT);
+  if (!isEffortName(level)) {
+    deps.err(`✗ ${command}: "${levelArg}" is not a level name (expected one of ${EFFORT_LEVELS.join(", ")})`);
+    return 1;
+  }
+  if (!(EFFORT_LEVELS as readonly string[]).includes(level)) {
+    deps.out(`  note: graft does not know the level "${level}"; it is sent to the model as typed.`);
+  }
+  if (opts.verify !== false) {
+    if (!cfg.apiKey) {
+      deps.out(`  not verified: no API key yet — set one with \`${cmd(SETTINGS.key.command)}\`.`);
+    } else {
+      deps.out(`Checking that ${cfg.model} accepts reasoning effort "${level}"…`);
+      const probe = await runEffortProbe(deps, cfg, [level]);
+      const r = probe.results[0];
+      if (r?.verdict === "rejected") {
+        deps.err(`✗ ${cfg.model} refused reasoning effort "${level}" (${r.detail ?? "rejected"}) — nothing saved.`);
+        deps.err(`  Run \`${command} --list\` to see the levels it accepts.`);
+        return 1;
+      }
+      if (r?.verdict === "accepted") deps.out(`  ✓ ${cfg.model} accepts reasoning effort "${level}".`);
+      else {
+        deps.out(
+          `  not verified: ${probe.baselineError ?? r?.detail ?? "no answer"}. Saving it anyway — a level the model refuses is dropped at build time with a warning.`,
+        );
+      }
+    }
+  }
+  return saveEffort(deps, level);
 }

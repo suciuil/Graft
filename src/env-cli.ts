@@ -184,6 +184,18 @@ export const ENV_VARS: EnvVar[] = [
     examples: ["graft model"],
   },
   {
+    name: "GRAFT_REASONING_EFFORT",
+    command: "effort",
+    builtin: true,
+    title: "Show or set GRAFT_REASONING_EFFORT: the thinking effort `graft build --deep` asks the model for",
+    help:
+      "The thinking / reasoning effort `graft build --deep` asks the model for: none, minimal, low, medium, high, " +
+      "xhigh or max, of which each model accepts its own subset; \"default\" sends none.",
+    unset: "high where the model takes it, else the model's own default",
+    kind: "text",
+    examples: ["graft effort"],
+  },
+  {
     name: "GRAFT_PROVIDER",
     command: "api provider",
     title: "Show or set GRAFT_PROVIDER: the wire format spoken to the LLM endpoint",

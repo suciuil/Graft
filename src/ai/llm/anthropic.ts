@@ -37,6 +37,27 @@ export interface AnthropicChatModelOptions {
   modelHeaders?: (model: string) => Record<string, string> | undefined;
   /** Inject a pre-built client (tests pass a stub; production omits it). */
   client?: Anthropic;
+  /**
+   * Thinking effort (`GRAFT_REASONING_EFFORT`), sent as the Messages API's
+   * `output_config.effort`. Unset: the field is omitted, the model's default.
+   */
+  reasoningEffort?: string;
+  /** Throw when the endpoint rejects the effort instead of dropping it. Only the probe sets this. */
+  strictEffort?: boolean;
+  /**
+   * The effort is graft's default ("high" while GRAFT_REASONING_EFFORT is not
+   * set), not the user's choice: any 400 other than a forced-tool refusal drops
+   * it for the rest of the run, with a one-line note instead of a warning.
+   */
+  effortOptional?: boolean;
+}
+
+type Effort = NonNullable<NonNullable<Anthropic.MessageCreateParamsNonStreaming["output_config"]>["effort"]>;
+
+/** The endpoint refused the effort graft sent (the level, or effort at all, on this model). */
+function isRejectedEffort(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status;
+  return status === 400 && /effort|output_config/i.test(String((err as Error)?.message ?? ""));
 }
 
 type CacheControl = { cache_control: { type: "ephemeral" } } | Record<string, never>;
@@ -71,8 +92,15 @@ export class AnthropicChatModel implements ChatModel {
   private modelIdx = 0;
   // Sticky: once the endpoint refuses a forced tool_choice, later calls ask for the tool instead.
   private forcedToolUnsupported = false;
+  /** The configured effort, or undefined once the endpoint refused it (non-strict). */
+  private effort: string | undefined;
+  private strictEffort: boolean;
+  private effortOptional: boolean;
 
   constructor(opts: AnthropicChatModelOptions) {
+    this.effort = opts.reasoningEffort?.trim() || undefined;
+    this.strictEffort = opts.strictEffort ?? false;
+    this.effortOptional = opts.effortOptional ?? false;
     this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
     this.modelHeaders = opts.modelHeaders;
@@ -144,6 +172,7 @@ export class AnthropicChatModel implements ChatModel {
       ...(system.length ? { system } : {}),
     };
     // temperature is intentionally NOT forwarded — current models reject it.
+    if (this.effort) params.output_config = { effort: this.effort as Effort };
 
     const fmt = req.responseFormat ?? { kind: "text" };
     if (fmt.kind === "json") {
@@ -170,10 +199,10 @@ export class AnthropicChatModel implements ChatModel {
    */
   private async sendWithToolChoiceCompat(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Messages.Message> {
     const forced = params.tool_choice?.type === "tool" ? params.tool_choice.name : undefined;
-    if (!forced) return this.send(params);
+    if (!forced) return this.sendWithEffortCompat(params);
     if (!this.forcedToolUnsupported) {
       try {
-        return await this.send(params);
+        return await this.sendWithEffortCompat(params);
       } catch (err) {
         if (!isRejectedForcedToolChoice(err)) throw err;
         this.forcedToolUnsupported = true;
@@ -181,7 +210,35 @@ export class AnthropicChatModel implements ChatModel {
     }
     const nudge: Anthropic.TextBlockParam = { type: "text", text: `Respond only by calling the \`${forced}\` tool; do not answer in plain text.` };
     const system = typeof params.system === "string" ? [{ type: "text" as const, text: params.system }] : (params.system ?? []);
-    return this.send({ ...params, tool_choice: { type: "auto" }, system: [...system, nudge] });
+    return this.sendWithEffortCompat({ ...params, tool_choice: { type: "auto" }, system: [...system, nudge] });
+  }
+
+  /**
+   * One send; when the endpoint refuses the configured effort, the probe gets
+   * the error and a build warns once and carries on at the model's default.
+   * Graft's own default effort is dropped on any other 400 too (a gateway
+   * that does not know `output_config` says so in words no check knows),
+   * with a quiet note: the user never asked for it.
+   */
+  private async sendWithEffortCompat(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Messages.Message> {
+    try {
+      return await this.send(params);
+    } catch (err) {
+      if (!params.output_config?.effort || this.strictEffort) throw err;
+      const optionalDrop =
+        this.effortOptional && (err as { status?: unknown })?.status === 400 && !isRejectedForcedToolChoice(err);
+      if (!isRejectedEffort(err) && !optionalDrop) throw err;
+      if (this.effort) {
+        console.error(
+          this.effortOptional
+            ? `· ${this.label}: the model does not take thinking effort "${this.effort}" (graft's default) — using its own default.`
+            : `⚠ ${this.label}: the endpoint refused thinking effort "${this.effort}" — using the model's default for the rest of this run. Run \`graft effort\` to pick a level this model accepts.`,
+        );
+        this.effort = undefined;
+      }
+      const { output_config: _dropped, ...rest } = params;
+      return this.send(rest);
+    }
   }
 
   /** Reconstruct an assistant turn, replaying the original blocks when we made them. */

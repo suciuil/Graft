@@ -732,3 +732,230 @@ test("anthropic: json mode forces emit_json and returns serialized text", async 
   assert.equal(res.text, '{"correct":true}');
   assert.equal(res.toolCalls.length, 0);
 });
+
+// --- Thinking / reasoning effort ---------------------------------------------
+
+/** Run `fn` with console.error captured; returns what it printed. */
+async function captureErrors(fn: () => Promise<unknown>): Promise<string[]> {
+  const printed: string[] = [];
+  const orig = console.error;
+  console.error = (...args: unknown[]) => void printed.push(args.map(String).join(" "));
+  try {
+    await fn();
+  } finally {
+    console.error = orig;
+  }
+  return printed;
+}
+
+/** An OpenAI stub that records every request and answers through `answer` (throw to refuse). */
+function scriptedOpenAI(answer: (params: any) => unknown) {
+  const calls: any[] = [];
+  const client = {
+    chat: { completions: { create: async (params: any) => (calls.push(params), answer(params)) } },
+  } as unknown as OpenAI;
+  return { client, calls };
+}
+
+const openAiError = (status: number, message: string) => new OpenAI.APIError(status, { message }, message, new Headers());
+const XHIGH_REFUSED = "Unsupported value: 'reasoning_effort' does not support 'xhigh' with this model.";
+
+test("openai effort: sent as reasoning_effort; omitted when unset", async () => {
+  const { client, box } = fakeOpenAI(openAiResp());
+  await new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client, reasoningEffort: " low " }).create({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal(box.params.reasoning_effort, "low");
+  const plain = fakeOpenAI(openAiResp());
+  await new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client: plain.client }).create({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal("reasoning_effort" in plain.box.params, false);
+});
+
+test("openai effort: a refused level warns once and is dropped for the rest of the run", async () => {
+  const { client, calls } = scriptedOpenAI((p) => {
+    if (p.reasoning_effort === "xhigh") throw openAiError(400, XHIGH_REFUSED);
+    return openAiResp();
+  });
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client, reasoningEffort: "xhigh" });
+  const printed = await captureErrors(async () => {
+    assert.equal((await m.create({ messages: [{ role: "user", content: "a" }] })).text, "hello");
+    await m.create({ messages: [{ role: "user", content: "b" }] });
+  });
+  assert.equal(printed.length, 1);
+  assert.match(printed[0]!, /refused reasoning effort "xhigh".*graft effort/);
+  assert.deepEqual(
+    calls.map((c) => c.reasoning_effort),
+    ["xhigh", undefined, undefined],
+  );
+});
+
+test("openai effort: strict (the probe) throws the refusal instead", async () => {
+  const { client } = scriptedOpenAI(() => {
+    throw openAiError(400, XHIGH_REFUSED);
+  });
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client, reasoningEffort: "xhigh", strictEffort: true });
+  await assert.rejects(() => m.create({ messages: [{ role: "user", content: "hi" }] }), /does not support 'xhigh'/);
+});
+
+test("openai effort: a temperature refusal is not mistaken for a refused level", async () => {
+  const msg = "Unsupported value: 'temperature' does not support 0 with this model (reasoning models take only 1).";
+  const { client, calls } = scriptedOpenAI((p) => {
+    if (p.temperature !== undefined) throw openAiError(400, msg);
+    return openAiResp();
+  });
+  const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client, reasoningEffort: "high" });
+  await m.create({ messages: [{ role: "user", content: "hi" }], temperature: 0 });
+  assert.equal(calls.at(-1).reasoning_effort, "high");
+  assert.equal(calls.at(-1).temperature, undefined);
+});
+
+const RECORD_TOOL = { name: "record", description: "d", parameters: { type: "object", properties: { a: { type: "string" } } } };
+
+for (const refusal of [
+  "Function tools with reasoning_effort are not supported for gpt-x in /v1/chat/completions. To resolve, set reasoning_effort to 'none'.",
+  "Thinking may not be enabled when tool_choice forces tool use.",
+]) {
+  test(`openai effort: forced tool clashes with the chosen effort — structured output keeps the effort (${refusal.slice(0, 24)}…)`, async () => {
+    const { client, calls } = scriptedOpenAI((p) => {
+      if (p.tools) throw openAiError(400, refusal);
+      return openAiResp({ choices: [{ message: { content: '{"a":"x"}', tool_calls: [] }, finish_reason: "stop" }] });
+    });
+    const m = new OpenAIChatModel({ apiKey: "x", model: "gpt-x", client, reasoningEffort: "high" });
+    const printed = await captureErrors(async () => {
+      const res = await m.create({
+        messages: [{ role: "user", content: "hi" }],
+        tools: [RECORD_TOOL],
+        responseFormat: { kind: "tool", name: "record" },
+      });
+      assert.deepEqual(res.toolCalls?.[0]?.args, { a: "x" });
+    });
+    assert.deepEqual(printed, [], "no warning: the effort was not refused");
+    const last = calls.at(-1);
+    assert.equal(last.tools, undefined);
+    assert.ok(last.response_format, "the tool's arguments asked for as structured output");
+    assert.equal(last.reasoning_effort, "high");
+  });
+}
+
+test("anthropic effort: sent as output_config.effort; a refused level is dropped", async () => {
+  const { client, box } = fakeAnthropic(anthropicResp());
+  await new AnthropicChatModel({ apiKey: "x", model: "claude-x", client, reasoningEffort: "max" }).create({ messages: [{ role: "user", content: "hi" }] });
+  assert.deepEqual(box.params.output_config, { effort: "max" });
+
+  const calls: any[] = [];
+  const refusing = {
+    messages: {
+      create: async (p: any) => {
+        calls.push(p);
+        if (p.output_config) throw new AnthropicSDK.APIError(400, undefined, "output_config.effort: 'max' is not supported for this model", new Headers());
+        return anthropicResp();
+      },
+    },
+  } as unknown as Anthropic;
+  const m = new AnthropicChatModel({ apiKey: "x", model: "claude-x", client: refusing, reasoningEffort: "max" });
+  const printed = await captureErrors(async () => {
+    await m.create({ messages: [{ role: "user", content: "a" }] });
+    await m.create({ messages: [{ role: "user", content: "b" }] });
+  });
+  assert.equal(printed.length, 1);
+  assert.match(printed[0]!, /refused thinking effort "max"/);
+  assert.deepEqual(
+    calls.map((c) => c.output_config?.effort),
+    ["max", undefined, undefined],
+  );
+
+  const strict = new AnthropicChatModel({ apiKey: "x", model: "claude-x", client: refusing, reasoningEffort: "max", strictEffort: true });
+  await assert.rejects(() => strict.create({ messages: [{ role: "user", content: "hi" }] }), /not supported/);
+});
+
+test("resolveConfig: GRAFT_REASONING_EFFORT is normalized; a flag wins; unset means graft's default high; default sends none", () => {
+  assert.equal(resolveConfig({}, { GRAFT_REASONING_EFFORT: "Off" }).reasoningEffort, "none");
+  assert.equal(resolveConfig({ reasoningEffort: "low" }, { GRAFT_REASONING_EFFORT: "high" }).reasoningEffort, "low");
+  // "default" is the user's choice: no effort sent, and not graft's default either.
+  const modelDefault = resolveConfig({}, { GRAFT_REASONING_EFFORT: "default" });
+  assert.equal(modelDefault.reasoningEffort, undefined);
+  assert.equal(modelDefault.reasoningEffortDefaulted, undefined);
+  // Nothing set (or blank, or "unset"): graft asks for high, optionally.
+  for (const env of [{}, { GRAFT_REASONING_EFFORT: "  " }, { GRAFT_REASONING_EFFORT: "unset" }]) {
+    const cfg = resolveConfig({}, env);
+    assert.equal(cfg.reasoningEffort, "high");
+    assert.equal(cfg.reasoningEffortDefaulted, true);
+  }
+  assert.equal(resolveConfig({}, { GRAFT_REASONING_EFFORT: "high" }).reasoningEffortDefaulted, undefined);
+});
+
+test("graft's default effort: a model that refuses it runs at its own default, with a note, not a warning", async () => {
+  // OpenAI wire, refusal worded in a way no specific check knows.
+  const sent: Array<Record<string, unknown>> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (p: Record<string, unknown>) => {
+          sent.push(p);
+          if (p.reasoning_effort !== undefined) throw openAiError(400, "Extra inputs are not permitted");
+          return { choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+        },
+      },
+    },
+  } as unknown as OpenAI;
+  const m = new OpenAIChatModel({ apiKey: "x", model: "m", client, reasoningEffort: "high", effortOptional: true });
+  const printed = await captureErrors(async () => {
+    assert.equal((await m.create({ messages: [{ role: "user", content: "a" }], maxTokens: 100 })).text, "ok");
+    await m.create({ messages: [{ role: "user", content: "b" }], maxTokens: 100 });
+  });
+  assert.equal(printed.length, 1);
+  assert.match(printed[0]!, /^· .*graft's default/);
+  assert.doesNotMatch(printed[0]!, /⚠/);
+  // Room for reasoning on the first try; the caller's own request once the effort is gone.
+  assert.deepEqual(
+    sent.map((p) => [p.reasoning_effort, p.max_tokens]),
+    [["high", 8292], [undefined, 100], [undefined, 100]],
+  );
+
+  // The same unknown refusal for an effort the user chose is the caller's error.
+  const chosen = new OpenAIChatModel({ apiKey: "x", model: "m", client, reasoningEffort: "high" });
+  await assert.rejects(() => chosen.create({ messages: [{ role: "user", content: "a" }] }), /Extra inputs/);
+
+  // Anthropic wire: a gateway that does not know output_config.
+  const calls: Array<{ output_config?: { effort?: string } }> = [];
+  const anthropic = {
+    messages: {
+      create: async (p: { output_config?: { effort?: string } }) => {
+        calls.push(p);
+        if (p.output_config) throw Object.assign(new Error("400 Unknown field"), { status: 400 });
+        return { content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 }, stop_reason: "end_turn" };
+      },
+    },
+  } as unknown as Anthropic;
+  const a = new AnthropicChatModel({ apiKey: "x", model: "claude-x", client: anthropic, reasoningEffort: "high", effortOptional: true });
+  const notes = await captureErrors(async () => {
+    await a.create({ messages: [{ role: "user", content: "a" }] });
+    await a.create({ messages: [{ role: "user", content: "b" }] });
+  });
+  assert.equal(notes.length, 1);
+  assert.match(notes[0]!, /^· .*graft's default/);
+  assert.deepEqual(calls.map((c) => c.output_config?.effort), ["high", undefined, undefined]);
+});
+
+test("reasoning effort on the OpenAI wire: the token cap leaves room for reasoning, and falls back when too large", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (p: Record<string, unknown>) => {
+          sent.push(p);
+          if ((p.max_tokens as number) > 4096) throw openAiError(400, "max_tokens is too large: 10240. This model supports at most 4096 completion tokens.");
+          return { choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+        },
+      },
+    },
+  } as unknown as OpenAI;
+  const m = new OpenAIChatModel({ apiKey: "x", model: "m", client, reasoningEffort: "high" });
+  const printed = await captureErrors(async () => {
+    await m.create({ messages: [{ role: "user", content: "a" }], maxTokens: 2048 });
+    await m.create({ messages: [{ role: "user", content: "b" }], maxTokens: 2048 });
+  });
+  assert.deepEqual(printed, []);
+  assert.deepEqual(
+    sent.map((p) => [p.reasoning_effort, p.max_tokens]),
+    [["high", 10240], ["high", 2048], ["high", 2048]],
+  );
+});

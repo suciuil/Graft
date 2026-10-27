@@ -22,6 +22,7 @@
 import OpenAI from "openai";
 import { transportRetries } from "./types.js";
 import { unwrapMarkdownFence } from "./recover-tool.js";
+import { reasoningTokenAllowance } from "./effort.js";
 import type { ChatModel, ChatRequest, ChatResponse, Message, ToolCall, ToolSpec, Usage } from "./types.js";
 
 const PROVIDER = "openai";
@@ -90,6 +91,25 @@ export interface OpenAIChatModelOptions {
   client?: OpenAI;
   /** Wait between retries of a 200-that-is-an-error (tests pass a no-op). */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Thinking / reasoning effort sent as `reasoning_effort` on every request
+   * (`GRAFT_REASONING_EFFORT`). Unset: the field is omitted and the model uses
+   * its own default.
+   */
+  reasoningEffort?: string;
+  /**
+   * Throw when the endpoint rejects {@link reasoningEffort} instead of warning
+   * once and dropping it. Only the probe behind `graft effort` sets this.
+   */
+  strictEffort?: boolean;
+  /**
+   * {@link reasoningEffort} is graft's default ("high" while
+   * GRAFT_REASONING_EFFORT is not set), not the user's choice: a model that
+   * does not take it runs at its own default. Any 400 left after the other
+   * remedies drops it for the rest of the run, with a one-line note instead of
+   * a warning.
+   */
+  effortOptional?: boolean;
 }
 
 type ChatParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
@@ -200,6 +220,54 @@ function isRejectedReasoningNone(err: unknown): boolean {
     err.status === 400 &&
     /reasoning_effort[^.]*does not support 'none'/i.test(String((err as { message?: string }).message ?? ""))
   );
+}
+
+/**
+ * The endpoint refused the `reasoning_effort` graft sent: the level is not one
+ * this model takes ("Unsupported value: 'reasoning_effort' does not support
+ * 'xhigh' with this model"), or the model takes no effort at all
+ * ("Unrecognized request argument supplied: reasoning_effort",
+ * "reasoning is not supported"). A 400 naming reasoning is enough, unless it
+ * names another parameter graft has its own remedy for: a thinking/tool_choice
+ * clash (below) is about the forced tool, not the level.
+ */
+export function isRejectedReasoningEffort(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status;
+  if (status !== 400 && status !== 422) return false;
+  const message = String((err as { message?: string })?.message ?? "");
+  return (
+    /reasoning|thinking/i.test(message) &&
+    !/tool_choice/i.test(message) &&
+    !isRejectedMaxTokens(err) &&
+    !isRejectedTemperature(err) &&
+    !isMaxTokensTooLarge(err)
+  );
+}
+
+/** The token cap is above what the model can write ("max_tokens is too large", "… > 32000, which is the maximum allowed"). */
+function isMaxTokensTooLarge(err: unknown): boolean {
+  const message = String((err as { message?: string })?.message ?? "");
+  return (
+    (err as { status?: unknown })?.status === 400 &&
+    /max_(completion_)?tokens/i.test(message) &&
+    /too large|at most|maximum allowed|exceeds?\b|supports up to/i.test(message)
+  );
+}
+
+/** A request the endpoint refused as malformed, whatever the wording. */
+function isBadRequest(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status;
+  return status === 400 || status === 422;
+}
+
+/**
+ * Thinking — switched on by the effort graft sent — rules out a forced tool:
+ * Claude behind an OpenAI-compatible gateway answers "Thinking may not be
+ * enabled when tool_choice forces tool use".
+ */
+function isThinkingToolChoiceConflict(err: unknown): boolean {
+  const message = String((err as { message?: string })?.message ?? "");
+  return (err as { status?: unknown })?.status === 400 && /tool_choice/i.test(message) && /thinking|reasoning/i.test(message);
 }
 
 /**
@@ -514,8 +582,19 @@ export class OpenAIChatModel implements ChatModel {
   /** Key into {@link forcedToolChoiceIgnored}: one entry per endpoint + model. */
   private choiceKey: string;
   private forcedIgnored: boolean;
+  /** The configured `reasoning_effort`, or undefined once the endpoint refused it (non-strict). */
+  private effort: string | undefined;
+  private strictEffort: boolean;
+  private effortOptional: boolean;
+  // Sticky: the endpoint refused the larger token cap that leaves room for reasoning.
+  private reasoningAllowanceRefused = false;
+  // Sticky: toolsAsResponseFormat was turned on only to keep the effort alongside a forced tool.
+  private structuredForEffort = false;
 
   constructor(opts: OpenAIChatModelOptions) {
+    this.effort = opts.reasoningEffort?.trim() || undefined;
+    this.strictEffort = opts.strictEffort ?? false;
+    this.effortOptional = opts.effortOptional ?? false;
     this.models = [opts.model, ...(opts.modelFallbacks ?? []).filter((m) => m && m !== opts.model)];
     this.label = opts.label ?? `${PROVIDER}:${opts.model}`;
     this.baseUrls = baseUrlCandidates(opts.baseUrl);
@@ -549,6 +628,7 @@ export class OpenAIChatModel implements ChatModel {
     const params: ChatParams = { model: this.models[0]!, messages };
     if (req.temperature !== undefined) params.temperature = req.temperature;
     if (req.maxTokens !== undefined) params.max_tokens = req.maxTokens;
+    if (this.effort) params.reasoning_effort = this.effort as ChatParams["reasoning_effort"];
 
     const fmt = req.responseFormat ?? { kind: "text" };
     // The tool whose call answers the request, and the format that needs one.
@@ -758,15 +838,37 @@ export class OpenAIChatModel implements ChatModel {
     let attempt = params;
     let structured: string | undefined;
     const forced = forcedSingleTool(params);
+    // The forced tool as structured output, keeping a configured effort: only
+    // function tools clash with reasoning, a response format does not.
+    const asStructured = (p: ChatParams, tool: OpenAI.Chat.Completions.ChatCompletionFunctionTool): ChatParams => {
+      const rf = asResponseFormat(p, tool);
+      return this.effort ? ({ ...rf, reasoning_effort: this.effort } as ChatParams) : rf;
+    };
     if (this.toolsAsResponseFormat && forced) {
-      attempt = asResponseFormat(params, forced);
+      attempt = asStructured(params, forced);
       structured = forced.function.name;
     } else if (this.forcedToolUnsupported) {
       attempt = asAutoToolChoice(params) ?? params;
     }
+    // Reasoning tokens count against the cap on this wire: leave room for them
+    // on top of what the caller asked for, so thinking cannot crowd out the answer.
+    let allowance =
+      this.effort && !this.reasoningAllowanceRefused && attempt.max_tokens != null ? reasoningTokenAllowance(this.effort) : 0;
+    if (allowance) attempt = { ...attempt, max_tokens: attempt.max_tokens! + allowance };
+    // Stop sending the effort: a warning for the user's own level, a note for graft's default.
+    const dropEffort = (p: ChatParams): ChatParams => {
+      console.error(
+        this.effortOptional
+          ? `· ${this.label}: the model does not take thinking effort "${this.effort}" (graft's default) — using its own default.`
+          : `⚠ ${this.label}: the endpoint refused reasoning effort "${this.effort}" — using the model's default for the rest of this run. Run \`graft effort\` to pick a level this model accepts.`,
+      );
+      this.effort = undefined;
+      const { reasoning_effort: _dropped, ...rest } = p;
+      return rest as ChatParams;
+    };
     const finish = (resp: OpenAI.Chat.Completions.ChatCompletion) => (structured ? asToolCallResponse(resp, structured) : resp);
     // Bounded: one retry per known incompatibility below, never an open loop.
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 9; i++) {
       try {
         return finish(await client.chat.completions.create(attempt));
       } catch (err) {
@@ -777,12 +879,53 @@ export class OpenAIChatModel implements ChatModel {
           attempt = { ...attempt, reasoning_effort: "none" } as ChatParams;
           continue;
         }
+        // The same refusal with an effort the user chose: keep the effort and
+        // ask for the forced tool's arguments as structured output instead.
+        // Only with no single forced tool to rewrite does reasoning go off.
+        if (
+          (isRejectedToolsWithReasoning(err) || isThinkingToolChoiceConflict(err)) &&
+          this.effort &&
+          attempt.reasoning_effort === this.effort &&
+          this.effort !== "none"
+        ) {
+          if (forced && !structured) {
+            attempt = asStructured(attempt, forced);
+            structured = forced.function.name;
+            this.toolsAsResponseFormat = true;
+            this.structuredForEffort = true;
+            continue;
+          }
+          if (!forced) {
+            attempt = { ...attempt, reasoning_effort: "none" } as ChatParams;
+            continue;
+          }
+        }
         // Reasoning cannot be turned off either: ask for the forced tool's
         // arguments as structured output instead, and keep doing so.
-        if (isRejectedReasoningNone(err) && attempt.reasoning_effort === "none" && forced && !structured) {
-          attempt = asResponseFormat(attempt, forced);
+        if (isRejectedReasoningNone(err) && attempt.reasoning_effort === "none" && this.effort !== "none" && forced && !structured) {
+          attempt = asStructured(attempt, forced);
           structured = forced.function.name;
           this.toolsAsResponseFormat = true;
+          continue;
+        }
+        // The configured effort itself was refused: the level is not one this
+        // model takes. The probe wants that as an error; a build warns once and
+        // carries on at the model's default rather than failing every call.
+        if (this.effort && attempt.reasoning_effort === this.effort && isRejectedReasoningEffort(err)) {
+          if (this.strictEffort) throw err;
+          attempt = dropEffort(attempt);
+          continue;
+        }
+        // The room left for reasoning is more than the model can write: back to the caller's cap.
+        if (allowance && isMaxTokensTooLarge(err)) {
+          this.reasoningAllowanceRefused = true;
+          attempt =
+            attempt.max_tokens != null
+              ? { ...attempt, max_tokens: attempt.max_tokens - allowance }
+              : attempt.max_completion_tokens != null
+                ? { ...attempt, max_completion_tokens: attempt.max_completion_tokens - allowance }
+                : attempt;
+          allowance = 0;
           continue;
         }
         // Checked before the object-form fallback below, which would only swap in
@@ -810,6 +953,31 @@ export class OpenAIChatModel implements ChatModel {
         if (isRejectedTemperature(err) && attempt.temperature !== undefined) {
           const { temperature, ...rest } = attempt;
           attempt = rest as ChatParams;
+          continue;
+        }
+        // Graft's default effort, and a refusal nothing above explains: the
+        // model may not take an effort at all, in words no check knows. Try once
+        // without it — the caller's own request, as before effort existed —
+        // and keep going without it when that works.
+        if (this.effortOptional && !this.strictEffort && this.effort && attempt.reasoning_effort === this.effort && isBadRequest(err)) {
+          if (structured && this.structuredForEffort) {
+            // The structured-output rewrite was only there to keep the effort.
+            structured = undefined;
+            this.toolsAsResponseFormat = false;
+            this.structuredForEffort = false;
+            attempt = dropEffort(params);
+          } else {
+            attempt = dropEffort(attempt);
+          }
+          if (allowance) {
+            const cap = attempt.max_tokens ?? attempt.max_completion_tokens;
+            if (cap != null && cap > (params.max_tokens ?? 0)) {
+              attempt = attempt.max_tokens != null
+                ? { ...attempt, max_tokens: attempt.max_tokens - allowance }
+                : { ...attempt, max_completion_tokens: attempt.max_completion_tokens! - allowance };
+            }
+            allowance = 0;
+          }
           continue;
         }
         throw err;
