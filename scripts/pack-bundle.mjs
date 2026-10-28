@@ -55,7 +55,22 @@ function npm(args, cwd) {
   const cli =
     fromNpm?.endsWith(".js") && existsSync(fromNpm) ? fromNpm : roots.map((r) => join(r, "bin", "npm-cli.js")).find((p) => existsSync(p));
   const [exe, argv] = cli ? [process.execPath, [cli, ...args]] : ["npm", args];
-  return spawnSync(exe, argv, { cwd, stdio: "inherit", shell: !cli && process.platform === "win32" });
+  return spawnSync(exe, argv, { cwd, env: npmEnv(), stdio: "inherit", shell: !cli && process.platform === "win32" });
+}
+
+/**
+ * The environment for a nested npm. `npm run pack:bundle` exports every non-default
+ * config as an `npm_config_*` variable, so an `allow-scripts` set in the user's or
+ * global .npmrc reaches the child as `npm_config_allow_scripts`. npm 12 treats that env
+ * layer like the `--allow-scripts` flag and rejects the project-scoped `npm install` in
+ * the staging tree with EALLOWSCRIPTS ("--allow-scripts is not allowed in project-scoped
+ * installs"). Dropping the variable lets the child read the same setting from .npmrc,
+ * where it is allowed — and the staging install passes `--ignore-scripts` regardless.
+ */
+function npmEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^npm_config_allow_scripts$/i.test(key)) delete env[key];
+  return env;
 }
 
 if (!skipBuild) {

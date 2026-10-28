@@ -20,7 +20,9 @@
  *      node_modules link if it points at a different checkout;
  *   1. skips it outright when the sibling directory is absent (or is not a grammar
  *      checkout) — which is what makes `npm run build` safe on a machine that has only
- *      graft. Anything else that is merely *unavailable* (no tree-sitter CLI, deps not
+ *      graft. Such a grammar uses the prebuilt binding committed under
+ *      vendor/<key>/prebuilds/<platform>/ (one info line, no warning); only a grammar
+ *      with neither a sibling repo nor a vendor/ prebuild is warned about. Anything else that is merely *unavailable* (no tree-sitter CLI, deps not
  *      installed) is a warning that keeps the previous build, never a failed build;
  *   2. regenerates the parser (`tree-sitter generate`) for every grammar the binding
  *      compiles — one per `<dir>/src/parser.c` listed in binding.gyp, so xml/dtd,
@@ -250,11 +252,26 @@ function cliEntry(command) {
   return null;
 }
 
+/**
+ * The environment for a nested npm. `npm run` exports every non-default config as an
+ * `npm_config_*` variable, so an `allow-scripts` set in the user's or global .npmrc
+ * reaches the child as `npm_config_allow_scripts` — and npm 12 counts the env layer as
+ * a command-line flag, rejecting a project-scoped `npm install` outright with
+ * EALLOWSCRIPTS ("--allow-scripts is not allowed in project-scoped installs"). Dropping
+ * the variable lets the child read the same setting from .npmrc, where it is allowed.
+ */
+function npmEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^npm_config_allow_scripts$/i.test(key)) delete env[key];
+  return env;
+}
+
 function run(command, args, cwd) {
   const cli = cliEntry(command);
   const [exe, argv] = cli ? [process.execPath, [cli, ...args]] : [command, args];
   const result = spawnSync(exe, argv, {
     cwd,
+    env: npmEnv(),
     stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
     // Only when we could not find the CLI's .js and must go through the shim.
     shell: !cli && process.platform === "win32",
@@ -969,19 +986,29 @@ const GRAFT_GRAMMARS_FALLBACK = {
   "tree-sitter-bash": [undefined], "@ganezdragon/tree-sitter-perl": [undefined],
   "tree-sitter-make": [undefined],
 };
-function graftGrammarProps(pkgName) {
-  try {
-    const src = readFileSync(join(repoRoot, "src", "graph", "extract.ts"), "utf8");
-    const block = src.match(/OPTIONAL_GRAMMAR_PKG[^=]*=\s*\{([\s\S]*?)\n\};/);
-    if (block) {
-      const props = [];
-      for (const m of block[1].matchAll(/\{\s*pkg:\s*"([^"]+)"(?:\s*,\s*prop:\s*"([^"]+)")?\s*\}/g)) {
-        if (m[1] === pkgName) props.push(m[2]);
-      }
-      if (props.length) return props;
+/** The OPTIONAL_GRAMMAR_PKG table's body, from whichever source file defines it today
+ * (src/graph/native.ts; src/graph/extract.ts in older trees), or null. */
+function grammarTableSource() {
+  for (const file of ["native.ts", "extract.ts"]) {
+    try {
+      const src = readFileSync(join(repoRoot, "src", "graph", file), "utf8");
+      const block = src.match(/OPTIONAL_GRAMMAR_PKG[^=]*=\s*\{([\s\S]*?)\n\};/);
+      if (block) return block[1];
+    } catch {
+      /* not in this file — try the next */
     }
-  } catch {
-    /* source not available — fall back */
+  }
+  return null;
+}
+
+function graftGrammarProps(pkgName) {
+  const table = grammarTableSource();
+  if (table) {
+    const props = [];
+    for (const m of table.matchAll(/\{\s*pkg:\s*"([^"]+)"(?:\s*,\s*prop:\s*"([^"]+)")?\s*\}/g)) {
+      if (m[1] === pkgName) props.push(m[2]);
+    }
+    if (props.length) return props;
   }
   return GRAFT_GRAMMARS_FALLBACK[pkgName] ?? [undefined];
 }
@@ -989,13 +1016,25 @@ function graftGrammarProps(pkgName) {
 /** graft's grammar key (`groovy`, `xml`, …) for a dependency name — the vendor/<key>
  * directory graft falls back to. Read from the same OPTIONAL_GRAMMAR_PKG table. */
 function graftKeyFor(depName) {
-  try {
-    const src = readFileSync(join(repoRoot, "src", "graph", "extract.ts"), "utf8");
-    for (const m of src.matchAll(/^\s*(\w+):\s*\{\s*pkg:\s*"([^"]+)"/gm)) if (m[2] === depName) return m[1];
-  } catch {
-    /* no source */
-  }
+  const table = grammarTableSource();
+  if (!table) return null;
+  for (const m of table.matchAll(/^\s*(\w+):\s*\{\s*pkg:\s*"([^"]+)"/gm)) if (m[2] === depName) return m[1];
   return null;
+}
+
+/** The committed vendor/<key>/prebuilds/<platform>/*.node for a dependency, or null.
+ * This is what graft loads on a machine without the sibling grammar repo, so a missing
+ * repo with one of these is a normal, fully working state rather than a lost language. */
+function vendoredNode(depName) {
+  const key = graftKeyFor(depName);
+  if (!key) return null;
+  const dir = join(vendorDir, key, "prebuilds", PLATFORM);
+  try {
+    const file = readdirSync(dir).find((f) => f.endsWith(".node"));
+    return file ? join(dir, file) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The grammar unit (from grammarUnits) a binding export comes from: `prop` names its
@@ -1104,8 +1143,11 @@ if (targets.length === 0) {
 
 mkdirSync(vendorDir, { recursive: true });
 
-const tally = { generated: 0, built: 0, packed: 0, current: 0, skipped: 0, abiMismatch: 0 };
-/** Grammar repos not present on this machine: warned, never a failure (not even --strict). */
+const tally = { generated: 0, built: 0, packed: 0, current: 0, vendored: 0, skipped: 0, abiMismatch: 0 };
+/** Grammar repos not present on this machine but covered by a committed vendor/ binding. */
+const vendored = [];
+/** Grammar repos not present on this machine and with no vendor/ binding either: warned,
+ * never a failure (not even --strict). */
 const missing = [];
 const failures = [];
 /** Unavailable tooling/deps: reported, previous build kept, exit code stays 0. */
@@ -1133,6 +1175,13 @@ for (const { name, dir } of targets) {
     absent = `not accessible (${err.code ?? err.message})`;
   }
   if (absent) {
+    // A committed vendor/<key> binding covers the language: nothing is lost, so this is
+    // the expected state of a fresh clone, reported in one info line, not a warning.
+    if (vendoredNode(name)) {
+      vendored.push(name);
+      tally.vendored++;
+      continue;
+    }
     // Listed once, in the warning block at the end — not also line by line here.
     missing.push({ name, dir, absent });
     tally.skipped++;
@@ -1291,7 +1340,14 @@ writeFileSync(stampFile, `${JSON.stringify(stamps, null, 2)}\n`);
 
 const summary =
   `grammars: ${tally.generated} generated, ${tally.built} built, ${tally.packed} packed, ` +
-  `${tally.current} up to date, ${tally.skipped} skipped`;
+  `${tally.current} up to date, ${tally.vendored} prebuilt in vendor/, ${tally.skipped} skipped`;
+
+if (vendored.length > 0) {
+  log(
+    `  ${vendored.length} grammar repo(s) not checked out next to graft — using the prebuilt ` +
+      `vendor/<key>/prebuilds/${PLATFORM} binding committed with graft (clone the repo to rebuild it).`,
+  );
+}
 
 if (notices.length > 0) {
   console.log(`\nℹ ${notices.length} note(s):`);
@@ -1299,8 +1355,9 @@ if (notices.length > 0) {
 }
 
 // Missing grammar repos: a warning, always, even under --quiet and --strict — a machine
-// with only graft on it must build. The languages fall back to a vendor/ copy if one
-// was built earlier, else stay unclaimed (their files go through the breadth tier).
+// with only graft on it must build. Only repos with no committed vendor/ prebuild for
+// this platform land here; their languages stay unclaimed (files go through the
+// breadth tier).
 if (missing.length > 0) {
   const all = missing.length === targets.length;
   console.warn(
@@ -1308,8 +1365,8 @@ if (missing.length > 0) {
       `${all ? "are" : "are not"} available — ${all ? "skipped" : "skipped those"}, the build continues:`,
   );
   for (const m of missing) {
-    const fallback = existsSync(join(vendorDir, graftKeyFor(m.name) ?? "\0")) ? "graft uses its vendor/ copy" : "language unavailable in graft";
-    console.warn(`  ${m.name}: ${m.dir} ${m.absent} (${fallback})`);
+    // Repos with a committed vendor/ binding never reach this list (see `vendored`).
+    console.warn(`  ${m.name}: ${m.dir} ${m.absent}, and no vendor/ prebuild for ${PLATFORM} (language unavailable in graft)`);
   }
   console.warn(`  Clone them next to graft (${relative(repoRoot, dirname(missing[0].dir)) || "."}) to build them.\n`);
 }
