@@ -301,6 +301,13 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft init", "graft init --agents copilot claude", "graft init --dry-run"],
     globals: ["dir"],
   },
+  issues: {
+    description:
+      "Open the issue tracker of this graft build in your browser, where you can report a bug or request a feature: " +
+      "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues. The address is also printed, in case no " +
+      "browser opens (or GRAFT_NO_BROWSER is set). Nothing is sent: it only opens the page.",
+    examples: ["graft issues"],
+  },
   languages: {
     description:
       "List every programming language graft indexes, the level of support each gets on this install, and what " +

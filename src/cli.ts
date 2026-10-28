@@ -217,6 +217,9 @@ const GROUP = {
   ci: "CI:",
 } as const;
 
+/** Where users of this fork report bugs and request features (`graft issues`). */
+const ISSUES_URL = "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues";
+
 /** Put a command in a help group, under trail only. */
 function grouped(c: Command, heading: string): Command {
   if (TRAIL) c.helpGroup(heading);
@@ -597,6 +600,13 @@ program
   .action(() => {
     const latest = getNpmViewVersion();
     console.log(formatVersionReport(currentVersion, latest));
+  });
+
+grouped(program.command("issues"), GROUP.setup)
+  .description(`Open the issue tracker where you can report a bug or request a feature for ${brand()}`)
+  .action(() => {
+    console.log(`Report issues at: ${ISSUES_URL}`);
+    openBrowser(ISSUES_URL);
   });
 
 grouped(program.command("upgrade"), GROUP.setup)

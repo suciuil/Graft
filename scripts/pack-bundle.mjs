@@ -28,10 +28,16 @@
  * `@bootswithdefer/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`.
  *
  * Usage: node scripts/pack-bundle.mjs [--skip-build]
- *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first
+ *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first;
+ *                 refused when either is older than its sources
+ *
+ * Either way vendor/ is re-staged from the sibling repos' prebuilds (build:vendor) and
+ * verified byte-for-byte against them before packing, so the tarball cannot carry
+ * grammars older than the ones graft itself is running.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -79,10 +85,71 @@ if (!skipBuild) {
     const r = npm(["run", script], repoRoot);
     if (r.status !== 0) die(`npm run ${script} failed — fix that before packing a bundle`);
   }
+} else {
+  // --skip-build reuses what is built, but only if it is current: a bundle is copied to
+  // other machines and nobody re-checks it there.
+  console.log("• checking that the existing build is current (--skip-build) …");
+  const r = npm(["run", "build:grammars", "--", "--check"], repoRoot);
+  if (r.status !== 0) die("grammar bindings are older than their sources — run without --skip-build");
+  // tsc leaves no content stamp to compare, so mtime it is; a false alarm (checkout,
+  // copy) costs one TypeScript build.
+  const newest = (dir, re) => {
+    let at = 0;
+    const walk = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (re.test(e.name)) at = Math.max(at, statSync(p).mtimeMs);
+      }
+    };
+    if (existsSync(dir)) walk(dir);
+    return at;
+  };
+  if (newest(join(repoRoot, "src"), /\.ts$/) > newest(join(repoRoot, "dist"), /\.js$/)) {
+    die("src/ has changes newer than dist/ — run without --skip-build (or npm run build:ts first)");
+  }
+}
+
+// Always, --skip-build included: staging only copies the prebuilds that exist, and
+// skipping it is how a bundle used to ship the previous parsers next to fresh ones.
+console.log("• staging grammar bindings into vendor/ …");
+{
+  const r = npm(["run", "build:vendor", "--", "--no-bundle-check"], repoRoot);
+  if (r.status !== 0) die("npm run build:vendor failed");
 }
 
 const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 if (!existsSync(join(repoRoot, "dist", "cli.js"))) die("dist/cli.js is missing — run npm run build:ts first");
+
+// vendor/ must now hold exactly the sibling repos' current prebuilds. build:vendor never
+// fails (it keeps an older copy when a running graft holds the file), so check here.
+{
+  const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
+  const nodeIn = (dir) => {
+    try {
+      const f = readdirSync(dir).find((n) => n.endsWith(".node") && !n.includes(".superseded-"));
+      return f ? join(dir, f) : null;
+    } catch {
+      return null;
+    }
+  };
+  const extractMod = await import(pathToFileURL(join(repoRoot, "dist", "graph", "extract.js")).href);
+  const drift = [];
+  for (const [key, pkgName] of Object.entries(extractMod.optionalGrammarPackages())) {
+    const spec = pkg.optionalDependencies?.[pkgName];
+    if (typeof spec !== "string" || !spec.startsWith("file:")) continue;
+    const source = nodeIn(join(resolve(repoRoot, spec.slice("file:".length)), "prebuilds", PLATFORM));
+    if (!source) continue; // sibling repo absent: the committed vendor/ copy is the source of truth
+    const vendored = nodeIn(join(repoRoot, "vendor", key, "prebuilds", PLATFORM));
+    if (!vendored || sha(source) !== sha(vendored)) drift.push(`${key} (${pkgName})`);
+  }
+  if (drift.length > 0) {
+    die(
+      `vendor/ does not match the current grammar prebuilds for: ${drift.join(", ")} — ` +
+        "a running graft (editor / MCP server) probably holds the old binding; close it and retry",
+    );
+  }
+}
 
 // The grammar-key → package-name map lives in extract.ts, the same table the runtime
 // loader uses, so the bundle layout cannot drift from where the loader looks.

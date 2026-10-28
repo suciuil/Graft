@@ -26,6 +26,7 @@
  * repos is a normal state.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -70,6 +71,55 @@ function clearVendored(key) {
     }
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+function sameBytes(a, b) {
+  try {
+    if (statSync(a).size !== statSync(b).size) return false;
+    const hash = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
+    return hash(a) === hash(b);
+  } catch {
+    return false;
+  }
+}
+
+/** Newest mtime of the files under `dir` whose name passes `keep`; 0 when none. */
+function newestMtime(dir, keep) {
+  let newest = 0;
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (keep(e.name)) newest = Math.max(newest, statSync(p).mtimeMs);
+    }
+  };
+  walk(dir);
+  return newest;
+}
+
+/**
+ * The offline bundle (scripts/pack-bundle.mjs) is a snapshot of dist/ and vendor/. Once
+ * either is newer than it, installing that tarball silently ships the old parsers or
+ * code, so say so here — this script runs last in `npm run build`.
+ */
+function warnIfBundleStale() {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const bundle = `${pkg.name.replace(/^@/, "").replace(/\//g, "-")}-${pkg.version}-${PLATFORM}.tgz`;
+  const bundlePath = join(repoRoot, bundle);
+  if (!existsSync(bundlePath)) return;
+  const packedAt = statSync(bundlePath).mtimeMs;
+  const vendorAt = newestMtime(vendorDir, (n) => n.endsWith(".node"));
+  const distAt = newestMtime(join(repoRoot, "dist"), (n) => n.endsWith(".js"));
+  const newer = [vendorAt > packedAt && "vendored grammars", distAt > packedAt && "dist/"].filter(Boolean);
+  if (newer.length > 0) {
+    console.warn(`⚠ ${bundle} is stale (${newer.join(" and ")} changed since it was packed) — rebuild it: npm run pack:bundle`);
+  }
 }
 
 const extractPath = join(repoRoot, "dist", "graph", "extract.js");
@@ -127,6 +177,17 @@ try {
       else missing.push(`${key} (${pkgName}): ${why}`);
       continue;
     }
+    // Byte-identical copy already staged: leave it, mtime included, so an unchanged
+    // grammar neither churns the quarantine nor makes the bundle look stale below.
+    try {
+      const staged = readdirSync(destDir).filter((f) => f.endsWith(".node"));
+      if (staged.length === 1 && staged[0] === file && sameBytes(join(srcDir, file), join(destDir, file))) {
+        included.push(key);
+        continue;
+      }
+    } catch {
+      /* nothing staged yet */
+    }
     // Replaced wholesale: a rename upstream would otherwise leave two .node files here,
     // and the loader takes the first one it finds.
     try {
@@ -160,6 +221,7 @@ try {
     console.warn(`⚠ vendor: ${missing.length} grammar(s) unavailable — their languages stay unclaimed (warning only):`);
     for (const m of missing) console.warn(`    ${m}`);
   }
+  if (!process.argv.includes("--no-bundle-check")) warnIfBundleStale();
 } catch (err) {
   // Staging is a convenience for the published package; it must never fail a build.
   console.warn(`⚠ vendor: grammar staging skipped (${err.message})`);
