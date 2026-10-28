@@ -32,6 +32,10 @@ tree-sitter.exe
 build-bundle/
 *.tgz
 
+# Offline Node.js zip(s) next to install-graft.ps1 (node-vX.Y.Z-win-x64.zip, ~37MB):
+# a downloaded nodejs.org artifact for the installer, not a build input.
+/node-v*-win-x64*.zip
+
 # graft's local repository settings — not committed.
 /.graft/
 

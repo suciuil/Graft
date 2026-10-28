@@ -34,6 +34,8 @@ const PY_CTOR_KINDS: Kind[] = ["class"];
  * implicit-self widening) have found nothing. */
 const SWIFT_EXT = /\.swift$/i;
 const SWIFT_CTOR_KINDS: Kind[] = ["class", "struct", "enum"];
+/** Oracle PL/SQL sources (extract.ts's GRAMMAR_BY_EXT plsql entries). */
+const PLSQL_EXT = /\.(sql|pks|pkb|plsql)$/i;
 /** CMake build files: `*.cmake` modules and `CMakeLists.txt` (matched by name). */
 const CMAKE_FILE = /(^|[/\\])cmakelists\.txt$|\.cmake$/i;
 /** What a CMake dependency name (target_link_libraries, add_dependencies) can mean. */
@@ -222,6 +224,11 @@ export function resolveEdges(
     push(classTraits, ownName, e.name);
   }
 
+  // PL/SQL call resolution needs its own index (built only when a PL/SQL call is
+  // met): names are case-insensitive, and scope is lexical through `contains`.
+  let plsqlIdx: PlsqlIndex | null = null;
+  const plsql = (): PlsqlIndex => (plsqlIdx ??= buildPlsqlIndex(nodes, rawEdges, byId));
+
   const out: EdgeV1[] = [];
   const seen = new Set<string>();
   const add = (source: string, target: string, relation: Relation, confidence: EdgeV1["confidence"]) => {
@@ -336,6 +343,13 @@ export function resolveEdges(
         if (candidates.length === 1) add(e.source, candidates[0].id, "calls", "extracted");
         continue;
       }
+      // PL/SQL resolves by Oracle's own rules rather than the generic ones below —
+      // see resolvePlsqlCall.
+      if (PLSQL_EXT.test(e.file) && byId.get(e.source)?.origin !== "generic") {
+        const hit = resolvePlsqlCall(e, plsql());
+        if (hit) add(e.source, hit.id, "calls", hit.confidence);
+        continue;
+      }
       if (e.viaMember) {
         if (!e.recvType) continue;
         const hit = resolveTypedMember(e.recvType, e.name!, e.file, ownerMethod, classParents, classTraits, e.argCount);
@@ -444,6 +458,115 @@ function resolveName(
   );
   if (global.length === 1) return { id: global[0].id, confidence: "inferred" };
   return null;
+}
+
+/** What a PL/SQL call may target when extract.ts did not narrow it. */
+const PLSQL_CALLABLE: Kind[] = ["procedure", "function"];
+
+interface PlsqlIndex {
+  /** UPPER-cased name → every PL/SQL procedure/function node of that name. */
+  byName: Map<string, NodeV1[]>;
+  /** node id → id of the node that `contains` it (its lexical scope). */
+  parentOf: Map<string, string>;
+  byId: Map<string, NodeV1>;
+}
+
+function buildPlsqlIndex(nodes: NodeV1[], rawEdges: RawEdge[], byId: Map<string, NodeV1>): PlsqlIndex {
+  const byName = new Map<string, NodeV1[]>();
+  for (const n of nodes) {
+    if ((n.kind === "procedure" || n.kind === "function") && PLSQL_EXT.test(n.path)) {
+      push(byName, n.name.toUpperCase(), n);
+    }
+  }
+  const parentOf = new Map<string, string>();
+  for (const e of rawEdges) {
+    if (e.relation === "contains" && e.targetId && PLSQL_EXT.test(e.file)) parentOf.set(e.targetId, e.source);
+  }
+  return { byName, parentOf, byId };
+}
+
+/** A package node is a BODY when `BODY` appears in its header before its name
+ * (`CREATE OR REPLACE PACKAGE BODY util_pkg AS …`); otherwise it is the spec. */
+function isPackageBody(pkg: NodeV1): boolean {
+  const sig = pkg.signature ?? "";
+  const at = sig.toUpperCase().indexOf(pkg.name.toUpperCase());
+  return /\bBODY\b/i.test(at >= 0 ? sig.slice(0, at) : sig);
+}
+
+/** The package directly holding a sub-program, or null for a standalone unit or
+ * one nested inside another sub-program (which no `pkg.` prefix can reach). */
+function plsqlPackageOf(n: NodeV1, idx: PlsqlIndex): NodeV1 | null {
+  const parent = idx.byId.get(idx.parentOf.get(n.id) ?? "");
+  return parent?.kind === "package" ? parent : null;
+}
+
+/**
+ * Pick the target among same-scope PL/SQL candidates. A public sub-program is
+ * declared in its package SPEC and defined in its package BODY — two nodes, one
+ * unit — so a definition wins over a declaration, and the declaration is the
+ * target only when no body is in the repo. Several definitions left (overloads,
+ * which PL/SQL tells apart by parameter TYPES this pass cannot read, or the same
+ * package in several files) resolve only to a unique same-file one; else drop.
+ */
+function pickPlsql(
+  candidates: NodeV1[],
+  file: string,
+  idx: PlsqlIndex,
+): { id: string; confidence: EdgeV1["confidence"] } | null {
+  if (candidates.length === 0) return null;
+  const defs = candidates.filter((n) => {
+    const pkg = plsqlPackageOf(n, idx);
+    return !pkg || isPackageBody(pkg);
+  });
+  const pool = defs.length > 0 ? defs : candidates;
+  let pick: NodeV1 | undefined = pool.length === 1 ? pool[0] : undefined;
+  if (!pick) {
+    const sameFile = pool.filter((n) => n.path === file);
+    if (sameFile.length === 1) pick = sameFile[0];
+  }
+  if (!pick) return null;
+  return { id: pick.id, confidence: pick.path === file ? "extracted" : "inferred" };
+}
+
+/**
+ * Resolve one PL/SQL call the way Oracle does. Identifiers are case-insensitive
+ * (`LOG_IT`, `log_it` and `"LOG_IT"` are one name).
+ *   - `pkg.proc(…)` (also `schema.pkg.proc(…)`; extract.ts keeps only `pkg`): a
+ *     sub-program directly inside a package named `pkg`, in any file.
+ *   - a bare `proc(…)` / `proc;`: walk the caller's lexical scopes outward —
+ *     sub-programs nested in the caller, then in each enclosing sub-program, then
+ *     in the enclosing package body (its private ones included) — and the first
+ *     scope declaring the name decides, exactly as inner declarations shadow outer
+ *     ones. Past the package comes the schema: standalone CREATE PROCEDURE /
+ *     CREATE FUNCTION units, in any file. A bare name never reaches into some
+ *     OTHER package; that needs the `pkg.` prefix.
+ * Anything else (built-ins like DBMS_OUTPUT.PUT_LINE, collection indexing that
+ * shares the call syntax, objects outside the repo) finds no candidate and drops.
+ */
+function resolvePlsqlCall(e: RawEdge, idx: PlsqlIndex): { id: string; confidence: EdgeV1["confidence"] } | null {
+  if (!e.name) return null;
+  const kinds = e.kinds ?? PLSQL_CALLABLE;
+  const all = (idx.byName.get(e.name.toUpperCase()) ?? []).filter((n) => kinds.includes(n.kind));
+  if (all.length === 0) return null;
+  if (e.recvType) {
+    const pkgName = e.recvType.toUpperCase();
+    return pickPlsql(
+      all.filter((n) => plsqlPackageOf(n, idx)?.name.toUpperCase() === pkgName),
+      e.file,
+      idx,
+    );
+  }
+  let scope: string | undefined = e.source;
+  while (scope !== undefined && idx.byId.get(scope)?.kind !== "file") {
+    const here = all.filter((n) => idx.parentOf.get(n.id) === scope);
+    if (here.length > 0) return pickPlsql(here, e.file, idx);
+    scope = idx.parentOf.get(scope);
+  }
+  return pickPlsql(
+    all.filter((n) => idx.byId.get(idx.parentOf.get(n.id) ?? "")?.kind === "file"),
+    e.file,
+    idx,
+  );
 }
 
 /**

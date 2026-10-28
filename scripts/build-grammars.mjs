@@ -45,7 +45,9 @@
  * vendor/*.tgz is then the input to scripts/pack-bundle.mjs, which turns graft plus
  * these grammars into a single installable tarball.
  *
- * Usage: node scripts/build-grammars.mjs [--force] [--quiet] [--generate | --no-generate] [--strict]
+ * Usage: node scripts/build-grammars.mjs [--force] [--quiet] [--generate | --no-generate] [--strict] [--check]
+ *   --check        report grammars whose binding is older than their sources and exit 1
+ *                  if any is; generates, builds, packs and records nothing
  *   --force        rebuild and repack every grammar, ignoring the staleness checks
  *                  (does not force `tree-sitter generate`: that rewrites committed files)
  *   --generate     regenerate every grammar's src/ regardless of timestamps
@@ -84,6 +86,10 @@ const strict = process.argv.includes("--strict");
 const installDeps = !process.argv.includes("--no-install");
 const pullUpstream = process.argv.includes("--pull") || process.env.GRAFT_GRAMMARS_PULL === "1";
 const fetchUpstream = pullUpstream || process.argv.includes("--fetch") || process.env.GRAFT_GRAMMARS_FETCH === "1";
+/** Report-only: list grammars whose compiled binding no longer matches their sources
+ * (same content hashes the build itself uses), touch nothing, exit 1 if any is stale.
+ * pack-bundle.mjs runs this under --skip-build so a bundle cannot ship old parsers. */
+const checkOnly = process.argv.includes("--check");
 
 /** Prebuilds are per platform+arch; this is the only tuple graft's bundle ships. */
 const PLATFORM = `${process.platform}-${process.arch}`;
@@ -496,8 +502,9 @@ function parserAbi(parserC) {
 /**
  * The grammars a repo's native binding compiles: one per `<dir>/src/parser.c` named in
  * binding.gyp (`xml/src/parser.c` + `dtd/src/parser.c`, `csv|psv|tsv/src/parser.c`,
- * markdown's block + inline). Grammars the binding does not compile (yaml's schema/*
- * helpers) are not graft's concern. Falls back to the repo root without a binding.gyp.
+ * markdown's block + inline). Helper grammars the binding reaches only through a
+ * post-processed source (yaml's schema/*) are {@link derivedUnits}. Falls back to the
+ * repo root without a binding.gyp.
  */
 function grammarUnits(dir) {
   let gyp = "";
@@ -514,6 +521,74 @@ function grammarUnits(dir) {
   return [...rels]
     .map((rel) => ({ rel: rel || ".", dir: join(dir, rel) }))
     .filter((u) => existsSync(join(u.dir, "grammar.js")) && existsSync(join(u.dir, "src", "parser.c")));
+}
+
+/**
+ * Helper grammars a repo generates but its binding does not compile as such: their
+ * generated parser.c is post-processed into a source the binding DOES compile.
+ * tree-sitter-yaml's schema/{core,json,legacy} are the case in point — each
+ * schema/<name>/package.json declares `"build": "tree-sitter generate --abi=14"` and
+ * `"postbuild": "node ../update-schema.js <name>"`, which lifts the lexer out of
+ * schema/<name>/src/parser.c into src/schema.<name>.c, #included by src/scanner.c.
+ * Without this an edit to a schema grammar.js reached the binary never.
+ *
+ * Recognised by that shape — grammar.js + src/parser.c + a package.json whose build
+ * script runs `tree-sitter generate` and which has a postbuild — so the repo's own
+ * declared pipeline is what runs; nothing yaml-specific is hard-coded. Dot-directories
+ * (.kilo agent worktrees, .git) and SKIP_DIRS are not walked, like {@link grammarFiles}.
+ */
+function derivedUnits(dir, compiled) {
+  const compiledDirs = new Set(compiled.map((u) => resolve(u.dir)));
+  const out = [];
+  const walk = (abs, depth) => {
+    if (depth > 3) return;
+    let entries;
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+      if (entry.name === "src" || entry.name === "bindings") continue;
+      const sub = join(abs, entry.name);
+      if (!compiledDirs.has(resolve(sub)) && existsSync(join(sub, "grammar.js")) && existsSync(join(sub, "src", "parser.c"))) {
+        let scripts = {};
+        try {
+          scripts = JSON.parse(readFileSync(join(sub, "package.json"), "utf8")).scripts ?? {};
+        } catch {
+          /* no package.json: no declared pipeline, not a derived grammar */
+        }
+        if (/\btree-sitter\s+generate\b/.test(scripts.build ?? "") && typeof scripts.postbuild === "string") {
+          out.push({ rel: relative(dir, sub).replace(/\\/g, "/"), dir: sub, postbuild: scripts.postbuild.trim() });
+        }
+      }
+      walk(sub, depth + 1);
+    }
+  };
+  walk(dir, 0);
+  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+
+/** A derived grammar's postbuild — only the plain `node <script> [args…]` form, run with
+ * this node and no shell, so a package.json cannot smuggle a command line in. */
+function runPostbuild(unit) {
+  const words = unit.postbuild.split(/\s+/);
+  if (words[0] !== "node" || words.length < 2 || /[|&;<>`$"'%^]/.test(unit.postbuild)) {
+    return { ok: false, message: `postbuild "${unit.postbuild}" is not a plain \`node <script> …\` command` };
+  }
+  const r = spawnSync(process.execPath, words.slice(1), {
+    cwd: unit.dir,
+    encoding: "utf8",
+    stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
+    timeout: 300_000,
+  });
+  if (r.error) return { ok: false, message: r.error.message };
+  if (r.status !== 0) {
+    const tail = `${r.stderr ?? ""}`.trim().split("\n").slice(-5).join("\n    ");
+    return { ok: false, message: `exit ${r.status}${tail ? `\n    ${tail}` : ""}` };
+  }
+  return { ok: true };
 }
 
 /** grammar.js plus every file it pulls in (transitively): `../common/common.js`,
@@ -849,6 +924,9 @@ function gitModified(repo, files) {
  * first build as well as later ones: it would build, then fail the load check, and the
  * language would drop out of graft. A failed attempt is retried on the next build.
  *
+ * Helper grammars compiled only through a post-processed source (yaml's schema/*) are
+ * handled after these, by {@link regenerateDerived}.
+ *
  * Returns `{ generated, pending, failed }`. `pending`: some needed generating but could
  * not (CLI unavailable) — the binding must not then be rebuilt from the stale src/.
  */
@@ -878,14 +956,8 @@ function regenerate(name, dir, entry) {
       // upstream that ships an ABI-15 parser.c would otherwise compile it as is and
       // fail the ABI gate after the build.
       reason = `src/parser.c is ABI ${abiNow}; graft's runtime loads ≤ ${MAX_ABI}`;
-    } else if (!rec) {
-      const newest = Math.max(...inputs.map((f) => statSync(f).mtimeMs));
-      if (newest > statSync(parserC).mtimeMs) {
-        const mod = gitModified(dir, [...inputs, parserC]);
-        const parserRel = relative(dir, parserC).replace(/\\/g, "/");
-        // No git: the plain timestamp rule. Git: an input edited while parser.c is not.
-        if (mod === null || (mod.size > 0 && !mod.has(parserRel))) reason = "grammar.js newer than src/parser.c";
-      }
+    } else if (!rec && firstSightStale(dir, inputs, parserC)) {
+      reason = "grammar.js newer than src/parser.c";
     }
     if (!reason) {
       entry.gen[unit.rel] = { in: inHash, parser: parserHash };
@@ -917,7 +989,77 @@ function regenerate(name, dir, entry) {
     entry.gen[unit.rel] = { in: inHash, parser: hashFile(parserC) };
     result.generated++;
   }
+  regenerateDerived(name, dir, entry, result);
   return result;
+}
+
+/** No stamp yet: grammar.js (or a file it requires) newer than src/parser.c, unless git
+ * shows a committed, untouched pair (see {@link regenerate}). */
+function firstSightStale(dir, inputs, parserC) {
+  const newest = Math.max(...inputs.map((f) => statSync(f).mtimeMs));
+  if (newest <= statSync(parserC).mtimeMs) return false;
+  const mod = gitModified(dir, [...inputs, parserC]);
+  const parserRel = relative(dir, parserC).replace(/\\/g, "/");
+  // No git: the plain timestamp rule. Git: an input edited while parser.c is not.
+  return mod === null || (mod.size > 0 && !mod.has(parserRel));
+}
+
+/**
+ * The {@link derivedUnits} half of {@link regenerate}, same stamp and same rules for
+ * when to `tree-sitter generate`; each generate is followed by the unit's postbuild,
+ * which rewrites the compiled source (yaml: src/schema.<name>.c). That lands in src/,
+ * so the build hash changes and the binding is recompiled. Also re-runs the postbuild
+ * alone when parser.c changed since the last record (regenerated by hand, or pulled):
+ * the derivation is deterministic, so this rewrites the file byte-for-byte when it was
+ * already in sync. No ABI rule: graft never loads these parsers, only their lexer.
+ * A failed postbuild is retried next run (parser.c then differs from the record).
+ */
+function regenerateDerived(name, dir, entry, result) {
+  for (const unit of derivedUnits(dir, grammarUnits(dir))) {
+    const parserC = join(unit.dir, "src", "parser.c");
+    const inputs = grammarInputs(unit.dir);
+    const inHash = hashInputs(unit.dir, inputs);
+    const parserHash = hashFile(parserC);
+    const rec = entry.gen[unit.rel];
+    const label = `${name} (${unit.rel})`;
+
+    let reason = null;
+    if (forceGenerate) reason = "--generate";
+    else if (rec && rec.in !== inHash && rec.parser === parserHash) reason = "grammar.js changed since src/parser.c was generated";
+    else if (!rec && firstSightStale(dir, inputs, parserC)) reason = "grammar.js newer than src/parser.c";
+    const rederive = !reason && rec && rec.parser !== parserHash;
+    if (!reason && !rederive) {
+      entry.gen[unit.rel] = { in: inHash, parser: parserHash };
+      continue;
+    }
+
+    if (reason) {
+      const cli = treeSitterCli(dir);
+      if (cli.error) {
+        warnings.push(`${label}: ${reason}, but it was not regenerated — ${cli.error}`);
+        result.pending = true;
+        continue;
+      }
+      const abi = Math.min(parserAbi(parserC) ?? MAX_ABI, MAX_ABI);
+      log(`  ${label}: generating (${reason}; ABI ${abi}) …`);
+      const gen = generateUnit(cli, unit, abi);
+      if (!gen.ok) {
+        failures.push(`${label}: tree-sitter generate failed — ${gen.message}`);
+        result.failed = true;
+        continue;
+      }
+    } else {
+      log(`  ${label}: src/parser.c changed — re-running its postbuild …`);
+    }
+    const post = runPostbuild(unit);
+    if (!post.ok) {
+      failures.push(`${label}: postbuild failed — ${post.message}`);
+      result.failed = true;
+      continue;
+    }
+    entry.gen[unit.rel] = { in: inHash, parser: hashFile(parserC) };
+    result.generated++;
+  }
 }
 
 /** Why a grammar's native build cannot run here, or null. Missing dependencies are an
@@ -1155,6 +1297,8 @@ const warnings = [];
 /** Informational: upstream commits not pulled, missing links graft works around. */
 const notices = [];
 const stamps = readStamps();
+/** --check only: grammars whose binding is older than their sources. */
+const stale = [];
 
 for (const { name, dir } of targets) {
   // Not an error: a checkout without the sibling grammar repos is a normal state, and
@@ -1185,6 +1329,20 @@ for (const { name, dir } of targets) {
     // Listed once, in the warning block at the end — not also line by line here.
     missing.push({ name, dir, absent });
     tally.skipped++;
+    continue;
+  }
+
+  if (checkOnly) {
+    let pkgName = name;
+    try {
+      pkgName = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).name ?? name;
+    } catch {
+      /* the build would report it; for the check the dependency key is good enough */
+    }
+    const stamp = stampFor(stamps, pkgName, dir);
+    if (!prebuiltNode(dir)) stale.push(`${name}: never built (no prebuilds/${PLATFORM}/*.node)`);
+    else if (stamp.build !== grammarHashes(dir).build) stale.push(`${name}: sources changed since its binding was built`);
+    else tally.current++;
     continue;
   }
 
@@ -1334,6 +1492,17 @@ for (const { name, dir } of targets) {
     log(`  ${name}: up to date`);
     tally.current++;
   }
+}
+
+if (checkOnly) {
+  if (stale.length > 0) {
+    console.error(`✗ grammars: ${stale.length} stale, ${tally.current} up to date:`);
+    for (const s of stale) console.error(`  ${s}`);
+    console.error("  Rebuild them with: npm run build:grammars");
+    process.exit(1);
+  }
+  console.log(`✓ grammars: ${tally.current} up to date, ${tally.vendored} prebuilt in vendor/, ${tally.skipped} skipped (check only)`);
+  process.exit(0);
 }
 
 writeFileSync(stampFile, `${JSON.stringify(stamps, null, 2)}\n`);

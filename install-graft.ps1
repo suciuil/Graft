@@ -3,8 +3,12 @@ param([switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
 $Registry     = 'https://<company>.jfrog.io/artifactory/api/npm/<npm-repo>/'
+# Downloaded from nodejs.org only when no offline Node.js zip is next to this script
 $NodeVersion  = 'v24.19.0'
 $NodeZipUrl   = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip"
+# Offline Node.js zip looked up next to this script before downloading $NodeZipUrl; any suffix after
+# -win-x64 is accepted (e.g. "node-v24.19.0-win-x64 - Copy.zip", "... (1).zip")
+$OfflineNodeRegex = '^node-v(\d+)\.(\d+)\.(\d+)-win-x64(.*)\.zip$'
 $NodeHome     = Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
 $NpmGlobal    = Join-Path $env:APPDATA 'npm'
 $PinnedNode   = Join-Path $NpmGlobal 'node.exe'
@@ -93,17 +97,66 @@ function Remove-NodeHome {
         ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+# Newest node-vX.Y.Z-win-x64.zip next to this script that graft can run on, or $null
+function Find-OfflineNode {
+    if (-not $PSScriptRoot) { return $null }
+    Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'node-v*-win-x64*.zip' -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            if ($_.Name -match $OfflineNodeRegex) {
+                $ver = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+                if ($ver.Major -ge $MinNodeMajor) { [pscustomobject]@{ File = $_; Version = $ver } }
+            }
+        } |
+        Sort-Object Version, { $_.File.LastWriteTime } |
+        Select-Object -Last 1
+}
+
+# The node-*-win-x64 folder of an extracted zip (the one holding node.exe), or $null
+function Find-ExtractedNode([string]$Dir) {
+    if (Test-Path -LiteralPath (Join-Path $Dir 'node.exe')) { return $Dir }
+    $sub = Get-ChildItem -LiteralPath $Dir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'node.exe') } | Select-Object -First 1
+    if ($sub) { return $sub.FullName }
+    return $null
+}
+
+# Extracts $Zip into a fresh temp folder; returns the folder holding node.exe, or $null when the zip is unusable
+function Expand-NodeZip([string]$Zip, [string]$Tmp) {
+    if (Test-Path $Tmp) { Remove-Item $Tmp -Recurse -Force }
+    try { Expand-Archive -LiteralPath $Zip -DestinationPath $Tmp -Force } catch {
+        Write-Warning "Could not extract ${Zip}: $($_.Exception.Message)"
+        return $null
+    }
+    $dir = Find-ExtractedNode $Tmp
+    if (-not $dir) { Write-Warning "$Zip does not contain node.exe." }
+    return $dir
+}
+
+# Installs the newest offline Node.js zip next to this script, else downloads $NodeVersion from nodejs.org
 function Install-PortableNode {
-    $zip = Join-Path $env:TEMP "node-$NodeVersion.zip"
-    $tmp = Join-Path $env:TEMP "node-$NodeVersion-extract"
-    Write-Host "Downloading Node.js $NodeVersion..."
-    Invoke-WebRequest $NodeZipUrl -OutFile $zip -UseBasicParsing
-    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-    Expand-Archive $zip $tmp -Force
+    $ProgressPreference = 'SilentlyContinue'
+    $tmp = Join-Path $env:TEMP "graft-node-extract"
+    $dir = $null
+    $zip = $null
+    if ($OfflineNode) {
+        Write-Host "Installing Node.js $($OfflineNode.Version) from the offline package $($OfflineNode.File.FullName)"
+        $dir = Expand-NodeZip $OfflineNode.File.FullName $tmp
+        if (-not $dir) { Write-Host "The offline Node.js package is unusable; downloading Node.js $NodeVersion instead." }
+    }
+    if (-not $dir) {
+        $zip = Join-Path $env:TEMP "node-$NodeVersion.zip"
+        Write-Host "Downloading Node.js $NodeVersion from $NodeZipUrl ..."
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest $NodeZipUrl -OutFile $zip -UseBasicParsing
+        $dir = Expand-NodeZip $zip $tmp
+        if (-not $dir) { throw "The Node.js download $NodeZipUrl is unusable." }
+    }
     New-Item -ItemType Directory -Force (Split-Path $NodeHome) | Out-Null
     Remove-NodeHome
-    Move-Item (Join-Path $tmp "node-$NodeVersion-win-x64") $NodeHome
-    Remove-Item $zip, $tmp -Recurse -Force
+    Move-Item -LiteralPath $dir $NodeHome
+    # Never deletes the offline zip next to this script, only the downloaded copy
+    if ($zip) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # ---- User PATH (HKCU\Environment\Path) ----
@@ -826,11 +879,16 @@ function Invoke-LlmSetup {
 # 0. Nothing is downloaded, installed or changed before the user agrees
 $plannedPkg = Find-OfflinePackage
 $graftSource = if ($plannedPkg) { "the offline package $($plannedPkg.File.Name) next to this script" } else { "the npm registry $Registry (npm login may ask for credentials)" }
+# The newest offline Node.js zip next to this script wins over downloading $NodeVersion
+$OfflineNode = Find-OfflineNode
+$nodeSource = if ($OfflineNode) { "install Node.js $($OfflineNode.Version) from the offline package $($OfflineNode.File.Name) next to this script" }
+else { "download Node.js $NodeVersion from nodejs.org" }
 Write-Host "This script will install or upgrade graft for user $env:USERNAME (no admin rights needed). It may:"
-Write-Host "  - download Node.js $NodeVersion from nodejs.org into $NodeHome, if no suitable Node.js is found"
+Write-Host "  - $nodeSource into $NodeHome, if no suitable Node.js is found"
 Write-Host "  - add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix"
 Write-Host "  - install graft globally with npm from $graftSource"
 Write-Host '  - set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell'
+Write-Host "  - offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings"
 Write-Host '  - check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL'
 if ($Yes) {
     Write-Host 'Proceeding (-Yes was given).'
@@ -843,7 +901,7 @@ if ($Yes) {
 }
 Write-Host ''
 
-$wanted    = [version]$NodeVersion.TrimStart('v')
+$wanted    = if ($OfflineNode) { $OfflineNode.Version } else { [version]$NodeVersion.TrimStart('v') }
 $reinstall = $false
 $pin       = $false
 
@@ -954,6 +1012,26 @@ foreach ($tool in 'node', 'npm', 'graft') {
 if (-not $pathOk) {
     Write-Host "  User PATH is now: $((Get-UserPathEntries) -join ';')"
     Write-Host "  Expected it to contain $NodeHome (if Node.js was installed there) and $NpmGlobal."
+}
+
+# 5c. LiteLLM's public model price/info catalog, so graft can price savings for models its built-in table
+# does not list (one anonymous GET; problems here never fail the install)
+Write-Host ''
+Write-Host "graft can download LiteLLM's latest public model price/info list ('graft prices update': one anonymous"
+Write-Host 'download, nothing about you, this PC or your repositories is sent) to price its savings for newer models.'
+$getPrices = $Yes
+if (-not $Yes) {
+    $getPrices = (Read-Line 'Download the latest model prices from LiteLLM now? [Y/n]') -notmatch '^(n|no)$'
+}
+if ($getPrices) {
+    try {
+        & graft prices update
+        if ($LASTEXITCODE -ne 0) { Write-Warning "'graft prices update' failed (exit code $LASTEXITCODE); run it again later." }
+    } catch {
+        Write-Warning "Could not run 'graft prices update': $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "Skipped. Run 'graft prices update' later to download them."
 }
 
 # 6. LLM endpoint, key and model for `graft build --deep` (problems here never fail the install)

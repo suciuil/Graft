@@ -571,8 +571,10 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   // It carries the same `function` field shape, so groovyCallee reads it unchanged; leaving
   // it out drops over half the call edges in closure-heavy Groovy and Jenkinsfiles.
   groovy: new Set(["function_call", "juxt_function_call"]),
-  // PL/SQL: a sub-program call is a `ref_call` (a referenced_element with args).
-  plsql: new Set(["ref_call"]),
+  // PL/SQL: a sub-program call is a `ref_call` (a referenced_element with args),
+  // or — for a procedure called without arguments (`log_it;`) — a `statement`
+  // holding nothing but a referenced_element. plsqlCallee tells them apart.
+  plsql: new Set(["ref_call", "statement"]),
   // Markup/style languages have no call graph — extracted by custom walkers.
   css: new Set<string>(),
   html: new Set<string>(),
@@ -1085,7 +1087,10 @@ function walk(node: Parser.SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEd
           implicitSelf: true,
         });
       } else {
-        const recvType = resolveRecvType(callee.receiver, ctx);
+        // PL/SQL: the receiver of `pkg.proc()` is already the owning package's
+        // name — there is no variable to type — so it goes through verbatim and
+        // resolve.ts matches it against package nodes.
+        const recvType = ctx.lang === "plsql" ? callee.receiver : resolveRecvType(callee.receiver, ctx);
         edges.push(recvType ? { ...callEdge, recvType } : callEdge);
       }
     }
@@ -3210,16 +3215,47 @@ function cCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; r
   return null;
 }
 
-/** PL/SQL call: a `ref_call` wraps a `referenced_element` whose `ref_name` is the
- * sub-program called and whose optional `ref_name_parent` is the owning package
- * (`pkg.proc()`), passed as the receiver so resolution can qualify the target. */
-function plsqlCallee(node: Parser.SyntaxNode): { name: string; viaMember: boolean; receiver?: string } | null {
-  const ref = node.childForFieldName("referenced_element") ?? node.namedChildren.find((c) => c.type === "referenced_element");
+/** PL/SQL call. Two shapes reach here (see CALL_TYPES.plsql):
+ *   - a `ref_call`: a `referenced_element` plus arguments — `log_it('x')`,
+ *     `v := pkg.calc(1)`;
+ *   - a `statement` whose only child is a `referenced_element` — a procedure
+ *     called with no arguments (`log_it;`). Any other statement is not a call.
+ * The referenced element is a dotted chain of identifiers: the LAST one is the
+ * sub-program, the one before it (if any) its package — `hr.util_pkg.log_it`
+ * names `util_pkg.log_it` in schema `hr`, and the schema adds nothing to an
+ * in-repo lookup. The package goes out as the receiver; resolve.ts reads it as
+ * the owning package's name, case-insensitively, like Oracle.
+ * A call across a database link (`pkg.proc@remote_db(…)`) runs in ANOTHER
+ * database, so whatever in-repo code shares its name is not its target: dropped.
+ * `kinds`: a sub-program may be a procedure or a function. A bare statement
+ * with no arguments can only be a procedure call (a function's result cannot be
+ * discarded in PL/SQL), so only that shape narrows to procedures. */
+function plsqlCallee(
+  node: Parser.SyntaxNode,
+): { name: string; viaMember: boolean; receiver?: string; kinds: Kind[] } | null {
+  let ref: Parser.SyntaxNode | undefined;
+  const asStatement = node.type === "statement";
+  if (asStatement) {
+    const only = node.namedChildren;
+    if (only.length !== 1 || only[0].type !== "referenced_element") return null;
+    ref = only[0];
+  } else {
+    ref = node.childForFieldName("referenced_element") ?? node.namedChildren.find((c) => c.type === "referenced_element");
+  }
   if (!ref) return null;
-  const nameNode = ref.childForFieldName("ref_name");
-  if (!nameNode) return null;
-  const parent = ref.childForFieldName("ref_name_parent");
-  return { name: nameNode.text.replace(/^"|"$/g, ""), viaMember: !!parent, receiver: parent?.text };
+  if (node.namedChildren.some((c) => c.type === "db_link") || ref.namedChildren.some((c) => c.type === "db_link")) {
+    return null;
+  }
+  const parts = ref.namedChildren.filter((c) => c.type === "identifier").map((c) => c.text.replace(/^"|"$/g, ""));
+  const name = parts.at(-1);
+  if (!name) return null;
+  const receiver = parts.length >= 2 ? parts[parts.length - 2] : undefined;
+  return {
+    name,
+    viaMember: receiver !== undefined,
+    ...(receiver !== undefined ? { receiver } : {}),
+    kinds: asStatement ? ["procedure"] : ["procedure", "function"],
+  };
 }
 
 /** A bare file node for a language with no symbol structure to extract (Razor)
