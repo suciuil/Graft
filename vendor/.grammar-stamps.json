@@ -1,169 +1,169 @@
 {
   "@tree-sitter-grammars/tree-sitter-xml": {
-    "build": "87722f686b5d88ae595b32ffdc8e6575bb8455fb76a066c5d0a707aa5988e568",
+    "build": "88044db57b905c4910ad9f2d3432fc7382541dcfca771eb1dae7b093f5ca0e58",
     "gen": {
       "dtd": {
         "in": "f5bb27c6bb7b4ea4512175c60206474bd1ada5021773aa3535070e581d3bcaa1",
-        "parser": "d28717c4c74af4a3a095dfc9e4c697d2393f8f8e4dec77a87d59696a18e9efa4"
+        "parser": "c5f131cd6398e3624fbec3f325c94e297c51c803d62ba1290fd9b69779619768"
       },
       "xml": {
         "in": "e48cb7bbfc7dcc018407395d0ee6e036c4fa69db53d55346fbfbff0ab574daf7",
-        "parser": "e00f74ae7edcfc5e0cf9dc551a41a02e88a86dad9d6d13820e292bde794cdd94"
+        "parser": "887ca7356ad8f0523729481c83cf20b6c280bbaf7b38e29e2ef8cdedb9ffd510"
       }
     },
-    "pack": "13d766bca4aa9ccdf76f3fc783576531d129ede34c090aedd901367365673950"
+    "pack": "5c28d075024d7236de93a1fae1424f209cecc66b0da82b2c9218c23a3539bbd3"
   },
   "tree-sitter-kotlin": {
-    "build": "1465f8bf4c62e049ac22c4cbd4ed76340afaec80abd58cea33069a82785de93f",
+    "build": "b4c43547324de705bc74ff851d06b4733a5babbdbcf0111eb410cadde37e4dda",
     "gen": {
       ".": {
         "in": "11502c1ad1ba9284b2184563b02bd8025ad2bbb0bd75804b0051b608b7726c6f",
-        "parser": "7d1b08094aea7be1092fb3b3f566d180706d9ad4a197e63a69d649eb183b77d6"
+        "parser": "18d00b133a2f323b2328a7144b48cbf1a3cc6a7d99d45a66a1892c37a986de84"
       }
     },
-    "pack": "d0117158570cd7bd283d91ff244529cf2ace364eec5ee60c670ba8af51ab2472"
+    "pack": "b83a4a447db7128223f260e0ed9aa27888418e5e78a4572f89ded9c9f6db46f5"
   },
   "@tree-sitter-grammars/tree-sitter-markdown": {
     "gen": {
       "tree-sitter-markdown": {
         "in": "495d39450f133faaa4ca20116233b30768647cf54ac0aabdceb5fabde7752629",
-        "parser": "efa1306e954881e7e3cf18ff37f55f7379d0c67b21bcc28e1b0ab50f32e30414"
+        "parser": "6f692b46390338ba5124805e719bbe068d897c4df47af31177854710b2ae3c77"
       },
       "tree-sitter-markdown-inline": {
         "in": "5470ff9240db87f3f001adb5bb592def28e4d84e6d2893bd78d432afa77ee5fb",
-        "parser": "fe627b898f143981a0249776957cc4b01ba94ae5d43857a2ac854db06006e499"
+        "parser": "85fe46b3f023aa0ad0d50cedb90c787695c2977c2f5b689fb070fc4607a0b78b"
       }
     },
-    "build": "4935acbe519ca872a28ce1916f50bbad97dc48cfc25332a51f4f5abf5b755fb1",
-    "pack": "f549f471231b4b590aeb10fc05d135ee93769e80e767dc0b534460a165a60afa"
+    "build": "b1d93fdf2ba77f2328c0ec81e1c0a42fb745dcdf9fc1b28a09a6d162583c142c",
+    "pack": "2a5e91c13bf8fceabcd808c231583811617b84117049e8bb4bf53ebea59c5665"
   },
   "@tree-sitter-grammars/tree-sitter-yaml": {
     "gen": {
       ".": {
         "in": "84aa140dfac83da727d76b5b11aabd5189aa3881b89f191863fb72769f81e3c1",
-        "parser": "8a3baaab33fb63cf9a89f97ec61dbb3ab0d4ef69be9f0f229092c79d129617c9"
+        "parser": "1787dd7c02e224d879e8767a83f88676d6ed0b55bb7fef4f950c76470a15e7ab"
       }
     },
-    "build": "52c97adcd80183d2a590cac584a1d1a3c85cdb52fd48b937f2187f6cd1cd51b5",
-    "pack": "0c75876b799ef2973169a59a7fa7d39f695bb49f8529e4846bb1d94125d50285"
+    "build": "de24e8150862e808fd5f492f4408c4dc80b2ddaa29cc8b03e9df7c0d300fe779",
+    "pack": "533764244f0e5f1846e5ef511ef8b2f6758f3b00c4cde2d18cc9fbd123b6e307"
   },
   "tree-sitter-c": {
     "gen": {
       ".": {
-        "in": "3f314a6412cf3b3e48662e8757e7d78cc4fc80c6c71e0fa25bf846f802cf89af",
-        "parser": "eb8323f5a89e71667334dee734520f54a3f48148dd02205be01d50bd3e4c745f"
+        "in": "9045dfce452ca9c90ca4fe8c22b7a0a5df2b27aaf785d1c9ecd95adc88e1bec9",
+        "parser": "d4ad4f601a54116e0cf2fe41ff5579d7fbb694bd3ba8ccc9fac73efa9edccf2a"
       }
     },
-    "build": "7f5d2b875355333728e70258b1bd9a54da08cbd5a29df84efc80efa72dcc5d26",
-    "pack": "add2d6f79846306e00b5830625add17075989b4d68ab423af01d61edbe40f475"
+    "build": "34f8fe80be91b6212e94d6329dcc0c0204f31131910cd042c081c531768b9b4a",
+    "pack": "f5ce9e7b264260dea604ed8ae1e14bdeb8e0a6a44cbc7b8dc64586f609348759"
   },
   "tree-sitter-c-sharp": {
     "gen": {
       ".": {
-        "in": "4bc3b2d87a25bcde9d11adf822eb48891528e610d64bba76bf28e94cf5b41c0c",
-        "parser": "b2f80cba115a0964e9dd6d368ac0c9a12736173f22c961431b008ade3b0efc3b"
+        "in": "e6a911f6cfc744914411b90414aa8dc4779f4cc24b098e3ace772d257ef40f7d",
+        "parser": "cd0362d8183a38c2facc9e48a9c983242d35148a29276b8eaacd2ab2d258b0cb"
       }
     },
-    "build": "a3bc790d59182b49124446f5760be42e4901cc46521c6d2eef52aa2cdc3778b6",
-    "pack": "27f80b63498a83932601bfeaad859ec6a373b956da62290b04d4366c99cb26ab"
+    "build": "7003935ce0ecb61612eb04f9f627228d132684341523ad184c209c14943766c3",
+    "pack": "c49536842f134572b9bfcf6f843ad677e0479358b9acbabe2fd9f80c7a0e98b8"
   },
   "tree-sitter-cpp": {
     "gen": {
       ".": {
-        "in": "d37f13c8f02bcf37f981cc358f0df73a8fe1c1f192e60a2f87f6f49101a9033f",
-        "parser": "1bb6b473193cd383be1ad307f64f80a700587e46522ff4f62fb357840a38da44"
+        "in": "eaaa35d8306aefd3b98408d5b1a923bab549675a3c4ae4f02b9f9a3fb1fa08cd",
+        "parser": "0e4b6f76ddd5de8ba54f20e47950e6ffa564fd1ddfb2290d48cac3385cfccabb"
       }
     },
-    "build": "2632dc22b3bc329e929394661fa73f819453940ebf0727aec4c6abb034ef2fa8",
-    "pack": "765bd253a99158b95237985a92749e54c549d746707f7700faf0e478c6385a16"
+    "build": "228a0266ca732dbb5a90e371afa7209f0fb1e963d356a3baf454f5b40fc0185c",
+    "pack": "4c9d4d8c6e64454693e06636f70f21f180d097ae0b881436a0a86ac28ea358e7"
   },
   "tree-sitter-css-in-js": {
     "gen": {
       ".": {
-        "in": "2514fa8bf292bdd02c117f5f197a3725d7b6ac7f699ef13d56d8a4bdea68042a",
-        "parser": "4fc19fe50cd0e52c45e0c7bcb1adc57a016941115824a8dee970bdf192b6c2f9"
+        "in": "f45c9fd7a34f857fcaea55ece0b037ff0b886892fd5c2f6d2e4fbdc628f49c1b",
+        "parser": "2b4770be760536cce9e377795a4b627e2e6c95aa8987b393395a926709056ffb"
       }
     },
-    "build": "dd70e529e821aa088978f58e87895d5433b87cb6779e5098636918ab224e09b3",
-    "pack": "151097e478e55e67dc66dd391e17e2d8d6b93f4bf8cfd81d50caef4fb1fe2a24"
+    "build": "bbf6f5ed698f93d8e0a1c6f01642f30b06b21f3c4898bdb4f80e3a0759beec2b",
+    "pack": "4f04295f121e4d216c91049975dce5d1419b3af27ba6dd9407f8d4727022925e"
   },
   "tree-sitter-csv": {
     "gen": {
       "csv": {
         "in": "21548bc3dc4f842e080007c91c75ab0b6b6f3152040decaa06812141e1b56848",
-        "parser": "97775245103443ee6ad4a82cb8df8e26a626f548112a26d4be9f5de18227028b"
+        "parser": "27dd86d81cceb106445b079d52d0fdbec911dab677b9fb5d49819be00c9e21af"
       },
       "psv": {
         "in": "0dbb73c2f6e7321d195516193231bc5eeeca0087ebb756472612531aa1d9c5e4",
-        "parser": "f677d4bc0b462c4112ea46221975bae2b960a024a943bba65e974ee97d1f83f1"
+        "parser": "7afed1e8ccfd118ab781e70e0350072520bd813180ec11b2d0167d6ecb9b1bb5"
       },
       "tsv": {
         "in": "c0459f03405f5bf9e73c4f260bd111286c97ed0f9d1c9f76501a64a4aac7705c",
-        "parser": "ea8cee9b1e5de67c9ecf66f339123da71bec8ca97abd1bac924ee49492bb6cca"
+        "parser": "0f09e3b3e495e34afd33dbb84e74dfcef2283d82b2f88576b3ed93bc37b1c260"
       }
     },
-    "build": "cb1e614825541eb058199fa8831189419f0585ed62be053b5e601485534a617e",
-    "pack": "70909145e82cd12065aee705a22e525154834e4459a90effd0698914f2b1b0e9"
+    "build": "9d1f0088f273b71aae70ed2e3485a9a8ea581f89fc8b829b615b5b83aba712f1",
+    "pack": "57f24dcb4ab6448edde76fe5bcb7537447010477da63a8f5e589af8c17f45f22"
   },
   "@bootswithdefer/tree-sitter-groovy": {
     "gen": {
       ".": {
         "in": "28e6a762758b71a3a9f1ededf983502f3cad2a2a5dee30b4356316dcb23d5040",
-        "parser": "bace487ec996c136382c3fb47ca3e74061ff4ba5d30ece0a319af96461d3b8a2"
+        "parser": "addde1b7685ebe90b1d1cf2b3acc0cdcc16af7241b06c533bb180e412eeb5f99"
       }
     },
-    "build": "58c46a8390dd9c1dac705387e07957d2356b6a5cb5a6812494238436b4159072",
-    "pack": "726dac5e1adb06eb7f82dd8750186bf3fe4e02f4bb683002b736f8121c3c136f"
+    "build": "36338bbbeaffbb02edf68e96c54b9d48189f554ab7c968a55f8a540a7f4df706",
+    "pack": "e9f9f42a941e4904edd5f88202b481c3d5be351c0ad01f79fce1499525dc3210"
   },
   "tree-sitter-html": {
     "gen": {
       ".": {
         "in": "305c5de733f39d1db9b6faa4a985b845acd349049ba4cfacbd341770855ef659",
-        "parser": "65768172733b3bbe461cbdc14ea928f00fbfcc51d8ac68f0a5c72071c6a0bbf1"
+        "parser": "b043b57daf37ea4cb48fbcf92d974137867eefd88caed08ea700a13c420bb93d"
       }
     },
-    "build": "1aaf79e991aaf602955afecf6bbd481943c1a4f4e53f50a80150dcbc92cc0909",
-    "pack": "4a867a6d679302f6deda5ec6b7236c8810eb332bf5ffaede169d239205c7327e"
+    "build": "0867ee266bee37ca64500dd793d1ad62447514a84f8232e1e5d913fe821d9dcb",
+    "pack": "076fb3343a11206fe716571fa691fed553a9637e5588bbf71257d76a84bb7f5b"
   },
   "tree-sitter-json": {
     "gen": {
       ".": {
         "in": "28fdeceb7eff8d888dad32644fe0d9a60a645327a095792391e85c65105db65e",
-        "parser": "9a266ae4a0305b8a2769bee90a14ac06914bdc83a509f16428311eac2845637e"
+        "parser": "af3c62346a84324f713c17f75b9bbb359f853449d613796752f1a5806f51cdc5"
       }
     },
-    "build": "6f82afa1b16e18b6b70829ee455fd5e6357d22ebc633c1ccb98507ff9bd0afd8",
-    "pack": "564f147654497a81b77d09fec9c6247fa2dfdc86dfb38dfd3beac4411533adcc"
+    "build": "e6c49999a836f01685078ae5c2626ea5e7da74157b1eb3d9bea57e284cf53c9d",
+    "pack": "011de1c1e5a18eda5432994c816543e9e50feb03e9a4d82ac2481142f0834f9e"
   },
   "tree-sitter-plsql": {
     "gen": {
       ".": {
         "in": "2cffdb90cbd6ae186080aa10f180742e85c1aa4c3206d7d75c672b60aed8d462",
-        "parser": "e2beb971059ddb7e43d15db28fd5ecd41578bbbfeb279db4f34d64bc71ad8b51"
+        "parser": "c0a9c8b7ca60577086327c7912ccd338533736fb254b0bb63db794ce96c2873a"
       }
     },
-    "build": "8b0aa1e702099f2ac87db51eb3de1c4b0327bca34666324af21b4b0f1e7faa15",
-    "pack": "55b9885af9195dd7d10f078cc8cb4d1d5a47eb0d4b946025790fdf064abaf953"
+    "build": "20792e30d14a952f0195c60fbbec58d081591a0acc48e2e2405ca0b9a91f2271",
+    "pack": "352466babc5c954c1eb3aeb4c953c8990c1bb5ded26de9af401982576facb0e1"
   },
   "tree-sitter-razor": {
     "gen": {
       ".": {
         "in": "101239c3d941eba894eabf56330b1f5c426f4a4defe5675f04be94016cc980df",
-        "parser": "516d92a6dc3402feef2f4eb277abb5f75d321f6f3ca8b9b781f8b9af132a9836"
+        "parser": "b63d3ab942ab82bbf2e1f26b1ad4a2f3cffc321a991670ee4d132d0bab61b07a"
       }
     },
-    "build": "a6e26cbf20372981ee8c94955f1633231f73140d8b8ff5c924bafdfa82fbf983",
-    "pack": "bce30e3cdc9a8dcb83d5249c9c6af4809cc013c71f19abff8ea5c4eaacf6dd5c"
+    "build": "cf54ab20848add0aa969dcd4b84444435df2141b95fd1963c7e4ae5239fbc76a",
+    "pack": "7330ac5e286e745b24671446e60dee5615cc6691cddcdb1c73f87d8a442afb78"
   },
   "tree-sitter-scss": {
     "gen": {
       ".": {
         "in": "9986b536803b5062af93ec3e25d863db6241f353e531d5b2f4bd82cf05fc16d6",
-        "parser": "bd47539a280d5c945226dbc59af450f65db4bf0238428d7f23109b9b24a840e8"
+        "parser": "bfa254c30e8dd0b93c25b908b205009da7489bc3f6a528d78ac78020f6c822d4"
       }
     },
-    "build": "7105c70c31c85e393ff94ee3753ae55d3f3224fab2dd3b48eb148e1a9c94cfbb",
-    "pack": "253b98c815ab642984c9f98bac9d12c2db8ca6ae0d7bd7d7088ea46aa058d9cc"
+    "build": "bc0d620190e3827287fc898fbc8dac718747726dd4b8d2c68ac47bcfbe7b966e",
+    "pack": "2f7ddb8b7290a31483afbc3598c38b20490a51d03f0365d1c5ef64692dcc3d87"
   },
   "tree-sitter-cmake": {
     "gen": {
@@ -172,37 +172,37 @@
         "parser": "ece92c2e3fbf15634fb90fab91d0af749348c069d27208eeb10dcdd4e77fe5a2"
       }
     },
-    "build": "b11054c177d1aad6178ce1016deb8a352bbcb986a86e134b941b41af6d45217e",
-    "pack": "d085276a3abdfb1f2ce67f744fc6e4e3f891a93982e9b10709f13168988decde"
+    "build": "50177a55fc766a0e0b267bebc6cacaa50edc80a08c2ca436266f101b4069825b",
+    "pack": "e65a04b8e946ef165cff6bc504aff3cbf331d0f4a565bbee6472d31657e4ec18"
   },
   "@ganezdragon/tree-sitter-perl": {
     "gen": {
       ".": {
         "in": "7b38d628fdda3181fe440863e2bdee203beca8343f088c68f7da34cdd93e873b",
-        "parser": "320673407ef8cab487808169cd048da6a496da82b47b7f9da17f889e6c4a4686"
+        "parser": "7f814c3b9313c584ac1186ad32b1dd0de28f0247376dcb063ac566b81e50ad34"
       }
     },
-    "build": "3c105f9504c04fb9cd72cb5291a0b440cf6bae358d02ee16d2d0e4547df93120",
-    "pack": "10fa3ce4bc81c83dafe47bf72fca08e634773c18d56b2b16a54a9fc7e2797786"
+    "build": "2e812f5fc74cbb84d7dd975b7fb50c83dbd8694609872829974f6522b440f06b",
+    "pack": "f6d71c558c212a15c0b170c376d236d27271e00c1a89637b8a0bad4b0dee1337"
   },
   "tree-sitter-bash": {
     "gen": {
       ".": {
         "in": "905bc371d680ca7d8c9a98bf6d63fe8e4de2cfac4feacc86546cf6ba2a6a09a9",
-        "parser": "917c39757f4bb9d29c1d0b3ea0d9584b5da83db52c9b3f1a702635ef6101de77"
+        "parser": "00840bdbea02adc3096566f02464affcfc79f35ddef4f00d7bb6ae17a15dafef"
       }
     },
-    "build": "636567be61d3464317c1a52c1fee3a36ec4ef3a423d87f89b1826fc70df56526",
-    "pack": "d8780cf0f3042f1a77c350a3d7dd46a2a28b6c0bc0cd78fd336c4fd856a7a82e"
+    "build": "067f7a33cb6877b3d693f31e5ff6e7d3c129aba90cee4f4a996f7978ae1434f1",
+    "pack": "60c7713e939dac0e67a973cacb99e4998682f3a5fb84e80943711cf34cfe061f"
   },
   "tree-sitter-make": {
     "gen": {
       ".": {
         "in": "6348284fa5ba2d2c8b0f6457518dd39deac486e56c9c609bb55f2225f491cdf9",
-        "parser": "07cdcd841349bf4134cd273d67551bfb9c36ec6c70a17467648734fe6cbd1817"
+        "parser": "3c6982f05abc4614e09468ff6d71aa906038f01802b8988f2a6edb735f74b55c"
       }
     },
-    "build": "635245621aa24efb27b87b6bec3166f8228c5eed2339683bd826d7df7ef22caa",
-    "pack": "95c23e7aaed1b5b7a2bfd922474af91ff578d3d45cb84a06adaa610de18984e2"
+    "build": "bfc41aac3cf313d6bed738ebf3abe863f76cd1d21de033d5d00cb4d888503fd3",
+    "pack": "b39c2a8812275e3ab663605bbdfa537b5136b4767cc26812a7b257c5b78d1405"
   }
 }

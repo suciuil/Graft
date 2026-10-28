@@ -84,6 +84,9 @@ try {
 
   const included = [];
   const kept = [];
+  /** Sibling repo not checked out, committed vendor/<key> binding used as is: the
+   * normal state of a fresh clone, so one summary line rather than a line each. */
+  const committed = [];
   const missing = [];
   const optedOut = [];
   for (const [key, pkgName] of Object.entries(optionalGrammarPackages())) {
@@ -117,8 +120,10 @@ try {
       file = undefined;
     }
     if (!file) {
-      const why = existsSync(repoDir) ? `no prebuilds/${PLATFORM}/*.node in ${repoDir}` : `${repoDir} not present`;
-      if (hasStaged()) kept.push(`${key} (${pkgName}): ${why} — keeping the copy staged earlier`);
+      const present = existsSync(repoDir);
+      const why = present ? `no prebuilds/${PLATFORM}/*.node in ${repoDir}` : `${repoDir} not present`;
+      if (hasStaged() && !present) committed.push(key);
+      else if (hasStaged()) kept.push(`${key} (${pkgName}): ${why} — keeping the copy staged earlier`);
       else missing.push(`${key} (${pkgName}): ${why}`);
       continue;
     }
@@ -143,6 +148,9 @@ try {
   console.log(`  vendor: ${included.length} grammars staged for ${PLATFORM} (${mb.toFixed(1)} MB)`);
   if (optedOut.length > 0) {
     console.log(`  vendor: not vendored (absent from optionalDependencies): ${optedOut.join(", ")}`);
+  }
+  if (committed.length > 0) {
+    console.log(`  vendor: ${committed.length} prebuilt in vendor/ (sibling repo not checked out): ${committed.join(", ")}`);
   }
   if (kept.length > 0) {
     console.log(`  vendor: ${kept.length} kept from an earlier build:`);
