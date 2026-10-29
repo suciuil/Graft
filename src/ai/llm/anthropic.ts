@@ -50,6 +50,10 @@ export interface AnthropicChatModelOptions {
    * it for the rest of the run, with a one-line note instead of a warning.
    */
   effortOptional?: boolean;
+  /** Transport retries; default {@link transportRetries}. A one-off probe passes 0. */
+  maxRetries?: number;
+  /** Per-request timeout in ms; default the SDK's. A one-off probe passes a short one. */
+  timeoutMs?: number;
 }
 
 type Effort = NonNullable<NonNullable<Anthropic.MessageCreateParamsNonStreaming["output_config"]>["effort"]>;
@@ -110,7 +114,8 @@ export class AnthropicChatModel implements ChatModel {
         ...(opts.authToken ? { apiKey: null, authToken: opts.authToken } : { apiKey: opts.apiKey }),
         baseURL: anthropicBaseUrl(opts.baseUrl),
         defaultHeaders: opts.headers,
-        maxRetries: transportRetries(),
+        maxRetries: opts.maxRetries ?? transportRetries(),
+        ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
       });
   }
 

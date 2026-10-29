@@ -110,6 +110,10 @@ export interface OpenAIChatModelOptions {
    * a warning.
    */
   effortOptional?: boolean;
+  /** Transport retries; default {@link transportRetries}. A one-off probe passes 0. */
+  maxRetries?: number;
+  /** Per-request timeout in ms; default the SDK's. A one-off probe passes a short one. */
+  timeoutMs?: number;
 }
 
 type ChatParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
@@ -590,8 +594,10 @@ export class OpenAIChatModel implements ChatModel {
   private reasoningAllowanceRefused = false;
   // Sticky: toolsAsResponseFormat was turned on only to keep the effort alongside a forced tool.
   private structuredForEffort = false;
+  private maxRetries: number | undefined;
 
   constructor(opts: OpenAIChatModelOptions) {
+    this.maxRetries = opts.maxRetries;
     this.effort = opts.reasoningEffort?.trim() || undefined;
     this.strictEffort = opts.strictEffort ?? false;
     this.effortOptional = opts.effortOptional ?? false;
@@ -607,7 +613,8 @@ export class OpenAIChatModel implements ChatModel {
         apiKey: opts.apiKey,
         baseURL: this.baseUrls[0],
         defaultHeaders: opts.headers,
-        maxRetries: transportRetries(),
+        maxRetries: opts.maxRetries ?? transportRetries(),
+        ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
         fetch: errorEnvelopeFetch(),
       });
     this.clients = this.baseUrls.map((_, i) => (i === 0 ? first : undefined));
@@ -774,7 +781,7 @@ export class OpenAIChatModel implements ChatModel {
    * reaches the caller once that budget is spent.
    */
   private async complete(params: ChatParams, retryErroredBody: boolean): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-    const retries = retryErroredBody ? transportRetries() : 0;
+    const retries = retryErroredBody ? (this.maxRetries ?? transportRetries()) : 0;
     for (let attempt = 0; ; attempt++) {
       let failure: ProviderResponseError;
       try {

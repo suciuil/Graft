@@ -16,7 +16,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Graft } from "./engine.js";
 import { resolveConfig, type EngineConfig } from "./ai/providers.js";
-import { printLlmFailureHints } from "./ai/llm-hints.js";
+import { llmProblems, printLlmFailureHints } from "./ai/llm-hints.js";
+import { ensureLlmAuth, resolveEndpointConflict, type LlmChanges, type LlmGuardDeps } from "./ai/llm-auth.js";
 import {
   applySavedSettings,
   runEffortCommand,
@@ -28,7 +29,7 @@ import {
 } from "./ai/llm-settings.js";
 import { startProgressLine } from "./util/progress-line.js";
 import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
-import { databricksTokenHint } from "./ai/llm/databricks.js";
+import { databricksTokenHint, type DatabricksListing } from "./ai/llm/databricks.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
@@ -346,8 +347,12 @@ interface GlobalOpts {
   agentModel?: string;
 }
 
-/** Key and model picked for this run by an interactive step (the Databricks model choice of `build --deep`). */
-let llmOverride: Pick<EngineConfig, "apiKey" | "model"> = {};
+/**
+ * Endpoint, key and model picked for this run by an interactive step (the endpoint
+ * choice and auth recovery of src/ai/llm-auth.ts, the Databricks model choice of
+ * `build --deep`) that replace a value given as a CLI flag.
+ */
+let llmOverride: Pick<EngineConfig, "apiKey" | "model" | "baseUrl"> = {};
 
 /** Config drawn from the global CLI flags (env + defaults fill the rest). */
 function cliConfig(): EngineConfig {
@@ -357,8 +362,50 @@ function cliConfig(): EngineConfig {
     provider: o.provider as ProviderKind | undefined,
     model: llmOverride.model ?? o.model,
     apiKey: llmOverride.apiKey ?? o.apiKey,
-    baseUrl: o.baseUrl,
+    baseUrl: llmOverride.baseUrl ?? o.baseUrl,
   };
+}
+
+const isInteractive = (): boolean => !!(process.stdin.isTTY && process.stdout.isTTY);
+
+/** The deps of the endpoint / auth guards (src/ai/llm-auth.ts) for this process. */
+function llmGuardDeps(): LlmGuardDeps {
+  return {
+    config: cliConfig(),
+    env: process.env,
+    store: userEnvStore(),
+    out: (l) => console.log(l),
+    err: (l) => console.error(l),
+    prompt: isInteractive() ? terminalPrompter() : undefined,
+  };
+}
+
+/** Apply what an endpoint / auth guard settled to the rest of this run: env vars in place, flag values via {@link llmOverride}. */
+function applyLlmChanges(changes: LlmChanges): void {
+  for (const [name, value] of Object.entries(changes.env)) process.env[name] = value;
+  if (changes.config.baseUrl) llmOverride = { ...llmOverride, baseUrl: changes.config.baseUrl };
+  if (changes.config.apiKey) llmOverride = { ...llmOverride, apiKey: changes.config.apiKey };
+}
+
+/**
+ * After a deep build failed: when the failures say the key was rejected or the
+ * endpoint unreachable, offer (in a terminal) to change the URL and/or key and
+ * check them, so the re-run works. Best effort: never turns the reported failure
+ * into a different crash.
+ */
+async function offerLlmFix(messages: (string | undefined)[]): Promise<void> {
+  if (!isInteractive()) return;
+  const problems = llmProblems(messages);
+  if (!problems.includes("auth") && !problems.includes("unreachable")) return;
+  try {
+    console.error("");
+    const r = await ensureLlmAuth(llmGuardDeps());
+    if (r.status === "ok" || r.status === "unverified") {
+      console.log(`  Re-run \`${cmd("graft build --deep")}\` to resume from what is cached.`);
+    }
+  } catch {
+    // the failure was reported already
+  }
 }
 
 const engineFrom = (): Graft => new Graft(cliConfig());
@@ -827,20 +874,50 @@ grouped(program.command("build"), GROUP.setup)
       // would otherwise run with graft's defaults while `graft model` shows the
       // saved value. What this process sets itself still wins.
       applySavedSettings();
-      const choice = await chooseDatabricksDeepModel({
-        config: cliConfig(),
-        env: process.env,
-        out: (l) => console.log(l),
-        err: (l) => console.error(l),
-        prompt: process.stdin.isTTY && process.stdout.isTTY ? terminalPrompter() : undefined,
-        store: userEnvStore(),
-      });
-      if ("cancelled" in choice) {
+      // A provider with its own endpoint plus a custom endpoint URL: ask which one (once per pair).
+      const endpoint = await resolveEndpointConflict(llmGuardDeps());
+      if ("cancelled" in endpoint) {
         console.log("Cancelled — nothing was built.");
         process.exit(130);
       }
-      if ("skip" in choice) deepSkip = choice.skip;
-      else llmOverride = { apiKey: choice.config.apiKey, model: choice.config.model };
+      applyLlmChanges(endpoint.changes);
+      // In a terminal, a rejected key / unreachable endpoint is fixed here (change or
+      // skip the URL and the key) instead of failing every LLM call of the build.
+      let listings: DatabricksListing[] | undefined;
+      if (isInteractive()) {
+        // Databricks: every route when the model choice below runs (it reuses the listings); with
+        // --model it does not, and the configured model's route alone answers the check.
+        // The endpoint picked above is remembered once it passes; a skip saves nothing.
+        const auth = await ensureLlmAuth({ ...llmGuardDeps(), allRoutes: !cliConfig().model }, { pendingSaves: endpoint.saves });
+        if (auth.status === "cancelled") {
+          console.log("Cancelled — nothing was built.");
+          process.exit(130);
+        }
+        if (auth.status === "skipped") deepSkip = auth.reason;
+        else if (auth.status !== "failed") {
+          applyLlmChanges(auth.changes);
+          listings = auth.listings;
+        }
+      }
+      if (!deepSkip) {
+        const choice = await chooseDatabricksDeepModel({
+          config: cliConfig(),
+          env: process.env,
+          out: (l) => console.log(l),
+          err: (l) => console.error(l),
+          prompt: isInteractive() ? terminalPrompter() : undefined,
+          store: userEnvStore(),
+          listings,
+        });
+        if ("cancelled" in choice) {
+          console.log("Cancelled — nothing was built.");
+          process.exit(130);
+        }
+        if ("skip" in choice) deepSkip = choice.skip;
+        else {
+          llmOverride = { ...llmOverride, model: choice.config.model };
+        }
+      }
     }
     const engine = engineFrom();
     const fmt = (o: Record<string, number>) =>
@@ -856,8 +933,10 @@ grouped(program.command("build"), GROUP.setup)
       deep = false;
       console.error(
         `⚠ ${deepSkip} — falling back to the structural build (no LLM summaries).\n` +
-          `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.\n` +
-          `  ${databricksTokenHint()}.`,
+          (resolved.databricks
+            ? `  Set GRAFT_API_KEY to a Databricks personal access token (\`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.\n` +
+              `  ${databricksTokenHint()}.`
+            : `  Fix the endpoint URL and the API key (\`${cmd("graft api url")}\`, \`${cmd("graft api key")}\`), then re-run \`${cmd("graft build --deep")}\`.`),
       );
     }
     if (deep && !resolved.apiKey) {
@@ -917,6 +996,7 @@ grouped(program.command("build"), GROUP.setup)
         // Only the stage and a code enum; the message stays on this machine.
         track("build_failed", { stage: "summarize", code: errorCode(err) }, { repo: buildRoot });
         await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
+        await offerLlmFix([err instanceof Error ? err.message : String(err)]);
         throw err;
       });
       conceptProgress.end();
@@ -953,7 +1033,10 @@ grouped(program.command("build"), GROUP.setup)
     }).catch(async (err: unknown) => {
       graphProgress.end();
       track("build_failed", { stage: "graph", code: errorCode(err) }, { repo: buildRoot });
-      if (deep) await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
+      if (deep) {
+        await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
+        await offerLlmFix([err instanceof Error ? err.message : String(err)]);
+      }
       throw err;
     });
     graphProgress.end();
@@ -1023,6 +1106,7 @@ grouped(program.command("build"), GROUP.setup)
           `  Nothing computed was lost: re-run \`${cmd("graft build --deep")}\` to resume from what is cached.\n` +
             "  Pass --allow-partial to accept a degraded meaning tier and exit 0.",
         );
+        await offerLlmFix([conceptFatal, m.fatal, ...conceptErrors, ...g.errors]);
         if (!opts.allowPartial) process.exitCode = 1;
       }
     }
@@ -1565,6 +1649,24 @@ pricesCommand
       .option("--unset", `remove the saved value (then: ${v.unset})`)
       .action(async (value: string | undefined, opts: { unset?: boolean }) => {
         process.exitCode = await runVarCommand(v, value, opts, envDeps());
+        // A provider with its own endpoint next to a custom endpoint URL: settle which one now, not at the next build.
+        if (v.name === "GRAFT_PROVIDER" && value !== undefined && !opts.unset && process.exitCode === 0) {
+          // The value just saved, even where this terminal still sets an older GRAFT_PROVIDER itself.
+          const guard = llmGuardDeps();
+          const saved = guard.store?.read("GRAFT_PROVIDER");
+          if (saved) guard.env = { ...process.env, GRAFT_PROVIDER: saved };
+          const endpoint = await resolveEndpointConflict(guard);
+          if ("cancelled" in endpoint) process.exitCode = 130;
+          else if (Object.keys(endpoint.saves).length > 0) {
+            // A choice just made is saved once the endpoint it picks passes its check, as everywhere else.
+            const picked = { ...guard, env: { ...guard.env, ...endpoint.changes.env }, config: { ...guard.config, ...endpoint.changes.config } };
+            const auth = await ensureLlmAuth(picked, { pendingSaves: endpoint.saves });
+            if (auth.status === "cancelled") process.exitCode = 130;
+            else if (auth.status === "skipped" || auth.status === "failed") {
+              console.log(`  The endpoint choice is not saved either: \`${cmd("graft build --deep")}\` asks again.`);
+            }
+          }
+        }
       });
   }
 }
