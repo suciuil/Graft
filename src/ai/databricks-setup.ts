@@ -33,23 +33,23 @@ export interface DeepModelDeps {
   err: (line: string) => void;
   /** Absent when stdin/stdout is not a terminal: nothing is asked. */
   prompt?: Prompter;
-  /** Where a newly typed key or picked model can be saved for future builds. */
+  /** Where a picked model can be saved for future builds. */
   store?: UserEnvStore;
   /** Overrides the live `GET /models` calls (tests). */
   lister?: DatabricksLister;
+  /** Listings an auth check already made with the configured key (src/ai/llm-auth.ts): not fetched again. */
+  listings?: DatabricksListing[];
 }
 
 export type DeepModelChoice =
-  /** The config the build should use (possibly with the typed key and picked model). */
+  /** The config the build should use (possibly with the picked model). */
   | { config: EngineConfig }
   /** Run the structural build only, for this reason. */
   | { skip: string }
   | { cancelled: true };
 
-const MAX_KEY_ATTEMPTS = 3;
-
 /** 401, or a message that says the credential itself is wrong. A 403 may only forbid the listing. */
-function isRejectedKey(err: unknown): boolean {
+export function isRejectedKey(err: unknown): boolean {
   if ((err as { status?: unknown })?.status === 401) return true;
   return /credential was not sent|unsupported type|invalid (access )?token|invalid api key|unauthori[sz]ed/i.test(shortError(err));
 }
@@ -85,40 +85,26 @@ export async function chooseDatabricksDeepModel(deps: DeepModelDeps): Promise<De
 async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModelChoice> {
   const prompt = deps.prompt!;
   const cfg = resolveConfig(deps.config, deps.env);
-  let apiKey = cfg.apiKey;
-  let typedKey = false;
-  let listings: DatabricksListing[] | undefined;
+  const apiKey = cfg.apiKey;
 
   deps.out(`graft build --deep uses the Databricks AI Gateway (${root}).`);
-  for (let attempt = 0; attempt < MAX_KEY_ATTEMPTS && !listings; attempt++) {
-    if (!apiKey) {
-      deps.out("It needs a Databricks personal access token (GRAFT_API_KEY or ANTHROPIC_AUTH_TOKEN).");
-      deps.out(`${databricksTokenHint()}.`);
-      const v = (await prompt.askHidden("Databricks personal access token (input hidden; Enter skips the LLM pass): ")).trim();
-      if (!v) return { skip: "no API key for the Databricks AI Gateway" };
-      apiKey = v;
-      typedKey = true;
-    }
-    deps.out("Checking the API key and asking the gateway which models it serves…");
-    const found = await listDatabricksModels(root, apiKey, deps.lister);
-    const rejected = found.every((l) => l.ids.length === 0 && l.error !== undefined && isRejectedKey(l.error));
-    if (!rejected) {
-      listings = found;
-      break;
-    }
+  // The auth guard before this (src/ai/llm-auth.ts) asks for a missing or rejected key; here it is only checked.
+  if (!apiKey) {
+    deps.err("⚠ no API key is set for the Databricks AI Gateway.");
+    deps.err(`  ${databricksTokenHint()}.`);
+    return { skip: "no API key for the Databricks AI Gateway" };
+  }
+  const reuse = deps.listings && deps.listings.length > 0;
+  if (!reuse) deps.out("Checking the API key and asking the gateway which models it serves…");
+  const listings = reuse ? deps.listings! : await listDatabricksModels(root, apiKey, deps.lister);
+  if (listings.every((l) => l.ids.length === 0 && l.error !== undefined && isRejectedKey(l.error))) {
     const src = settingSource("key", deps.config, cfg, deps.env);
-    const s = typedKey ? "the key you typed" : `${maskSecret(apiKey)} (from ${src.flag ?? src.env ?? "the environment"})`;
-    deps.err(`⚠ the Databricks AI Gateway rejected ${s}: ${shortError(found[0]!.error)}`);
+    deps.err(
+      `⚠ the Databricks AI Gateway rejected ${maskSecret(apiKey)} (from ${src.flag ?? src.env ?? "the environment"}): ${shortError(listings[0]!.error)}`,
+    );
     deps.err("  It needs a Databricks personal access token (it usually starts with `dapi`), not another gateway's key.");
     deps.err(`  ${databricksTokenHint()}.`);
-    apiKey = undefined;
-    typedKey = false;
-  }
-  if (!listings || !apiKey) return { skip: "the Databricks AI Gateway rejected the API key" };
-
-  if (typedKey && deps.store && (await yes(prompt, `Save this token as GRAFT_API_KEY in ${deps.store.where} for future builds? [y/N] `))) {
-    deps.store.write("GRAFT_API_KEY", apiKey);
-    deps.out("✓ saved GRAFT_API_KEY.");
+    return { skip: "the Databricks AI Gateway rejected the API key" };
   }
 
   const current = cfg.model;
@@ -129,7 +115,7 @@ async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModel
     // The model already set (GRAFT_MODEL, or the default) is one the gateway serves
     // for this key: use it, as every build after the first wants, without asking.
     deps.out(`→ ${current} (from ${from}) via ${databricksRouteUrl(root, databricksRoute(current))} — \`graft model\` picks another.`);
-    return { config: { ...deps.config, model: current, ...(typedKey ? { apiKey } : {}) } };
+    return { config: { ...deps.config, model: current } };
   }
   deps.err(`⚠ ${current} (from ${from}) ${verdict.why}.`);
 
@@ -171,7 +157,7 @@ async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModel
     deps.out("✓ saved GRAFT_MODEL.");
   }
 
-  return { config: { ...deps.config, model, ...(typedKey ? { apiKey } : {}) } };
+  return { config: { ...deps.config, model } };
 }
 
 /**

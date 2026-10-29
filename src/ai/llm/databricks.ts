@@ -410,16 +410,22 @@ export async function listDatabricksModels(
   apiKey: string,
   lister: DatabricksLister = defaultLister,
 ): Promise<DatabricksListing[]> {
-  return Promise.all(
-    DATABRICKS_ROUTES.map(async (route): Promise<DatabricksListing> => {
-      const url = databricksRouteUrl(root, route);
-      try {
-        const listed = await lister(route, url, apiKey);
-        const ids = [...new Set(listed.filter((id) => id && !NON_CHAT_RE.test(id) && databricksRoute(id) === route))];
-        return { route, url, ids };
-      } catch (error) {
-        return { route, url, ids: [], error };
-      }
-    }),
-  );
+  return Promise.all(DATABRICKS_ROUTES.map((route) => listDatabricksRoute(root, apiKey, route, lister)));
+}
+
+/** `GET /models` on one gateway route (see {@link listDatabricksModels}). Never throws: a failure is the listing's `error`. */
+export async function listDatabricksRoute(
+  root: string,
+  apiKey: string,
+  route: DatabricksRoute,
+  lister: DatabricksLister = defaultLister,
+): Promise<DatabricksListing> {
+  const url = databricksRouteUrl(root, route);
+  try {
+    const listed = await lister(route, url, apiKey);
+    const ids = [...new Set(listed.filter((id) => id && !NON_CHAT_RE.test(id) && databricksRoute(id) === route))];
+    return { route, url, ids };
+  } catch (error) {
+    return { route, url, ids: [], error };
+  }
 }

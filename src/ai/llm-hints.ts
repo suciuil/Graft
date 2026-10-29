@@ -11,7 +11,7 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { terminalKind } from "./failure.js";
-import { resolveConfig, type EngineConfig, type ResolvedConfig } from "./providers.js";
+import { resolveConfig, ORCAROUTER_BASE_URL, type EngineConfig, type ResolvedConfig } from "./providers.js";
 import { baseUrlCandidates } from "./llm/openai.js";
 import { anthropicBaseUrl } from "./llm/anthropic.js";
 import { DEFAULT_LITELLM_BASE_URL } from "./llm/litellm.js";
@@ -170,6 +170,9 @@ async function listAnthropicModels(cfg: ResolvedConfig): Promise<string[]> {
  */
 export async function listEndpointModels(cfg: ResolvedConfig, databricksLister?: DatabricksLister): Promise<string[]> {
   if (!cfg.apiKey) throw new Error("no API key");
+  // Without a URL the SDK would reach api.openai.com with a key meant for another gateway.
+  const noUrl = missingEndpointUrl(cfg);
+  if (noUrl) throw new Error(noUrl);
   if (cfg.databricks) {
     const listings = await listDatabricksModels(cfg.databricks.root, cfg.apiKey, databricksLister);
     if (listings.some((l) => l.ids.length > 0)) {
@@ -253,11 +256,38 @@ export function envSetExample(name: string, value: string, platform: NodeJS.Plat
   return platform === "win32" ? `$env:${name} = "${value}"` : `export ${name}="${value}"`;
 }
 
-/** The endpoint a provider's SDK reaches when no base URL is configured. */
+/**
+ * The endpoint a provider reaches when no base URL is configured; undefined for
+ * one that has none (llm-incubator: its gateway must be configured), or a name
+ * graft does not know. The one mapping every caller uses.
+ */
+export function providerEndpoint(provider: string | undefined): string | undefined {
+  switch (provider) {
+    case "anthropic":
+      return "https://api.anthropic.com";
+    case "openai":
+      return "https://api.openai.com/v1";
+    case "litellm":
+      return DEFAULT_LITELLM_BASE_URL;
+    case "orcarouter":
+      return ORCAROUTER_BASE_URL;
+    default:
+      return undefined;
+  }
+}
+
+/** Shown where no endpoint URL is configured and the provider has none of its own. */
+export const NO_ENDPOINT_URL = "(no endpoint URL set)";
+
+/** The endpoint a provider reaches when no base URL is configured, for display. */
 export function defaultBaseUrl(provider: ProviderKind): string {
-  if (provider === "anthropic") return "https://api.anthropic.com";
-  if (provider === "litellm") return DEFAULT_LITELLM_BASE_URL;
-  return "https://api.openai.com/v1";
+  return providerEndpoint(provider) ?? NO_ENDPOINT_URL;
+}
+
+/** Why no request can be made: no base URL, and the provider has no endpoint of its own. */
+export function missingEndpointUrl(cfg: ResolvedConfig): string | undefined {
+  if (cfg.databricks || cfg.baseUrl?.trim() || providerEndpoint(cfg.provider)) return undefined;
+  return `no endpoint URL is set, and the ${cfg.provider} provider has no default one`;
 }
 
 export function shortError(err: unknown): string {

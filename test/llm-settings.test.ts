@@ -147,6 +147,94 @@ test("set a key: masked in output, and a rejected key is reported", async () => 
   assert.match(out, /rejected the API key/);
 });
 
+test("set a rejected key in a terminal: asks for the URL and the key again until one works", async () => {
+  const prompt = scripted(["https://good.example/v1", "sk-good-123456789"]);
+  const d = deps({
+    env: { GRAFT_BASE_URL: "https://gw.example/v1" },
+    prompt,
+    listModels: async () => {
+      throw new Error("401 Incorrect API key provided");
+    },
+    checkAuth: async (cfg) =>
+      cfg.baseUrl === "https://good.example/v1" && cfg.apiKey === "sk-good-123456789"
+        ? { status: "ok" }
+        : { status: "rejected", message: "401 Incorrect API key provided" },
+  });
+  assert.equal(await runSettingCommand("key", "sk-abcdefghijklmnop", {}, d), 0);
+  const out = d.lines.join("\n");
+  assert.doesNotMatch(out, /abcdefghijkl|good-1234/, "no key is printed");
+  assert.match(out, /rejected the API key/);
+  assert.match(out, /accepted the key/);
+  assert.equal(d.store.read("GRAFT_BASE_URL"), "https://good.example/v1");
+  assert.equal(d.store.read("GRAFT_API_KEY"), "sk-good-123456789");
+});
+
+test("set a URL while GRAFT_PROVIDER has its own endpoint: asks which one to use", async () => {
+  const prompt = scripted(["2"]);
+  const d = deps({ env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "k" }, prompt });
+  assert.equal(await runSettingCommand("url", "https://gw.example/v1", {}, d), 0);
+  assert.match(prompt.asked.join("\n"), /Pick 1 or 2/);
+  assert.equal(d.store.read("GRAFT_BASE_URL"), "https://api.anthropic.com");
+  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), "anthropic|https://gw.example/v1|provider");
+});
+
+test("set a URL, pick the provider's endpoint, then type another URL in the recovery: the typed one stays saved", async () => {
+  const other = "https://other.example/v1";
+  const prompt = scripted(["2", other, "", "1"]);
+  const d = deps({
+    env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "sk-good-123456789" },
+    prompt,
+    listModels: async () => {
+      throw new Error("401 invalid x-api-key");
+    },
+    checkAuth: async (cfg) => (cfg.baseUrl === other ? { status: "ok" } : { status: "rejected", message: "401 invalid x-api-key" }),
+  });
+  assert.equal(await runSettingCommand("url", "https://gw.example/v1", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_BASE_URL"), other, "not overwritten by the provider's endpoint picked first");
+  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), `anthropic|${other}|custom`);
+});
+
+test("set a model, fix the key in a terminal: the model is then checked against the endpoint that passed", async () => {
+  const prompt = scripted(["", "sk-good-123456789"]);
+  const d = deps({
+    env: { GRAFT_BASE_URL: "https://gw.example/v1", GRAFT_API_KEY: "sk-bad-1234567890" },
+    prompt,
+    listModels: async () => {
+      throw new Error("401 Incorrect API key provided");
+    },
+    checkAuth: async (cfg) =>
+      cfg.apiKey === "sk-good-123456789" ? { status: "ok", ids: ["claude-sonnet-5.5"] } : { status: "rejected", message: "401" },
+  });
+  assert.equal(await runSettingCommand("model", "no-such-model", { verify: true }, d), 0);
+  const out = d.lines.join("\n");
+  assert.match(out, /accepted the key/);
+  assert.match(out, /no-such-model is not in the models this endpoint lists/);
+});
+
+test("set a key, skip the recovery: no endpoint choice is saved and the effort step is not run", async () => {
+  const prompt = scripted(["2", "s"]);
+  const d = deps({
+    env: { GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: "https://gw.example/v1" },
+    prompt,
+    listModels: async () => {
+      throw new Error("401 Incorrect API key provided");
+    },
+    checkAuth: async () => ({ status: "rejected", message: "401" }),
+  });
+  assert.equal(await runSettingCommand("key", "sk-abcdefghijklmnop", {}, d), 0);
+  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), undefined);
+  assert.equal(d.store.read("GRAFT_BASE_URL"), undefined, "the provider's endpoint is not saved either");
+});
+
+test("set a key for a provider without an endpoint of its own and no URL: says so, sends nothing", async () => {
+  const d = deps({
+    env: { GRAFT_PROVIDER: "llm-incubator" },
+    listModels: async () => assert.fail("no request without an endpoint"),
+  });
+  assert.equal(await runSettingCommand("key", "sk-abcdefghijklmnop", {}, d), 0);
+  assert.match(d.lines.join("\n"), /not verified: no endpoint URL is set, and the llm-incubator provider has no default one/);
+});
+
 test("set a model the endpoint does not list: warns with the ones it does", async () => {
   const d = deps({ env: { GRAFT_API_KEY: "k", GRAFT_BASE_URL: "https://gw.example/v1" } });
   await runSettingCommand("model", "no-such-model", {}, d);
