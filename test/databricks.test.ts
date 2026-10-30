@@ -633,7 +633,7 @@ test("deep model choice: not on a terminal, nothing is asked", async () => {
   assert.match(d.lines.join("\n"), /using claude-haiku-5-5/);
 });
 
-test("deep model choice: asks for a missing key first, then lists every route and takes a number", async () => {
+test("deep model choice: lists every route with the key and takes a number", async () => {
   const seenKeys: string[] = [];
   const lister: DatabricksLister = async (route, _url, key) => {
     seenKeys.push(key);
@@ -642,16 +642,15 @@ test("deep model choice: asks for a missing key first, then lists every route an
     throw new Error("Connection error.");
   };
   const store = memoryStore();
-  const p = scriptedPrompter(["dapi-new", "y", "3", "n"]);
+  const p = scriptedPrompter(["3", "n"]);
   // GRAFT_MODEL names a model the gateway does not list for this key, so it asks.
-  const d = deps({ env: env({ GRAFT_MODEL: "claude-haiku-5-5" }), prompt: p, store, lister });
+  const d = deps({ env: env({ GRAFT_API_KEY: "dapi-1", GRAFT_MODEL: "claude-haiku-5-5" }), prompt: p, store, lister });
   const r = await chooseDatabricksDeepModel(d);
   assert.match(d.lines.join("\n"), /claude-haiku-5-5 \(from GRAFT_MODEL\) is not among the models/);
-  assert.equal(p.hidden.length, 1, "the key is asked hidden, before any listing");
-  assert.deepEqual([...new Set(seenKeys)], ["dapi-new"]);
-  assert.equal(store.vars.get("GRAFT_API_KEY"), "dapi-new");
+  assert.equal(p.hidden.length, 0, "no key is asked here: the auth guard before it does that");
+  assert.deepEqual([...new Set(seenKeys)], ["dapi-1"]);
   // anthropic: sonnet (1), opus (2); openai: gpt (3); mlflow falls back to the known ids.
-  assert.deepEqual(r, { config: { model: "model_service.models.1adp-gpt-6-1-sol", apiKey: "dapi-new" } });
+  assert.deepEqual(r, { config: { model: "model_service.models.1adp-gpt-6-1-sol" } });
   const text = d.lines.join("\n");
   assert.match(text, /ai-gateway\/openai\/v1/);
   assert.match(text, /could not list its models \(Connection error\.\)/);
@@ -659,24 +658,28 @@ test("deep model choice: asks for a missing key first, then lists every route an
   assert.equal(store.vars.get("GRAFT_MODEL"), undefined, "declined");
 });
 
-test("deep model choice: a rejected key is reported and a new one asked for", async () => {
+test("deep model choice: a rejected key is reported, and the build skips the LLM pass", async () => {
   let calls = 0;
-  const lister: DatabricksLister = async (route, url, key) => {
-    calls++;
-    if (key === "gAAAA-old") return rejecting(route, url, key);
-    return route === "anthropic" ? ["claude-haiku-5-5"] : [];
-  };
-  const p = scriptedPrompter(["dapi-good", ""]);
-  const store = memoryStore();
-  const d = deps({ env: env({ GRAFT_API_KEY: "gAAAA-old" }), prompt: p, store, lister });
+  const lister: DatabricksLister = async (route, url, key) => (calls++, rejecting(route, url, key));
+  const p = scriptedPrompter([]);
+  const d = deps({ env: env({ GRAFT_API_KEY: "gAAAA-old" }), prompt: p, lister });
   const r = await chooseDatabricksDeepModel(d);
+  assert.deepEqual(r, { skip: "the Databricks AI Gateway rejected the API key" });
   assert.match(d.lines.join("\n"), /rejected .*from GRAFT_API_KEY/);
   assert.match(d.lines.join("\n"), /https:\/\/dbx\.1adp\.automotive\.cloud\/login/, "the rejection points at the token page");
-  assert.equal(p.hidden.length, 1);
-  assert.deepEqual(r, { config: { model: "claude-haiku-5-5", apiKey: "dapi-good" } });
-  assert.equal(p.asked.length, 1, "only whether to save the typed key: the default model is served, so no model is asked");
-  assert.equal(store.vars.get("GRAFT_MODEL"), undefined);
-  assert.equal(calls, 8, "two keys × four routes");
+  assert.equal(p.asked.length + p.hidden.length, 0);
+  assert.equal(calls, 4, "one key × four routes");
+});
+
+test("deep model choice: the auth check's listings are reused, not fetched again", async () => {
+  const listings = [{ route: "anthropic" as const, url: "u", ids: ["claude-haiku-5-5"] }];
+  const d = deps({
+    env: env({ GRAFT_API_KEY: "dapi1" }),
+    prompt: scriptedPrompter([]),
+    listings,
+    lister: async () => assert.fail("listed again"),
+  });
+  assert.deepEqual(await chooseDatabricksDeepModel(d), { config: { model: "claude-haiku-5-5" } });
 });
 
 test("deep model choice: the model already set is used without asking when the gateway serves it", async () => {
@@ -713,17 +716,16 @@ test("deep model choice: a default the gateway does not serve is not used silent
   assert.match(d.lines.join("\n"), /Which model should/);
 });
 
-test("deep model choice: no key typed, or every key rejected → the structural build", async () => {
-  const none = deps({ prompt: scriptedPrompter([""]) });
+test("deep model choice: no key → the structural build, nothing asked", async () => {
+  const p = scriptedPrompter([]);
+  const none = deps({ prompt: p });
   assert.deepEqual(await chooseDatabricksDeepModel(none), { skip: "no API key for the Databricks AI Gateway" });
   assert.match(none.lines.join("\n"), /Generate a Databricks personal access token at https:\/\/dbx\.1adp\.automotive\.cloud\/login/);
-  const r = await chooseDatabricksDeepModel(
-    deps({ env: env({ GRAFT_API_KEY: "bad" }), prompt: scriptedPrompter(["bad2", "bad3"]), lister: rejecting }),
-  );
-  assert.deepEqual(r, { skip: "the Databricks AI Gateway rejected the API key" });
+  assert.equal(p.asked.length + p.hidden.length, 0);
 });
 
 test("deep model choice: Ctrl+C cancels", async () => {
-  const p: Prompter = { ask: async () => "", askHidden: async () => { throw new PromptCancelled(); } };
-  assert.deepEqual(await chooseDatabricksDeepModel(deps({ prompt: p })), { cancelled: true });
+  const lister: DatabricksLister = async (route) => (route === "anthropic" ? ["claude-opus-5-5"] : []);
+  const p: Prompter = { ask: async () => { throw new PromptCancelled(); }, askHidden: async () => "" };
+  assert.deepEqual(await chooseDatabricksDeepModel(deps({ env: env({ GRAFT_API_KEY: "dapi1" }), prompt: p, lister })), { cancelled: true });
 });

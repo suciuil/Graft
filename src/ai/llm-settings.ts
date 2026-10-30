@@ -26,6 +26,7 @@ import {
   EXAMPLE_MODELS,
   isTopTierModel,
   listEndpointModels,
+  missingEndpointUrl,
   rankModelsForHint,
   settingSource,
   SETTINGS,
@@ -46,6 +47,7 @@ import {
   MODEL_DEFAULT_EFFORT,
 } from "./llm/effort.js";
 import { acceptedEfforts, probeEfforts, type EffortProbe } from "./llm-effort.js";
+import { commitEndpointChoice, ensureLlmAuth, resolveEndpointConflict, type AuthCheck, type AuthRecoveryDeps } from "./llm-auth.js";
 import { cmd } from "../brand.js";
 
 // ---------------------------------------------------------------------------
@@ -62,8 +64,27 @@ export interface UserEnvStore {
   write(name: string, value: string | undefined): void;
 }
 
-/** The variables `graft api url` / `graft api key` / `graft model` / `graft effort` save. */
-export const SAVED_SETTING_NAMES = ["GRAFT_BASE_URL", "GRAFT_API_KEY", "GRAFT_MODEL", REASONING_EFFORT_ENV] as const;
+/**
+ * Remembers which endpoint the user picked when GRAFT_PROVIDER names a provider
+ * with its own endpoint while a custom endpoint URL is set too (src/ai/llm-auth.ts):
+ * `<provider>|<custom url>|custom` or `…|provider`. Asked again once either changes.
+ */
+export const ENDPOINT_CHOICE_ENV = "GRAFT_ENDPOINT_CHOICE";
+
+/**
+ * The variables `graft api url` / `graft api key` / `graft model` / `graft effort` /
+ * `graft api provider` save, plus the remembered endpoint choice. GRAFT_PROVIDER is
+ * here so a terminal opened before `graft api provider` ran speaks the same wire
+ * format to the saved GRAFT_BASE_URL as a new terminal would.
+ */
+export const SAVED_SETTING_NAMES = [
+  "GRAFT_BASE_URL",
+  "GRAFT_API_KEY",
+  "GRAFT_MODEL",
+  REASONING_EFFORT_ENV,
+  "GRAFT_PROVIDER",
+  ENDPOINT_CHOICE_ENV,
+] as const;
 
 /** Set in the environment to ignore saved settings (the test runner sets it, so a developer's own setup never leaks in). */
 export const NO_SAVED_SETTINGS_ENV = "GRAFT_NO_SAVED_SETTINGS";
@@ -341,6 +362,23 @@ export interface SettingDeps {
   listModels?: (cfg: ResolvedConfig) => Promise<string[]>;
   /** Asks the endpoint which effort levels the model accepts (tests inject a stub). */
   probeEfforts?: (cfg: ResolvedConfig, levels: readonly string[]) => Promise<EffortProbe>;
+  /** Replaces the endpoint + key check of the auth recovery prompt (tests inject a stub). */
+  checkAuth?: (cfg: ResolvedConfig) => Promise<AuthCheck>;
+}
+
+/** The auth guards (src/ai/llm-auth.ts) over these deps, with `env` as this process's environment. */
+function guardDeps(deps: SettingDeps, env: NodeJS.ProcessEnv): AuthRecoveryDeps {
+  return {
+    config: deps.config,
+    env,
+    store: deps.store,
+    out: deps.out,
+    err: deps.err,
+    prompt: deps.prompt,
+    platform: deps.platform,
+    probes: deps.listModels ? { listModels: deps.listModels } : undefined,
+    check: deps.checkAuth,
+  };
 }
 
 export interface SettingOptions {
@@ -387,6 +425,11 @@ function validate(kind: SettingKind, value: string): string | null {
     }
   }
   return null;
+}
+
+/** Why `value` is not an endpoint URL `graft api url` would accept, or null when it is. */
+export function urlProblem(value: string): string | null {
+  return validate("url", value);
 }
 
 /** `env` as `graft build --deep` sees it: the saved settings fill what this process does not set. */
@@ -471,33 +514,86 @@ async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter)
   return v || undefined;
 }
 
-/** One cheap `GET /models` with the new value in place; warnings only, the value is saved either way. */
-async function verifySetting(kind: SettingKind, deps: SettingDeps, env: NodeJS.ProcessEnv): Promise<void> {
-  const cfg = resolveConfig(deps.config, effectiveEnv(deps, env));
-  const url = cfg.baseUrl ?? defaultBaseUrl(cfg.provider);
+/**
+ * After {@link verifySetting}: the environment and deps to go on with (an auth
+ * recovery may have replaced the URL or the key), and why to stop: the user
+ * skipped or cancelled the recovery.
+ */
+interface Verified {
+  env: NodeJS.ProcessEnv;
+  deps: SettingDeps;
+  stop?: "skipped" | "cancelled";
+  /** The auth recovery ran and passed: it saved the endpoint choice (or dropped it for a typed URL). */
+  choiceSaved?: boolean;
+}
+
+/**
+ * One cheap `GET /models` with the new value in place; warnings only, the value
+ * is saved either way. `pendingSaves`: the endpoint choice made just before,
+ * handed to the auth recovery when that runs (see {@link ensureLlmAuth}).
+ */
+async function verifySetting(
+  kind: SettingKind,
+  deps: SettingDeps,
+  env: NodeJS.ProcessEnv,
+  pendingSaves: Record<string, string> = {},
+): Promise<Verified> {
+  let cfg = resolveConfig(deps.config, effectiveEnv(deps, env));
+  let url = cfg.baseUrl ?? defaultBaseUrl(cfg.provider);
+  const noUrl = missingEndpointUrl(cfg);
+  if (noUrl) {
+    deps.out(`  not verified: ${noUrl} — set one with \`${cmd(SETTINGS.url.command)}\`.`);
+    return { env, deps };
+  }
   if (!cfg.apiKey) {
     deps.out(`  not verified: no API key yet — set one with \`${cmd(SETTINGS.key.command)}\`.`);
     if (cfg.databricks) deps.out(`  ${databricksTokenHint()}.`);
-    return;
+    return { env, deps };
   }
   let ids: string[];
+  let recovered = false;
   try {
     ids = await (deps.listModels ?? listEndpointModels)(cfg);
   } catch (err) {
     const message = shortError(err);
     const problem = classifyLlmError(message);
-    if (problem === "auth") {
-      deps.err(`⚠ ${url} rejected the API key (${message}) — set a valid one with \`${cmd(SETTINGS.key.command)}\`.`);
-      if (cfg.databricks) deps.err(`  ${databricksTokenHint()}.`);
-    } else if (problem === "unreachable" && !/^40[45]\b/.test(message)) {
-      deps.err(`⚠ ${url} could not be reached (${message}) — check it with \`${cmd(SETTINGS.url.command)}\`.`);
-    } else {
-      deps.out(`  not verified: ${url} did not list its models (${message}); that is common for gateways and not an error.`);
+    const fixable = problem === "auth" || (problem === "unreachable" && !/^40[45]\b/.test(message));
+    if (!fixable || !deps.prompt) {
+      if (problem === "auth") {
+        deps.err(`⚠ ${url} rejected the API key (${message}) — set a valid one with \`${cmd(SETTINGS.key.command)}\`.`);
+        if (cfg.databricks) deps.err(`  ${databricksTokenHint()}.`);
+      } else if (problem === "unreachable" && !/^40[45]\b/.test(message)) {
+        deps.err(`⚠ ${url} could not be reached (${message}) — check it with \`${cmd(SETTINGS.url.command)}\`.`);
+      } else {
+        deps.out(`  not verified: ${url} did not list its models (${message}); that is common for gateways and not an error.`);
+      }
+      return { env, deps };
     }
-    return;
+    // In a terminal: offer to change the URL and/or the key, and check again until it passes or is skipped.
+    // The full check also tries one chat request, since a refused listing alone does not prove a bad key;
+    // the listing that just failed is not repeated.
+    const r = await ensureLlmAuth(guardDeps(deps, env), { listingError: err, pendingSaves });
+    if (r.status === "cancelled" || r.status === "skipped") return { env, deps, stop: r.status };
+    if (r.status === "failed") return { env, deps };
+    // Go on with what the recovery settled: the model check below must ask the endpoint that passed.
+    env = { ...env, ...r.changes.env };
+    deps = { ...deps, config: { ...deps.config, ...r.changes.config } };
+    cfg = resolveConfig(deps.config, effectiveEnv(deps, env));
+    url = cfg.baseUrl ?? defaultBaseUrl(cfg.provider);
+    if (r.status === "unverified") {
+      deps.out(`  not verified: ${r.message ?? "the endpoint did not say"}.`);
+      return { env, deps, choiceSaved: true };
+    }
+    if (!r.ids) {
+      const unchecked = kind === "model" ? `, so ${cfg.model} could not be checked against them` : "";
+      deps.out(`  ✓ ${url} answered with this key (it does not list its models for it${unchecked}).`);
+      return { env, deps, choiceSaved: true };
+    }
+    ids = r.ids;
+    recovered = true;
   }
-  deps.out(`  ✓ ${url} answered with this key (${ids.length} models listed).`);
-  if (kind !== "model") return;
+  if (!recovered) deps.out(`  ✓ ${url} answered with this key (${ids.length} models listed).`);
+  if (kind !== "model") return { env, deps, choiceSaved: recovered };
   const candidates = [cfg.model, ...(bareModelFallbacks(cfg.model) ?? [])];
   if (ids.some((id) => candidates.includes(id))) {
     deps.out(`  ✓ ${cfg.model} is served by this endpoint.`);
@@ -511,6 +607,7 @@ async function verifySetting(kind: SettingKind, deps: SettingDeps, env: NodeJS.P
     printModelList(deps, ranked.slice(0, 15), false);
     deps.err(`  Run \`${cmd(SETTINGS.model.command)}\` to pick one.`);
   }
+  return { env, deps, choiceSaved: recovered };
 }
 
 /**
@@ -608,11 +705,28 @@ export async function runSettingCommand(
   if (flagValue) deps.out(`  note: ${SETTINGS[kind].flag} on this command line overrides ${name}.`);
 
   if (opts.verify !== false && !opts.unset) {
-    const env: NodeJS.ProcessEnv = { ...deps.env, [name]: value };
+    let env: NodeJS.ProcessEnv = { ...deps.env, [name]: value };
+    // A provider with its own endpoint plus a custom endpoint URL: which one is asked, never guessed.
+    const endpoint = await resolveEndpointConflict(guardDeps(deps, env));
+    if ("cancelled" in endpoint) {
+      deps.out("Cancelled — the endpoint was not checked.");
+      return 130;
+    }
+    env = { ...env, ...endpoint.changes.env };
+    const checked: SettingDeps = { ...deps, config: { ...deps.config, ...endpoint.changes.config } };
     deps.out("Checking the endpoint…");
-    await verifySetting(kind, deps, env);
-    // A new model takes its own set of effort levels: offer them now, or check the saved one still fits.
-    if (kind === "model") await effortAfterModelChange(deps, env);
+    const v = await verifySetting(kind, checked, env, endpoint.saves);
+    if (v.stop === "cancelled") {
+      deps.out("Cancelled.");
+      return 130;
+    }
+    if (!v.stop) {
+      // The endpoint picked above was checked (or could not be, for want of a key): remember the choice,
+      // unless the auth recovery already did (it drops the choice when the user typed another URL).
+      if (!v.choiceSaved) commitEndpointChoice(guardDeps(deps, env), endpoint.saves);
+      // A new model takes its own set of effort levels: offer them now, or check the saved one still fits.
+      if (kind === "model") await effortAfterModelChange(v.deps, v.env);
+    }
   }
   return 0;
 }

@@ -89,7 +89,7 @@ export interface ResolvedConfig {
 }
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1";
+export const ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1";
 
 /** The model graft uses whenever none is configured (GRAFT_MODEL / --model), on every provider. */
 export const DEFAULT_MODEL = "claude-haiku-5-5";

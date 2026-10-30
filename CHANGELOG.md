@@ -97,6 +97,11 @@
 
 ### Changed
 
+- **Owner decision on the build-time price list download: keep as upstream
+  ships it.** `npm run build` refreshes the bundled model price list from the
+  public LiteLLM catalog (plain download, nothing about the user, machine or
+  repo is sent; the existing list is kept when offline). Recorded in
+  `docs/no-cloud-policy.md`.
 - **The default model is `claude-haiku-5-5` on every provider.** When neither
   `--model` nor `GRAFT_MODEL` names one, `graft build --deep` uses
   `claude-haiku-5-5` (falling back to the `claude-haiku-5.5` spelling when a
@@ -161,10 +166,21 @@
   part gives the same answer. `npm test` sets both to `0`, because the suite
   tests these features.
 - **A written no-cloud policy for this fork.** `docs/no-cloud-policy.md` sets
-  two rules for every AI agent and contributor. First, anything that sends data
-  to a cloud, whether new or merged from upstream, is off by default and can't
-  be turned back on without being asked. Second, tests of such features are
-  skipped. The rules are in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+  four rules for every AI agent and contributor. First, anything that sends
+  data to a cloud, whether new or merged from upstream, is off by default.
+  Second, users have no way to turn it on: the gate is hard-coded off and reads
+  no environment variable, config key, flag, command, MCP argument or UI
+  toggle. Upstream enable/login/connect/pair switches stay ignored or refuse
+  with a "disabled in this fork" message, get no `graft env` command, and are
+  not documented as a way to turn sending on. Only the repository owner can
+  lift this, by changing the policy file. Third, tests of such features are
+  skipped. Fourth, whenever an upstream change adds or changes a request that
+  sends data to any third party (cloud, telemetry, LLM provider, GitHub,
+  package registry or any other host), the agent stops and asks the
+  repository owner whether to disable it, remove it, keep it as an opt-in or
+  keep it as upstream ships it. It stays disabled until the owner answers, and
+  each answer is recorded in a "Decisions on third-party data flows" table in
+  the policy file. The rules are in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
   `.github/copilot-instructions.md`, and the Kilo Code, Cursor, Windsurf, Kiro,
   Cline and Roo rule folders. To skip a test file, add an
   `@cloud-sending-test` comment to it; `npm test` skips every file that has one.
