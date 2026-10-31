@@ -214,15 +214,53 @@ function shapeOfNodes(nodes: unknown): string {
 
 const RECORD_TOOL = "record_graph";
 
+const MAX_OUTPUT_TOKENS = 8192;
+
+/**
+ * The reply ran out of output budget. Some gateways report a cut-off reply as
+ * `stop`, so a spent budget counts too (same rule as the crux pass, src/ai/crux.ts).
+ */
+function hitOutputCap(res: { stopReason?: string | null; usage?: { output?: number } }): boolean {
+  const r = res.stopReason?.toLowerCase() ?? "";
+  return r === "length" || r === "max_tokens" || (res.usage?.output ?? 0) >= MAX_OUTPUT_TOKENS * 0.97;
+}
+
 /** Synthesizer backed by any {@link ChatModel} via forced tool calling. */
 export class ChatSynthesizer implements Synthesizer {
   constructor(private model: ChatModel) {}
 
+  /**
+   * A batch whose reply hit the output cap comes back as a cut-off tool call:
+   * Anthropic hands over `input: {}` ("nodes" is undefined), the OpenAI wire a
+   * truncated argument string. Every concept in such a batch was lost, and the
+   * re-run lost it again, since the batch and so the reply length did not change.
+   * Re-ask for the two halves of the files instead, down to a single file; the
+   * concept pass merges nodes across batches anyway, so halves merge the same way.
+   */
   async synthesize(files: FileSummary[]): Promise<SynthNode[]> {
     if (files.length === 0) return [];
-    const res = await this.model.create({
+    const res = await this.ask(files);
+    const capped = hitOutputCap(res);
+    if (capped && files.length > 1) {
+      const mid = Math.ceil(files.length / 2);
+      console.error(
+        `⚠ synthesize: reply cut off at the output limit [finish_reason=${res.stopReason || "null"}] — re-asking as two batches of ${mid} and ${files.length - mid} file(s)`,
+      );
+      return [...(await this.synthesize(files.slice(0, mid))), ...(await this.synthesize(files.slice(mid)))];
+    }
+    const raw = nodesFromResponse(res, capped)?.nodes;
+    const out = clean(coerceRecordGraphNodes(raw, res.toolCalls.length));
+    if (out.length === 0) {
+      const why = capped ? `; reply cut off at the output limit [finish_reason=${res.stopReason || "null"}]` : "";
+      console.error(`⚠ synthesize: empty batch (${shapeOfNodes(raw)}; ${res.toolCalls.length} tool call(s)${why})`);
+    }
+    return out;
+  }
+
+  private ask(files: FileSummary[]) {
+    return this.model.create({
       temperature: 0,
-      maxTokens: 8192,
+      maxTokens: MAX_OUTPUT_TOKENS,
       tools: [
         {
           name: RECORD_TOOL,
@@ -236,12 +274,6 @@ export class ChatSynthesizer implements Synthesizer {
         { role: "user", content: userContent(files) },
       ],
     });
-    const raw = nodesFromResponse(res)?.nodes;
-    const out = clean(coerceRecordGraphNodes(raw, res.toolCalls.length));
-    if (out.length === 0) {
-      console.error(`⚠ synthesize: empty batch (${shapeOfNodes(raw)}; ${res.toolCalls.length} tool call(s))`);
-    }
-    return out;
   }
 }
 
@@ -249,11 +281,14 @@ export class ChatSynthesizer implements Synthesizer {
  * Prefer a real tool call; if the gateway ignored `tool_choice` (#129), recover
  * the same payload from `content`. Recovered args still go through {@link clean}.
  */
-function nodesFromResponse(res: {
-  text: string;
-  toolCalls: { name: string; args: unknown }[];
-  stopReason?: string | null;
-}): {
+function nodesFromResponse(
+  res: {
+    text: string;
+    toolCalls: { name: string; args: unknown }[];
+    stopReason?: string | null;
+  },
+  capped = false,
+): {
   nodes?: unknown;
 } | undefined {
   const call = res.toolCalls.find((c) => c.name === RECORD_TOOL) ?? res.toolCalls[0];
@@ -264,7 +299,7 @@ function nodesFromResponse(res: {
     toolNames: [RECORD_TOOL, "emit_json"],
     payloadKey: "nodes",
   });
-  if (!recovered) warnToolChoiceIgnored("synthesize", res.text?.trim() ? "unparsed" : "empty", res.stopReason);
+  if (!recovered) warnToolChoiceIgnored("synthesize", res.text?.trim() ? "unparsed" : "empty", res.stopReason, capped);
   return recovered as { nodes?: unknown } | undefined;
 }
 

@@ -89,6 +89,62 @@ test("#383: a genuine empty nodes array stays 0 but does not look like success",
   assert.ok(!err.some((l) => /✓/.test(l)), "0-node batch must not print a success tick");
 });
 
+/** Answers like a gateway whose reply ran out of output budget for batches of more than `fits` files. */
+class CappedChatModel implements ChatModel {
+  readonly label = "fake:synthesize-capped";
+  calls: string[][] = [];
+  constructor(
+    private fits: number,
+    private stopReason = "max_tokens",
+  ) {}
+  async create(req: ChatRequest): Promise<ChatResponse> {
+    const user = String(req.messages.find((m) => m.role === "user")?.content ?? "");
+    const paths = [...user.matchAll(/^## (\S+)$/gm)].map((m) => m[1]!);
+    this.calls.push(paths);
+    const capped = paths.length > this.fits;
+    const args = capped
+      ? {}
+      : { nodes: paths.map((p) => ({ name: `Node ${p}`, type: "file", summary: `About ${p}.`, sources: [p], links: [] })) };
+    return {
+      text: "",
+      toolCalls: [{ id: "1", name: "record_graph", args }],
+      usage: { input: 0, output: capped ? 8192 : 100, cacheRead: 0, cacheCreate: 0 },
+      stopReason: capped ? this.stopReason : "tool_use",
+      assistant: { role: "assistant", content: "" },
+    };
+  }
+}
+
+const FILES = ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"].map((path) => ({ path, summary: `summary of ${path}` }));
+
+test("a batch cut off at the output limit is re-asked in halves instead of coming back empty", async () => {
+  const m = new CappedChatModel(2);
+  const { result, err } = await withCapturedError(() => new ChatSynthesizer(m).synthesize(FILES));
+  assert.deepEqual(
+    result.map((n) => n.name).sort(),
+    FILES.map((f) => `Node ${f.path}`),
+    "every file's node survives the split",
+  );
+  assert.deepEqual(m.calls[0], FILES.map((f) => f.path), "the first call carries the whole batch");
+  assert.ok(m.calls.every((c) => c.length > 0));
+  assert.ok(err.some((l) => /cut off at the output limit/.test(l) && /re-asking as two batches/.test(l)), err.join(" | "));
+  assert.ok(!err.some((l) => /empty batch/.test(l)), `no batch should end up empty, got: ${err.join(" | ")}`);
+});
+
+test("a cut-off reply reported as `stop` is caught by the spent output budget", async () => {
+  const m = new CappedChatModel(2, "stop");
+  const { result } = await withCapturedError(() => new ChatSynthesizer(m).synthesize(FILES));
+  assert.equal(result.length, FILES.length);
+});
+
+test("a single file that still overruns the limit says why its batch is empty", async () => {
+  const m = new CappedChatModel(0);
+  const { result, err } = await withCapturedError(() => new ChatSynthesizer(m).synthesize([FILES[0]!]));
+  assert.deepEqual(result, []);
+  assert.equal(m.calls.length, 1, "a one-file batch cannot be split further");
+  assert.ok(err.some((l) => /empty batch/.test(l) && /cut off at the output limit/.test(l)), err.join(" | "));
+});
+
 async function withCapturedError<T>(fn: () => Promise<T>): Promise<{ result: T; err: string[] }> {
   const err: string[] = [];
   const origErr = console.error;
