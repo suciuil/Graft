@@ -21,7 +21,8 @@
     "url": "https://github.com/trailhq/Trail-Code/issues"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://eu.artifactory.automotive.cloud/ui/repos/tree/General/a_asc_tools_graft"
   },
   "type": "module",
   "main": "./dist/index.js",

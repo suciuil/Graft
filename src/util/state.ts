@@ -133,6 +133,9 @@ export interface BuildConfig {
    * {@link GlobalSettings.deepStaleThreshold}, then to
    * {@link DEFAULT_DEEP_STALE_THRESHOLD}. */
   deepStaleThreshold?: number;
+  /** The VS Code `.code-workspace` file (relative to this folder) whose folders
+   * `graft init` wired here, so `graft build` builds the same ones; `false` = this folder itself. */
+  codeWorkspace?: string | false;
 }
 
 /** Local, Git-ignored repository configuration. Kept outside generated
@@ -189,7 +192,7 @@ function ensureBuildConfigIgnored(d: string): void {
  * one (`~/.graft/settings.json`), so scaffolding the default into every repo
  * would make `graft deep-threshold --global` a no-op everywhere `init` ran.
  */
-const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold'>> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold' | 'codeWorkspace'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,

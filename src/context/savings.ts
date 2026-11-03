@@ -239,6 +239,19 @@ export function setCompactNudge(on: boolean): void {
   callScope().compactNudge = on === true;
 }
 
+/** Record the models that priced this turn's earlier calls (see `CallScope.turnModels`). */
+export function setTurnModels(models: string[]): void {
+  callScope().turnModels = models.filter((m) => typeof m === 'string' && m.trim() !== '');
+}
+
+/** Models other than this call's that priced earlier calls of the turn, when this call is priced at a list rate. */
+function otherTurnModels(rate: InputRate | null): string[] {
+  if (!rate || rate.measured) return [];
+  const name = modelLabel(rate);
+  if (!name) return [];
+  return [...new Set(callScope().turnModels)].filter((m) => m !== name);
+}
+
 /**
  * What this call claimed, in the terms its footer used: the tokens, their dollar
  * value at the rate the footer priced them at (null when it priced nothing), and
@@ -372,6 +385,11 @@ function savingsTally(savedTokens: number, rate: InputRate | null): string {
   }
   if (rate.measured) return `\u{1F331} ${b} saved ~N tokens (~$X) this turn`;
   const name = modelLabel(rate);
+  const earlier = otherTurnModels(rate);
+  if (name && earlier.length > 0) {
+    const parts = [...earlier, name].map((m, i) => `~$${String.fromCharCode(65 + i)} for ${m}`).join(' + ');
+    return `\u{1F331} ${b} saved ~N tokens (~$X: ${parts}) this turn`;
+  }
   return name
     ? `\u{1F331} ${b} saved ~N tokens (~$X for ${name}) this turn`
     : `\u{1F331} ${b} saved ~N tokens (~$X) this turn`;
@@ -413,6 +431,11 @@ export function savingsTurnNudge(savedTokens: number): string {
   const scope = callScope();
   const rate = savedTokens > 0 ? scope.pricing.rate : null;
   const example = tallyExample(savedTokens, rate);
+  const earlier = otherTurnModels(rate);
+  const mixed = earlier.length
+    ? ` The ${b} calls just before this one were priced for ${earlier.join(', ')}: if they belong to this ` +
+      'turn (e.g. its planning phase on another model), give each model its own dollar figure and their sum, as in the example.'
+    : '';
 
   // The short form, for a call that follows another graft call in this repo by
   // a few minutes: the agent has just read the paragraph below, so this repeats
@@ -422,7 +445,7 @@ export function savingsTurnNudge(savedTokens: number): string {
   if (scope.compactNudge) {
     const worth = rate ? ` Worth ${formatDollars((savedTokens * rate.usdPerMtok) / 1_000_000)}.` : '';
     const table = !rate && modelTableBlock(savedTokens) ? ' Reproduce the table exactly, in a collapsed/expandable section.' : '';
-    return `${worth} Add it to this turn's ${b} tally and close your reply with the sum.${table} e.g. ${tallyTail(example)}`;
+    return `${worth} Add it to this turn's ${b} tally and close your reply with the sum.${table}${mixed} e.g. ${tallyTail(example)}`;
   }
 
   if (rate === null) {
@@ -475,7 +498,7 @@ export function savingsTurnNudge(savedTokens: number): string {
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     `reply, tell the user the total ${b} tokens saved this turn and what they ` +
     'were worth, as ONE line — no table: this call is priced, and a table ' +
-    `belongs only to a call that is not.${sum}${tallyTail(example)}`
+    `belongs only to a call that is not.${mixed}${sum}${tallyTail(example)}`
   );
 }
 

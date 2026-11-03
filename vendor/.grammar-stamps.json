@@ -76,8 +76,8 @@
         "parser": "cd0362d8183a38c2facc9e48a9c983242d35148a29276b8eaacd2ab2d258b0cb"
       }
     },
-    "build": "7003935ce0ecb61612eb04f9f627228d132684341523ad184c209c14943766c3",
-    "pack": "dcfb41dbd0d0cf8047d3471a83f76600b55359f75318682fd0a9cbcb4cd97796"
+    "build": "ed321baad230c80a3934e6630aa3902038ace62b890b39efd5f34f391c632d90",
+    "pack": "cc3abd06b0cdf7bf2208b23d64b28d351f882000c91ba0754ea8b3d7a0cc1297"
   },
   "tree-sitter-cpp": {
     "gen": {
@@ -96,8 +96,8 @@
         "parser": "d550bef68f591655b541f683d84de0d614247cb0d8fad897fe77a7dbc29ef80a"
       }
     },
-    "build": "f4ea9efc8af7eb938284833ad72ac4793fb66d7dd67fcf5542c2fee066d2eb9c",
-    "pack": "0323f27e4ac393d90bef5f5bdcd0f5cfb11a57aacf86f6b2e02d0ccfa4089292"
+    "build": "c9965b2a7118c9539ceacc5c80ad83bb5f5b12f389d68929c09e42592074228e",
+    "pack": "63707015da975e9c46c17f9a68340f7cca1a20b22a297f0b45d8d2ecdbb7d470"
   },
   "tree-sitter-csv": {
     "gen": {
@@ -134,8 +134,8 @@
         "parser": "6c02bb53c18eabd43b077955ae36994112c53ba183fb018a0e355edd55f92dac"
       }
     },
-    "build": "12bc308edee93777e9431cbe704942ec8099f3a5fb9d41bf1aa17d378bba88e2",
-    "pack": "04195be460c573cf33f879cc409dd753a6309d49e7b3bffb75085157608ab113"
+    "build": "e5c77e3c8777aec44b89b83e8315b4d6bef4962dcc3ae280d3c73d19932c3824",
+    "pack": "1035b917f11c3eddd173cc37935c176fa592458467d0bc01dcd1f8a7c5b21236"
   },
   "tree-sitter-json": {
     "gen": {
@@ -154,8 +154,8 @@
         "parser": "08cd1b9944bf997e4b5c2451af05bf50a02ee8d9118e059565473ae077478549"
       }
     },
-    "build": "262401b6e5e208084f4c3d23fa9a07990fd5171c07dd19459df3ca29b6324d4a",
-    "pack": "a30016333da2d6eafb81604d33890db7e3248cfbcb4b9426d2cff4ef974676f6"
+    "build": "7dac6665a016bb7e257a194f96135f9f6fceccb4e96bfd66ff9dc248072e0efd",
+    "pack": "6e6a5cdeb685d40ad93ea3d5c2eca2ec78c1532d3d8e85798ba65de1a25fcb7d"
   },
   "tree-sitter-razor": {
     "gen": {

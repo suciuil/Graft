@@ -31,13 +31,20 @@
  *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first;
  *                 refused when either is older than its sources
  *
+ * On Windows it also writes graft-<version>-win-<arch>.zip, the offline installer kit:
+ * the tarball, install-graft.ps1/.cmd and the latest LTS node-vX.Y.Z-win-<arch>.zip,
+ * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
+ * there). Offline, it falls back to the newest such zip already in the repo root. The
+ * standalone tarball is then deleted: the kit is the only artifact left.
+ *
  * Either way vendor/ is re-staged from the sibling repos' prebuilds (build:vendor) and
  * verified byte-for-byte against them before packing, so the tarball cannot carry
  * grammars older than the ones graft itself is running.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -339,5 +346,101 @@ if (unprebuilt.length > 0) {
   console.log(`  ${unprebuilt.length} native deps ship no prebuilds/${PLATFORM} — they will fail to load on the target:`);
   for (const u of unprebuilt) console.log(`    ${u}`);
 }
-console.log(`\n  Install on another ${PLATFORM} machine with:\n    npm i -g ./${finalName} --ignore-scripts\n`);
+
+// Same pattern and minimum major (20) as $OfflineNodeRegex / $MinNodeMajor in install-graft.ps1.
+const nodeZipRe = new RegExp(`^node-v(\\d+)\\.(\\d+)\\.(\\d+)-win-${process.arch}(.*)\\.zip$`, "i");
+const cmpVersion = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+const localNodeZips = () =>
+  readdirSync(repoRoot)
+    .map((name) => ({ name, v: nodeZipRe.exec(name)?.slice(1, 4).map(Number) }))
+    .filter(({ v }) => v)
+    .sort((a, b) => cmpVersion(a.v, b.v));
+
+/** Removes node-v*-win-<arch>*.zip files in the repo root older than `keep`. */
+function removeOlderNodeZips(keep) {
+  const keepVersion = nodeZipRe.exec(keep).slice(1, 4).map(Number);
+  for (const { name, v } of localNodeZips()) {
+    if (cmpVersion(v, keepVersion) >= 0) continue;
+    rmSync(join(repoRoot, name), { force: true });
+    console.log(`• removed older ${name}`);
+  }
+}
+
+/** Downloads the newest LTS node-vX.Y.Z-win-<arch>.zip into the repo root, verified against SHASUMS256.txt. */
+async function downloadLtsNodeZip(arch) {
+  const dist = "https://nodejs.org/dist";
+  const index = await fetch(`${dist}/index.json`);
+  if (!index.ok) throw new Error(`${dist}/index.json: HTTP ${index.status}`);
+  // index.json lists releases newest first.
+  const release = (await index.json()).find((r) => r.lts && r.files?.includes(`win-${arch}-zip`));
+  if (!release) throw new Error(`no LTS release ships win-${arch}-zip`);
+  const name = `node-${release.version}-win-${arch}.zip`;
+  const sums = await fetch(`${dist}/${release.version}/SHASUMS256.txt`);
+  if (!sums.ok) throw new Error(`SHASUMS256.txt for ${release.version}: HTTP ${sums.status}`);
+  const expected = (await sums.text())
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .find(([, file]) => file === name)?.[0];
+  if (!expected) throw new Error(`${name} is not listed in SHASUMS256.txt`);
+  const sha = (buf) => createHash("sha256").update(buf).digest("hex");
+  const dest = join(repoRoot, name);
+  if (existsSync(dest) && sha(readFileSync(dest)) === expected) {
+    console.log(`• Node.js ${release.version} LTS (${release.lts}) already downloaded: ${name}`);
+    return name;
+  }
+  console.log(`• downloading Node.js ${release.version} LTS (${release.lts}): ${name} …`);
+  const zip = await fetch(`${dist}/${release.version}/${name}`);
+  if (!zip.ok) throw new Error(`${name}: HTTP ${zip.status}`);
+  const buf = Buffer.from(await zip.arrayBuffer());
+  if (sha(buf) !== expected) throw new Error(`${name}: SHA-256 mismatch`);
+  writeFileSync(`${dest}.part`, buf);
+  renameSync(`${dest}.part`, dest);
+  removeOlderNodeZips(name);
+  return name;
+}
+
+const kitName = process.platform === "win32" ? `graft-${pkg.version}-win-${process.arch}.zip` : null;
+if (kitName) {
+  let nodeZipSource;
+  let nodeZipName;
+  try {
+    nodeZipSource = nodeZipName = await downloadLtsNodeZip(process.arch);
+  } catch (err) {
+    console.warn(`! could not download the latest Node.js LTS zip (${err.message}) — using the newest one in the repo root`);
+    const nodeZip = localNodeZips()
+      .filter(({ v }) => v[0] >= 20)
+      .at(-1);
+    if (!nodeZip) {
+      die(`${finalName} was built, but ${kitName} was not: no node-vX.Y.Z-win-${process.arch}.zip (v20+) in ${repoRoot} — download one from https://nodejs.org/dist/`);
+    }
+    nodeZipSource = nodeZip.name;
+    nodeZipName = `node-v${nodeZip.v.join(".")}-win-${process.arch}.zip`;
+  }
+  const kitDir = mkdtempSync(join(tmpdir(), "graft-kit-"));
+  try {
+    cpSync(join(repoRoot, nodeZipSource), join(kitDir, nodeZipName));
+    for (const f of [finalName, "install-graft.ps1", "install-graft.cmd"]) cpSync(join(repoRoot, f), join(kitDir, f));
+    const zipped = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; " +
+          "Get-ChildItem -LiteralPath $env:GRAFT_KIT_DIR | Compress-Archive -DestinationPath $env:GRAFT_KIT_ZIP -Force",
+      ],
+      { env: { ...process.env, GRAFT_KIT_DIR: kitDir, GRAFT_KIT_ZIP: join(repoRoot, kitName) }, stdio: "inherit" },
+    );
+    if (zipped.status !== 0) die(`Compress-Archive failed — ${kitName} was not written`);
+  } finally {
+    rmSync(kitDir, { recursive: true, force: true });
+  }
+  rmSync(join(repoRoot, finalName), { force: true });
+  const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
+  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft.ps1, install-graft.cmd`);
+}
+
+if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and run install-graft.cmd, or from the unzipped folder:`);
+else console.log(`\n  Install on another ${PLATFORM} machine with:`);
+console.log(`    npm i -g ./${finalName} --ignore-scripts\n`);
 console.log("  (--ignore-scripts: every binding in here is prebuilt, so nothing compiles on the\n   target. Without it npm 12 warns about unapproved install scripts, then installs anyway.)\n");

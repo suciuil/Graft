@@ -183,7 +183,9 @@ export function withLock<T>(path: string, fn: () => T, waitMs = 200): Locked<T> 
       fd = openSync(lock, 'wx', 0o600);
       break;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      // Windows answers EPERM, not EEXIST, while another process's lock file is still being deleted.
+      if (code !== 'EEXIST' && !(code === 'EPERM' && process.platform === 'win32')) throw e;
     }
     // The deadline is checked on every turn: a lock that can't be taken over (a dangling symlink, a
     // folder we can't move) must not spin forever.

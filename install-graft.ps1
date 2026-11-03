@@ -3,16 +3,19 @@ param([switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
 $Registry     = 'https://<company>.jfrog.io/artifactory/api/npm/<npm-repo>/'
-# Downloaded from nodejs.org only when no offline Node.js zip is next to this script
-$NodeVersion  = 'v24.19.0'
-$NodeZipUrl   = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip"
-# Offline Node.js zip looked up next to this script before downloading $NodeZipUrl; any suffix after
+# Without an offline Node.js zip next to this script, the latest LTS is downloaded from $NodeDist;
+# $NodeVersion is used only when that lookup fails
+$NodeDist     = 'https://nodejs.org/dist'
+$NodeVersion  = 'v26.13.0'
+# Offline Node.js zip looked up next to this script before downloading from $NodeDist; any suffix after
 # -win-x64 is accepted (e.g. "node-v24.19.0-win-x64 - Copy.zip", "... (1).zip")
 $OfflineNodeRegex = '^node-v(\d+)\.(\d+)\.(\d+)-win-x64(.*)\.zip$'
 $NodeHome     = Join-Path $env:LOCALAPPDATA 'Programs\nodejs'
 $NpmGlobal    = Join-Path $env:APPDATA 'npm'
 $PinnedNode   = Join-Path $NpmGlobal 'node.exe'
 $PinMarker    = Join-Path $NpmGlobal 'node.exe.installed-by-graft-script'
+# The Node.js (path|major) graft was last installed for; another one means its native modules must be rebuilt
+$GraftNodeMarker = Join-Path $NpmGlobal 'graft.node.installed-by-graft-script'
 $MinNodeMajor = 20
 $InUseMsg     = 'Node.js or graft is in use. Close editors/terminals running node or graft, then run this again.'
 # Offline package looked up next to this script before falling back to $Registry; any suffix after
@@ -76,14 +79,23 @@ $DefaultLlmModels = @{
 }
 $LlmTimeoutSec   = 15
 
+# $null when $exe does not run (e.g. a version manager's shim or link pointing at a removed version)
 function Get-NodeVersion([string]$exe) {
-    [version]((& $exe --version).Trim().TrimStart('v'))
+    try { [version]("$(& $exe --version)".Trim().TrimStart('v')) } catch { $null }
 }
 
+# The `node` a NEW terminal runs (what graft's shim runs unless pinned), not this session's possibly stale or
+# version-manager-adjusted PATH; graft's pinned copy in $NpmGlobal is skipped
 function Get-CurrentNode {
-    $cmd = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $cmd) { return $null }
-    [pscustomobject]@{ Path = $cmd.Source; Version = Get-NodeVersion $cmd.Source }
+    $exe = Find-InNewTerminal 'node' -Skip $PinnedNode
+    if (-not $exe) { return $null }
+    [pscustomobject]@{ Path = $exe; Version = Get-NodeVersion $exe }
+}
+
+# The Node.js npm's graft shims run: %APPDATA%\npm\node.exe when present, else `node` from PATH
+function Get-GraftNode {
+    if (Test-Path $PinnedNode) { return [pscustomobject]@{ Path = $PinnedNode; Version = Get-NodeVersion $PinnedNode } }
+    return Get-CurrentNode
 }
 
 function Remove-NodeHome {
@@ -132,7 +144,22 @@ function Expand-NodeZip([string]$Zip, [string]$Tmp) {
     return $dir
 }
 
-# Installs the newest offline Node.js zip next to this script, else downloads $NodeVersion from nodejs.org
+# Latest LTS version on $NodeDist that ships a win-x64 zip, else $NodeVersion
+function Get-LatestLtsNodeVersion {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        # Assigned first: Windows PowerShell emits a JSON array as one pipeline object
+        $index = Invoke-RestMethod "$NodeDist/index.json" -UseBasicParsing -TimeoutSec 30
+        $release = $index | Where-Object { $_.lts -and $_.files -contains 'win-x64-zip' } | Select-Object -First 1
+        if ($release) { return $release.version }
+        Write-Warning "$NodeDist lists no LTS release with a win-x64 zip; using Node.js $NodeVersion."
+    } catch {
+        Write-Warning "Could not look up the latest Node.js LTS ($($_.Exception.Message)); using Node.js $NodeVersion."
+    }
+    return $NodeVersion
+}
+
+# Installs the newest offline Node.js zip next to this script, else downloads the latest LTS from nodejs.org
 function Install-PortableNode {
     $ProgressPreference = 'SilentlyContinue'
     $tmp = Join-Path $env:TEMP "graft-node-extract"
@@ -141,15 +168,27 @@ function Install-PortableNode {
     if ($OfflineNode) {
         Write-Host "Installing Node.js $($OfflineNode.Version) from the offline package $($OfflineNode.File.FullName)"
         $dir = Expand-NodeZip $OfflineNode.File.FullName $tmp
-        if (-not $dir) { Write-Host "The offline Node.js package is unusable; downloading Node.js $NodeVersion instead." }
+        if (-not $dir) { Write-Host "The offline Node.js package is unusable; downloading Node.js from nodejs.org instead." }
     }
     if (-not $dir) {
-        $zip = Join-Path $env:TEMP "node-$NodeVersion.zip"
-        Write-Host "Downloading Node.js $NodeVersion from $NodeZipUrl ..."
+        if (-not $script:NodeDownloadVersion) { $script:NodeDownloadVersion = Get-LatestLtsNodeVersion }
+        $name = "node-$script:NodeDownloadVersion-win-x64.zip"
+        $url  = "$NodeDist/$script:NodeDownloadVersion/$name"
+        $zip  = Join-Path $env:TEMP $name
+        Write-Host "Downloading Node.js $script:NodeDownloadVersion from $url ..."
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest $NodeZipUrl -OutFile $zip -UseBasicParsing
+        Invoke-WebRequest $url -OutFile $zip -UseBasicParsing
+        $sums = Invoke-RestMethod "$NodeDist/$script:NodeDownloadVersion/SHASUMS256.txt" -UseBasicParsing
+        $expected = "$sums" -split "`n" | ForEach-Object {
+            $parts = $_.Trim() -split '\s+'
+            if ($parts.Count -ge 2 -and $parts[1] -eq $name) { $parts[0] }
+        } | Select-Object -First 1
+        if (-not $expected -or (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expected) {
+            Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+            throw "The Node.js download $url failed its SHA-256 check."
+        }
         $dir = Expand-NodeZip $zip $tmp
-        if (-not $dir) { throw "The Node.js download $NodeZipUrl is unusable." }
+        if (-not $dir) { throw "The Node.js download $url is unusable." }
     }
     New-Item -ItemType Directory -Force (Split-Path $NodeHome) | Out-Null
     Remove-NodeHome
@@ -206,12 +245,13 @@ function Remove-UserPath([string]$Dir) {
 }
 
 # Where a NEW terminal will find a command: the machine PATH, then the user PATH, as stored in the registry
-function Find-InNewTerminal([string]$Name) {
+function Find-InNewTerminal([string]$Name, [string]$Skip) {
     $dirs = foreach ($scope in 'Machine', 'User') { "$([Environment]::GetEnvironmentVariable('Path', $scope))" -split ';' }
     foreach ($d in $dirs) {
         if (-not $d.Trim()) { continue }
         foreach ($ext in '.exe', '.cmd', '.bat') {
-            try { $f = [IO.Path]::Combine([Environment]::ExpandEnvironmentVariables($d.Trim().Trim('"')), "$Name$ext") } catch { continue }
+            try { $f = [IO.Path]::GetFullPath([IO.Path]::Combine([Environment]::ExpandEnvironmentVariables($d.Trim().Trim('"')), "$Name$ext")) } catch { continue }
+            if ($Skip -and $f -ieq [IO.Path]::GetFullPath($Skip)) { continue }
             if (Test-Path -LiteralPath $f -PathType Leaf) { return $f }
         }
     }
@@ -1023,10 +1063,11 @@ function Invoke-LlmSetup {
 # 0. Nothing is downloaded, installed or changed before the user agrees
 $plannedPkg = Find-OfflinePackage
 $graftSource = if ($plannedPkg) { "the offline package $($plannedPkg.File.Name) next to this script" } else { "the npm registry $Registry (npm login may ask for credentials)" }
-# The newest offline Node.js zip next to this script wins over downloading $NodeVersion
+# The newest offline Node.js zip next to this script wins over downloading the latest LTS
 $OfflineNode = Find-OfflineNode
+$NodeDownloadVersion = $null
 $nodeSource = if ($OfflineNode) { "install Node.js $($OfflineNode.Version) from the offline package $($OfflineNode.File.Name) next to this script" }
-else { "download Node.js $NodeVersion from nodejs.org" }
+else { "download the latest Node.js LTS from nodejs.org" }
 Write-Host "This script will install or upgrade graft for user $env:USERNAME (no admin rights needed). It may:"
 Write-Host "  - $nodeSource into $NodeHome, if no suitable Node.js is found"
 Write-Host "  - add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix"
@@ -1045,7 +1086,10 @@ if ($Yes) {
 }
 Write-Host ''
 
-$wanted    = if ($OfflineNode) { $OfflineNode.Version } else { [version]$NodeVersion.TrimStart('v') }
+$wanted = if ($OfflineNode) { $OfflineNode.Version } else {
+    $NodeDownloadVersion = Get-LatestLtsNodeVersion
+    [version]$NodeDownloadVersion.TrimStart('v')
+}
 $reinstall = $false
 $pin       = $false
 
@@ -1065,7 +1109,7 @@ if ($machineVer -and $machineVer.Major -ge $MinNodeMajor -and (Test-Path $NodeHo
 
 # 2. Make sure graft has a recent enough Node
 $cur  = Get-CurrentNode
-$ours = $cur -and $cur.Path.StartsWith($NodeHome, [StringComparison]::OrdinalIgnoreCase)
+$ours = $cur -and (ConvertTo-PathKey (Split-Path $cur.Path)) -eq (ConvertTo-PathKey $NodeHome)
 
 # The per-user Node is the one node/npm should resolve to (not just graft's pinned copy)
 $ownNode = -not $cur -or $ours
@@ -1073,19 +1117,19 @@ $ownNode = -not $cur -or $ours
 if (-not $cur) {
     Install-PortableNode
 } elseif ($ours) {
-    if ($cur.Version -lt $wanted) {
+    if (-not $cur.Version -or $cur.Version -lt $wanted) {
         Write-Host "Upgrading Node.js $($cur.Version) -> $wanted"
-        if ($cur.Version.Major -ne $wanted.Major) { $reinstall = $true }
         Install-PortableNode
     } else {
         Write-Host "Using Node.js $($cur.Version) ($($cur.Path))."
     }
-} elseif ($cur.Version.Major -lt $MinNodeMajor) {
-    # An old Node this script cannot upgrade (e.g. machine-wide): give graft its own
-    Write-Host "Node.js $($cur.Version) at $($cur.Path) is too old for graft; graft gets its own Node.js $wanted."
+} elseif (-not $cur.Version -or $cur.Version.Major -lt $MinNodeMajor) {
+    # An old or broken Node this script cannot upgrade (e.g. machine-wide, or a version manager's): give graft its own
+    $what = if ($cur.Version) { "Node.js $($cur.Version) at $($cur.Path) is too old for graft" } else { "$($cur.Path) does not run" }
+    Write-Host "$what; graft gets its own Node.js $wanted."
     $pin = $true
-    $portableExe = Join-Path $NodeHome 'node.exe'
-    if (-not (Test-Path $portableExe) -or (Get-NodeVersion $portableExe) -lt $wanted) { Install-PortableNode }
+    $portableVer = Get-NodeVersion (Join-Path $NodeHome 'node.exe')
+    if (-not $portableVer -or $portableVer -lt $wanted) { Install-PortableNode }
 } else {
     Write-Host "Using Node.js $($cur.Version) ($($cur.Path))."
 }
@@ -1105,8 +1149,9 @@ if ((Test-Path $NodeHome) -and $ownNode) {
     # graft only pins this Node (or uses another one); leave which `node` the user gets alone
     Add-UserPath @(@($NodeHome, $NpmGlobal) | Where-Object { Test-Path $_ })
 }
-$env:Path = "$NpmGlobal;$env:Path"
-if (Test-Path $NodeHome) { $env:Path = "$NodeHome;$env:Path" }
+# This session installs graft with the npm of the Node.js graft will run on, so its native modules match it
+$installNodeDir = if ($pin -or $ownNode) { $NodeHome } else { Split-Path $cur.Path }
+$env:Path = "$installNodeDir;$NpmGlobal;$env:Path"
 
 # 4. npm configuration and graft: the newest offline package next to this script, else the registry
 & npm config set prefix $NpmGlobal --location=user
@@ -1126,10 +1171,14 @@ if ($offline) {
     $installArgs += '@nanonets/graft'
 }
 
-# Reinstall when the Node running graft changed, so its native modules match
+# Reinstall when the Node running graft changed (another installation, or another major), so its native modules match
+$graftNode = Get-GraftNode
+$graftNodeId = if ($graftNode) { "$($graftNode.Path)|$($graftNode.Version.Major)".ToLowerInvariant() } else { '' }
+if (-not (Test-Path $GraftNodeMarker) -or (Get-Content -LiteralPath $GraftNodeMarker -Raw).Trim() -ne $graftNodeId) { $reinstall = $true }
 if ($reinstall) { $installArgs += '--force' }
 & npm @installArgs
 if ($LASTEXITCODE -ne 0) { throw 'graft install failed' }
+Set-Content -LiteralPath $GraftNodeMarker $graftNodeId
 
 # 5. Let `graft` run from PowerShell terminals
 if (-not (Enable-UserScripts)) {
@@ -1140,7 +1189,10 @@ if (-not (Enable-UserScripts)) {
     Write-Host "PowerShell blocks scripts on this PC, so 'graft' and 'npm' will run through graft.cmd / npm.cmd. Run this installer again after 'graft upgrade'."
 }
 
-& graft --version
+# The graft just installed, not another copy earlier in PATH (e.g. in another Node.js installation's folder)
+$GraftCmd = Join-Path $NpmGlobal 'graft.cmd'
+if (-not (Test-Path $GraftCmd)) { $GraftCmd = 'graft' }
+& $GraftCmd --version
 
 # 5b. Check what a NEW terminal will find, not this session's adjusted PATH
 $pathOk = $true
@@ -1151,6 +1203,16 @@ foreach ($tool in 'node', 'npm', 'graft') {
     } else {
         $pathOk = $false
         Write-Warning "New terminals will NOT find '$tool': it is in neither the machine nor the user PATH."
+    }
+}
+$newGraft = Find-InNewTerminal 'graft'
+if ($newGraft -and (ConvertTo-PathKey (Split-Path $newGraft)) -ne (ConvertTo-PathKey $NpmGlobal)) {
+    Write-Warning "New terminals will run another graft ($newGraft), not the one just installed in ${NpmGlobal}: uninstall it, or move $NpmGlobal before $(Split-Path $newGraft) in PATH."
+}
+if ($graftNode) {
+    Write-Host ("graft will run on Node.js {0} ({1})" -f $graftNode.Version, $graftNode.Path)
+    if (-not $graftNode.Version -or $graftNode.Version.Major -lt $MinNodeMajor) {
+        Write-Warning "graft needs Node.js $MinNodeMajor or newer; $($graftNode.Path) is not."
     }
 }
 if (-not $pathOk) {
@@ -1169,7 +1231,7 @@ if (-not $Yes) {
 }
 if ($getPrices) {
     try {
-        & graft prices update
+        & $GraftCmd prices update
         if ($LASTEXITCODE -ne 0) { Write-Warning "'graft prices update' failed (exit code $LASTEXITCODE); run it again later." }
     } catch {
         Write-Warning "Could not run 'graft prices update': $($_.Exception.Message)"

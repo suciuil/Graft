@@ -52,7 +52,7 @@ export async function buildGraphWithProgress(
   let stderr = "";
   const fmt = (x: number) => x.toLocaleString("en-US");
   const code = await new Promise<number | null>((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, opts.cliPath!, "build", "."], {
+    const child = spawn(process.execPath, [...process.execArgv, opts.cliPath!, "build", ".", "--no-workspace"], {
       cwd: dir,
       stdio: ["ignore", "pipe", "pipe"],
     });

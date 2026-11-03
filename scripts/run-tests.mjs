@@ -52,7 +52,8 @@ const isCloudTest = (f) => {
 // Sorted so a failure is reported in the same order on every platform and run.
 const all = readdirSync(testDir).filter((f) => f.endsWith(".test.ts")).sort();
 const skipped = withCloud ? [] : all.filter(isCloudTest);
-const files = all.filter((f) => !skipped.includes(f)).map((f) => join(testDir, f));
+// Relative to `cwd: repoRoot`: absolute paths for ~500 files overflow Windows' 32,767-char command line.
+const files = all.filter((f) => !skipped.includes(f)).map((f) => join("test", f));
 if (skipped.length) {
   console.error(`(skipping ${skipped.length} test files that need data sent to a cloud, which this fork disables; CLOUD_TESTS=1 runs them: ${skipped.join(", ")})`);
 }
@@ -91,7 +92,17 @@ const tmpEnv = { TMPDIR: runTmp, TEMP: runTmp, TMP: runTmp };
 // list (`graft savings --all`), so the list points at a scratch file inside the
 // run's own temp folder rather than the developer's real ~/.graft/repos.json.
 const reposFile = join(runTmp, "graft-test-repos.json");
-const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...files], {
+
+// Still split into batches when the list outgrows the Windows limit, with room left for the node path.
+const MAX_ARGS_CHARS = 24_000;
+const batches = [];
+for (const f of files) {
+  const last = batches.at(-1);
+  if (last && last.reduce((n, x) => n + x.length + 1, 0) + f.length < MAX_ARGS_CHARS) last.push(f);
+  else batches.push([f]);
+}
+
+const run = (batch) => spawnSync(process.execPath, ["--import", "tsx", "--test", ...batch], {
   cwd: repoRoot,
   stdio: "inherit",
   env: {
@@ -112,11 +123,12 @@ const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...file
     // The developer's saved `graft model` / `graft api key` (HKCU\Environment,
     // ~/.graft/env.sh) must not change what a spawned CLI resolves.
     GRAFT_NO_SAVED_SETTINGS: "1",
-    // The skills' ready probes get 300 ms for every git spawn together. With
-    // many test files running at once, a loaded machine (a Windows runner
-    // especially) can't fit that, and the probes answer nothing. Honoured only
-    // in a test home and only with the real git (src/skills/probes.ts
-    // testScale), so the time-cap test still checks the real limits.
+    // The skills' ready probes get 300 ms for every git spawn together, and the
+    // prompt hook 400 ms in all. With many test files running at once, a loaded
+    // machine (a Windows runner especially) can't fit that, and the hook answers
+    // nothing. Honoured only in a test home, only with the real git and clock
+    // (src/skills/probes.ts testScale, testTimeScale), so the time-cap tests
+    // still check the real limits.
     TRAIL_TEST_PROBE_SCALE: "5",
     // This fork turns the look-back and fetching OFF unless the variable is "0"
     // (src/util/privacy-switches.ts). The suite tests those features, so it
@@ -126,6 +138,8 @@ const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...file
     TRAIL_NO_FETCH: "0",
   },
 });
+const results = batches.map(run);
+const result = results.find((r) => r.error) ?? results.find((r) => r.status !== 0) ?? results[0];
 try {
   rmSync(runTmp, { recursive: true, force: true });
 } catch {

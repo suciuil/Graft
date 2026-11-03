@@ -8,12 +8,11 @@
  * `registerMcpConfigs()` walks that same list to do the writing.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { PlannedWrite } from './plan.js';
 import { readJsonObject, type ConfigWrite } from './config-write.js';
-import { trailOnPath, type Brand } from '../brand.js';
+import { commandOnPath, trailOnPath, type Brand } from '../brand.js';
 
 /** MCP registration reports the same write-result record every installer does. */
 export type McpWrite = ConfigWrite;
@@ -53,9 +52,9 @@ const BIN_LAUNCH = { command: 'graft', args: ['mcp'] };
 const TRAIL_NPX_LAUNCH = { command: 'npx', args: ['-y', '@trailhq/trail-code', 'mcp'] };
 const TRAIL_BIN_LAUNCH = { command: 'trail', args: ['mcp'] };
 
+// A PATH lookup, not a spawn: Node can't spawn Windows' `graft.cmd` without a shell.
 function graftOnPath(): boolean {
-  const r = spawnSync('graft', ['--version'], { stdio: 'ignore', timeout: 5000 });
-  return r.status === 0;
+  return commandOnPath('graft');
 }
 
 /**

@@ -285,7 +285,7 @@ function ciFolder(top: string, deadline: number): CiFolder {
   const files = new Set<string>();
   const names = new Set<string>();
   for (const n of list) {
-    if (Date.now() > deadline) return 'unsure';
+    if (Date.now() >= deadline) return 'unsure';
     files.add(n.replace(/\.ya?ml$/i, '').toLowerCase());
     const text = readSmall(join(folder, n), MAX_CI_BYTES);
     if (text === null) return 'unsure';

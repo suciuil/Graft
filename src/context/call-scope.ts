@@ -75,6 +75,12 @@ export interface CallScope {
    */
   compactNudge: boolean;
   /**
+   * Models (tally labels) that priced the graft calls of the turn now running,
+   * oldest first. More than one when a turn switches model midway, as Kilo's
+   * "Plan first" does between its Plan and Code/Debug phases.
+   */
+  turnModels: string[];
+  /**
    * Called with each saving as a footer claims it, before the output is
    * printed. The CLI uses it to log the call and to repeat the savings line on
    * stderr. That has to happen at this point, not after the command: a pipe that
@@ -96,6 +102,7 @@ function freshScope(): CallScope {
     deepDue: null,
     initDue: null,
     compactNudge: false,
+    turnModels: [],
     onClaim: null,
   };
 }

@@ -139,6 +139,8 @@ export function hostModelFor(repo: string, opts: HostModelOpts = {}): string | n
     } catch {
       // Next source; a price is never worth failing a turn over.
     }
+    // Kilo's shell inherits VS Code's env, so a later source would price Kilo's turn at another host's model.
+    if (source.id === 'kilo') return null;
   }
   return null;
 }

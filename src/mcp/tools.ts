@@ -11,8 +11,8 @@ import { deepDueFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
-import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters, setCompactNudge, claimedSummary, tallyWarnings } from '../context/savings.js';
-import { calledRecently, recordRecentCall } from '../context/recent-calls.js';
+import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters, setCompactNudge, setTurnModels, claimedSummary, tallyWarnings } from '../context/savings.js';
+import { calledRecently, recordRecentCall, turnModels } from '../context/recent-calls.js';
 import { initDueReason } from '../hosts/drift.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { latestSession, sessionPricing } from '../claude/session-metrics.js';
@@ -337,6 +337,7 @@ async function callToolScoped(
     // A call a few minutes after another one in this repo gets the short savings
     // nudge: the agent has just read the long one (see `savingsTurnNudge`).
     setCompactNudge(calledRecently(root));
+    setTurnModels(turnModels(root));
     let note: string | null = null;
     let deep: string | null = null;
     setDeepDue(null);

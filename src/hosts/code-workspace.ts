@@ -121,17 +121,19 @@ export async function promptCodeWorkspace(
   choices: CodeWorkspaceChoice[],
   dir: string,
   io: { input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream } = {},
+  command: 'init' | 'build' = 'init',
 ): Promise<string | null | undefined> {
   const input = io.input ?? process.stdin;
   const output = io.output ?? process.stderr;
-  const count = (n: number | null) => (n === null ? 'unreadable' : `wire its ${n} folder${n === 1 ? '' : 's'}`);
+  const verb = command === 'init' ? 'wire' : 'build';
+  const count = (n: number | null) => (n === null ? 'unreadable' : `${verb} its ${n} folder${n === 1 ? '' : 's'}`);
   const lines = [
     choices.length === 1 ? `Found a VS Code workspace in ${dir}:` : `Found ${choices.length} VS Code workspaces in ${dir}:`,
     ...choices.map((c, i) => `  ${i + 1}) ${basename(c.file)} · ${count(c.folders)}`),
-    `  0) none · wire this whole folder instead`,
+    `  0) none · ${verb} this whole folder instead`,
   ];
   output.write(`${lines.join('\n')}\n`);
-  const ask = () => output.write(`Which one should init use? [0-${choices.length}] `);
+  const ask = () => output.write(`Which one should ${command} use? [0-${choices.length}] `);
   const rl = createInterface({ input, crlfDelay: Infinity, terminal: false });
   try {
     ask();
