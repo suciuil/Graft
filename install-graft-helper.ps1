@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 # Started from PowerShell 7 (pwsh), or with a PSModulePath that lists its folders, Windows PowerShell 5.1 autoloads
 # PowerShell 7's copies of its own modules (Microsoft.PowerShell.Security for Get-ExecutionPolicy, ...), which fail
 # to load. Keep only the other folders, with Windows PowerShell's own first; child processes inherit this.
+# Same rule as windowsPowerShellEnv() in src/reporting/flush.ts.
 if ($PSVersionTable.PSEdition -ne 'Core') {
     $ownModules = Join-Path $PSHOME 'Modules'
     $keptModules = @("$env:PSModulePath" -split ';' | Where-Object {
@@ -1389,7 +1390,7 @@ $graftNodeId = if ($graftNode) { "$($graftNode.Path)|$($graftNode.Version.Major)
 if (-not (Test-Path $GraftNodeMarker) -or (Get-Content -LiteralPath $GraftNodeMarker -Raw).Trim() -ne $graftNodeId) { $reinstall = $true }
 if ($reinstall) { $installArgs += '--force' }
 # npm 12 (Node.js 26) skips install scripts not listed in allow-scripts; graft's postinstall points npm at the
-# fork's registry. Older npm runs them anyway and does not know the setting.
+# fork's registry and mints the install id. Older npm runs them anyway and does not know the setting.
 $npmSettings = try { (& npm config ls -l 2>$null) -join "`n" } catch { '' }
 if ($npmSettings -match '(?m)^\s*allow-scripts\s*=') { $installArgs += '--allow-scripts=@nanonets/graft' }
 & npm @installArgs

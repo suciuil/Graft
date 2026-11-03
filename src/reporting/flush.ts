@@ -552,6 +552,27 @@ function powershellExe(): string {
   return existsSync(full) ? full : 'powershell.exe';
 }
 
+/** PowerShell 7's module folders (`...\PowerShell\7\Modules`, `...\PowerShell\Modules`,
+ *  `Documents\PowerShell\Modules`), never Windows PowerShell's (`...\WindowsPowerShell\...`). */
+const PWSH_MODULE_DIR = /(?<![A-Za-z])PowerShell[\\/](?:[^\\/]+[\\/])?Modules[\\/]?$/i;
+
+/**
+ * The environment for a Windows PowerShell 5.1 child. When graft runs under
+ * PowerShell 7 (or the user's PSModulePath lists its folders), 5.1 inherits
+ * PowerShell 7's module folders and autoloads their copies of its own modules
+ * (Microsoft.PowerShell.Security, ...), which fail to load there. Those folders
+ * are dropped; everything else is passed on unchanged.
+ */
+export function windowsPowerShellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find((k) => k.toLowerCase() === 'psmodulepath');
+  if (!key || !env[key]) return { ...env };
+  const kept = env[key]!.split(';').filter((p) => p.trim() && !PWSH_MODULE_DIR.test(p.trim()));
+  const next = { ...env };
+  if (kept.length) next[key] = kept.join(';');
+  else delete next[key];
+  return next;
+}
+
 /** The real runner: Windows PowerShell 5.1, hidden, killed after ODPNET_TIMEOUT_MS. */
 export const runPowerShell: OdpnetRunner = (input) =>
   new Promise((resolve) => {
@@ -571,6 +592,7 @@ export const runPowerShell: OdpnetRunner = (input) =>
       child = spawn(powershellExe(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: windowsPowerShellEnv(),
       });
     } catch (e) {
       err = short(e);

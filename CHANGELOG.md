@@ -206,9 +206,11 @@
   5.1 tried to load PowerShell 7's `Microsoft.PowerShell.Security` and stopped
   with "the module could not be loaded". The installer now drops those folders
   from `PSModulePath` at its start, and a failure to read the execution policy
-  only prints a warning. With npm 12 (Node.js 26) the installer also passes
-  `--allow-scripts=@nanonets/graft`, so graft's postinstall (the fork registry
-  in `.npmrc`) runs instead of being skipped with a warning.
+  only prints a warning. The savings report's ODP.NET sender starts Windows
+  PowerShell with the same cleaned `PSModulePath`. With npm 12 (Node.js 26)
+  the installer also passes `--allow-scripts=@nanonets/graft`, so graft's
+  postinstall (the fork registry in `.npmrc`, the install id) runs instead of
+  being skipped with a warning.
 - **Databricks GPT models without a `model_service.models.1adp-*` id work.**
   `databricks-gpt-*` ids (for example `databricks-gpt-6-astra` and
   `databricks-gpt-5-mini`, which have no service id) now go to the gateway's
