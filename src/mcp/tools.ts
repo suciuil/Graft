@@ -390,10 +390,15 @@ function recordMcpSavings(root: string, res: { text: string; isError: boolean },
   if (res.isError) return;
   const saved = sumSavingsFooters(res.text);
   if (saved <= 0) return;
-  recordSavedTokens(root, currentModel(root, liveClaudeSession(root)?.model), saved);
+  const s = claimedSummary(saved);
+  recordSavedTokens(root, currentModel(root, liveClaudeSession(root)?.model), saved, undefined, {
+    channel: "mcp",
+    command: tool,
+    usd: s.usd,
+    measured: s.measured,
+  });
   // What `graft savings --last` reads back, and what makes the next call's
   // nudge short.
-  const s = claimedSummary(saved);
   recordRecentCall(root, { command: tool, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
 }
 

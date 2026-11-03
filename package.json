@@ -41,6 +41,9 @@
     "dist",
     "scripts",
     "vendor/*/prebuilds/**",
+    "vendor/oracledb/**",
+    "vendor/odpnet/**",
+    "config/savings-report*.json",
     "README.md",
     "LICENSE",
     "docs/changelog.html"
@@ -53,6 +56,8 @@
     "build:ts": "tsc -p tsconfig.json && tsc -p viewer/tsconfig.json && node scripts/build-viewer.mjs",
     "build:vendor": "node scripts/vendor-grammars.mjs && node scripts/vendor-optional-grammars.mjs",
     "pack:bundle": "node scripts/pack-bundle.mjs",
+    "vendor:oracledb": "node scripts/vendor-oracledb.mjs",
+    "vendor:odpnet": "node scripts/vendor-odpnet.mjs",
     "prices:bundle": "node --import tsx scripts/update-bundled-prices.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "cli": "tsx src/cli.ts",

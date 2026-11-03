@@ -85,7 +85,7 @@ function sampleTurnCost(s: SessionState, read: TranscriptCatchUp | null, dir: st
     const dominant = [...read.models].sort((a, b) => b.tokens - a.tokens)[0]?.model;
     if (dominant) s.model = dominant;
     try {
-      recordTurnBilling(dir, read.models);
+      recordTurnBilling(dir, read.models, undefined, { channel: 'hook', command: 'stop' });
     } catch {
       // A lifetime total is never worth failing a hook over.
     }

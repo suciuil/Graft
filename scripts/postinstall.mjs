@@ -1,10 +1,10 @@
-// Points the user's npm at this fork's registry, then prints a one-line nudge
-// after install. Records nothing: telemetry is permanently disabled. Never
-// fails the install.
+// Points the user's npm at this fork's registry, mints the local install id,
+// then prints a one-line nudge after install. Sends nothing: telemetry is
+// permanently disabled. Never fails the install.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -38,6 +38,21 @@ try {
       changed = true;
     }
     if (changed) writeFileSync(file, lines.join(eol) + eol, { mode: 0o600 });
+  }
+} catch {
+  /* never fail an install */
+}
+
+// The machine's install id (a random UUID in ~/.graft/telemetry.json), minted
+// now so it exists from the first command on. Local only: it leaves the machine
+// solely in the opt-in savings report (`graft savings-report enable`). An
+// install that skips scripts (`--ignore-scripts`, the offline bundle) mints it
+// on first use instead.
+try {
+  const identity = join(root, 'dist', 'telemetry', 'identity.js');
+  if (existsSync(identity)) {
+    const { installId } = await import(pathToFileURL(identity).href);
+    installId();
   }
 } catch {
   /* never fail an install */

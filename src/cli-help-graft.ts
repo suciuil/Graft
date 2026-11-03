@@ -379,6 +379,18 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "--last prints the latest turn's graft calls and the tally to report, for when a savings line was cut out of the output.",
     examples: ["graft savings", "graft savings 2026", "graft savings 2026-09", "graft savings 2026-09-08", "graft savings --last"],
   },
+  "savings-report": {
+    description:
+      "Opt-in, off until you run `graft savings-report enable`: also send each saving and billing entry graft records " +
+      "to the company's Oracle database for analytics. A row holds a random install id, the day and time, the model, " +
+      "the tokens saved or billed, their dollar value, and which graft surface (cli / mcp / hook) and command filed it — " +
+      "no repo name or path, user name, host name, file name or query text. Rows are queued in ~/.graft/ and sent by a " +
+      "background process at most every 5 minutes; normal commands never wait on it or show its errors. `disable` stops " +
+      "it and discards what was not sent; `flush` sends now and prints the outcome; `status` shows the install id, the " +
+      "database, the queue and the last send. The database can turn reporting off (DISABLE_COST_SAVINGS_REPORTING in " +
+      "GRAFT_REPORTING_SETTINGS); that is checked before every send and turns it off on this machine too.",
+    examples: ["graft savings-report", "graft savings-report enable", "graft savings-report flush", "graft savings-report disable"],
+  },
   skeleton: {
     description:
       "Show one file's API: every function, class and method with its signature and line range, without the bodies. " +

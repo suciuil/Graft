@@ -1,0 +1,6 @@
+{
+  "package": "oracledb",
+  "version": "26.0.0",
+  "source": "https://registry.npmjs.org/oracledb/-/oracledb-26.0.0.tgz",
+  "integrity": "sha512-ywUqFidj/mPjRjfpOQdzcXT98lhiJzavPCbyPF9JYivcgrpHx7ENj4ZGQDclrpGXeozUBLc5BNXV7yj5qTMxDw=="
+}

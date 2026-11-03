@@ -307,8 +307,13 @@ let runningCommand = "";
  */
 function fileClaim(repo: string, tokens: number): void {
   if (runningCommand === "mcp") return;
-  recordSavedTokens(repo, currentModel(repo, liveClaudeSession(repo)?.model), tokens);
   const s = claimedSummary(tokens);
+  recordSavedTokens(repo, currentModel(repo, liveClaudeSession(repo)?.model), tokens, undefined, {
+    channel: "cli",
+    command: queryNote.command ?? runningCommand,
+    usd: s.usd,
+    measured: s.measured,
+  });
   recordRecentCall(repo, { command: queryNote.command ?? runningCommand, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
   if (!process.stdout.isTTY && process.env.CLAUDECODE === undefined && process.env.GRAFT_STDERR_SAVINGS !== "0") {
     const copy = stderrSavingsCopy(tokens);
@@ -507,7 +512,7 @@ function parseTabs(raw: string | undefined): VizTab[] | undefined {
  * not editorialize on stderr at startup (`mcp` runs its own upkeep at boot, and
  * `_update-check` IS the fetch).
  */
-const UPKEEP_SKIP = new Set(["version", "upgrade", "_update-check", "mcp", "/h", "/help"]);
+const UPKEEP_SKIP = new Set(["version", "upgrade", "_update-check", "_savings-report-flush", "mcp", "/h", "/help"]);
 
 /**
  * Every other command: top up the cached registry answer in the background and,
@@ -625,6 +630,62 @@ program
   .description("internal: POST the queued anonymous usage events")
   .action(async () => {
     await runFlush();
+  });
+
+// Hidden: spawned detached by the savings report's maybeFlushInBackground
+// (src/reporting/flush.ts). Bounded by a watchdog so a hung connection cannot
+// leave a process behind; a batch cut off by it is recovered by the next flush.
+program
+  .command("_savings-report-flush", { hidden: true })
+  .description("internal: send the queued savings-report rows to the database")
+  .action(async () => {
+    setTimeout(() => process.exit(0), 60_000).unref();
+    const { runFlush: runReportFlush } = await import("./reporting/flush.js");
+    await runReportFlush();
+    process.exit(0);
+  });
+
+grouped(program.command("savings-report"), GROUP.setup)
+  .description(
+    "Opt-in: also send each saving graft records (install id, day, model, tokens, dollars — no repo, path or user) to the company database for analytics. Off until enabled",
+  )
+  .argument("[action]", "status (default) | enable | disable | flush", "status")
+  .addHelpText(
+    "after",
+    // Under graft, the entry in cli-help-graft.ts says all of this.
+    !TRAIL ? "" : [
+      "",
+      "  status    whether it is on, the install id, the database, what is queued and the last send",
+      "  enable    start queueing; a background process sends the queue at most every 5 minutes",
+      "  disable   stop, and discard what was not sent yet",
+      "  flush     send the queue now, in the foreground, and print the outcome",
+      "",
+      "Errors are never shown during normal commands. The database can turn reporting off",
+      "for everyone (DISABLE_COST_SAVINGS_REPORTING); it is checked before every send.",
+    ].join("\n"),
+  )
+  .action(async (action: string) => {
+    const report = await import("./reporting/command.js");
+    switch (action) {
+      case "status":
+        console.log(report.formatReportingStatus());
+        return;
+      case "enable":
+        console.log(report.enableReporting());
+        return;
+      case "disable":
+        console.log(report.disableReporting());
+        return;
+      case "flush": {
+        const r = await report.flushNow();
+        console.log(report.formatFlushResult(r));
+        process.exit(r.ok || r.skipped === "disabled" ? 0 : 1);
+        return;
+      }
+      default:
+        console.error(`✗ unknown action "${action}": expected status, enable, disable, or flush`);
+        process.exit(1);
+    }
   });
 
 // Hidden from the help list: telemetry is permanently off, so there is nothing to

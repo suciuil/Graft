@@ -56,6 +56,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { localDate, stampChangelog } from "./stamp-changelog.mjs";
 import { kitFileName, kitVersion, latestKitInChangelog, nextKitBuild, parseKitName, parseKitRecord } from "./kit-build.mjs";
 
@@ -255,6 +256,64 @@ for (const [key, pkgName] of Object.entries(keyToPkg)) {
 
 if (included.length === 0) die("no grammars could be bundled — is this the machine with the sibling grammar repos?");
 
+// The Oracle driver for the opt-in savings report (src/reporting/), vendored by
+// scripts/vendor-oracledb.mjs from registry.npmjs.org. Only this platform's
+// thick-mode binding goes in, like the grammars: the tarball is per platform.
+const oracleSrc = join(repoRoot, "vendor", "oracledb");
+if (!existsSync(join(oracleSrc, "index.js"))) die("vendor/oracledb is missing — run npm run vendor:oracledb");
+{
+  const oracleDest = join(stagingDir, "vendor", "oracledb");
+  cpSync(oracleSrc, oracleDest, {
+    recursive: true,
+    filter: (src) => !src.endsWith(".node") || src.endsWith(`-${PLATFORM}.node`),
+  });
+  if (!readdirSync(join(oracleDest, "build", "Release")).some((f) => f.endsWith(".node"))) {
+    console.warn(`! vendor/oracledb has no thick-mode binding for ${PLATFORM}: the savings report can only use thin mode there`);
+  }
+}
+
+// Oracle's managed .NET driver, vendored by scripts/vendor-odpnet.mjs from
+// nuget.org: the savings report's sender on Windows machines with no Oracle
+// Client (the database requires Native Network Encryption, which thin mode
+// cannot do). Windows bundles only, and required there: a kit without it cannot
+// report from most PCs. Its LICENSE.txt must travel with it, and both files must
+// match the SHA-256 list the vendoring script wrote, the same list
+// install-graft-helper.ps1 checks the installed copy against.
+const odpnetFiles = [];
+if (PLATFORM.startsWith("win32-")) {
+  const odpSrc = join(repoRoot, "vendor", "odpnet");
+  const manifestPath = join(odpSrc, "VENDORED.json");
+  if (!existsSync(manifestPath)) die("vendor/odpnet is missing — run npm run vendor:odpnet");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const expected = manifest.files ?? {};
+  for (const name of ["Oracle.ManagedDataAccess.dll", "LICENSE.txt"]) {
+    const file = join(odpSrc, name);
+    if (!existsSync(file)) die(`vendor/odpnet/${name} is missing — run npm run vendor:odpnet`);
+    if (!expected[name]) die(`vendor/odpnet/VENDORED.json lists no SHA-256 for ${name} — run npm run vendor:odpnet`);
+    if (createHash("sha256").update(readFileSync(file)).digest("hex") !== expected[name]) {
+      die(`vendor/odpnet/${name} does not match its SHA-256 in VENDORED.json — run npm run vendor:odpnet`);
+    }
+  }
+  const odpDest = join(stagingDir, "vendor", "odpnet");
+  mkdirSync(odpDest, { recursive: true });
+  for (const name of ["Oracle.ManagedDataAccess.dll", "LICENSE.txt", "VENDORED.json"]) {
+    cpSync(join(odpSrc, name), join(odpDest, name));
+    odpnetFiles.push(`vendor/odpnet/${name}`);
+  }
+  console.log(`• bundling ${manifest.package} ${manifest.version} (vendor/odpnet) for the savings report`);
+}
+
+// The savings-report database config. The real one carries a password, so it is
+// git-ignored and copied only when present here; the example always ships.
+mkdirSync(join(stagingDir, "config"), { recursive: true });
+for (const f of ["savings-report.json", "savings-report.example.json"]) {
+  const from = join(repoRoot, "config", f);
+  if (existsSync(from)) cpSync(from, join(stagingDir, "config", f));
+}
+if (!existsSync(join(repoRoot, "config", "savings-report.json"))) {
+  console.warn("! config/savings-report.json is missing: the bundle's savings report has no database until a user adds ~/.graft/savings-report.json");
+}
+
 // A published bundle must not carry the `file:../…` specs: on the target machine those
 // paths do not exist, and npm would report a resolution failure for each. The grammars
 // are already inside, so the entries have no job left to do. devDependencies and the
@@ -273,7 +332,7 @@ delete staged.optionalDependencies;
 delete staged.devDependencies;
 delete staged.allowScripts;
 staged.scripts = pkg.scripts?.postinstall ? { postinstall: pkg.scripts.postinstall } : {};
-staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE", "docs/changelog.html"];
+staged.files = ["dist", "scripts", "vendor", "config", "README.md", "LICENSE", "docs/changelog.html"];
 writeFileSync(join(stagingDir, "package.json"), `${JSON.stringify(staged, null, 2)}\n`);
 
 // The 19 optional grammars are in `vendor/` by now, but `dependencies` — tree-sitter
@@ -394,8 +453,43 @@ const finalName = `${pkg.name.replace(/^@/, "").replace(/\//g, "-")}-${pkg.versi
 rmSync(join(repoRoot, finalName), { force: true });
 renameSync(produced, join(repoRoot, finalName));
 
+/** Paths (without the leading `package/`) of the regular files in a .tgz. */
+function tarballFiles(tgz) {
+  const tar = gunzipSync(readFileSync(tgz));
+  const out = new Set();
+  let longName = null;
+  for (let off = 0; off + 512 <= tar.length; ) {
+    const header = tar.subarray(off, off + 512);
+    if (header.every((b) => b === 0)) break;
+    const field = (start, len) => header.subarray(start, start + len).toString("utf8").replace(/\0.*$/s, "");
+    const size = parseInt(field(124, 12).trim() || "0", 8);
+    const type = field(156, 1) || "0";
+    const body = tar.subarray(off + 512, off + 512 + size);
+    if (type === "L") longName = body.toString("utf8").replace(/\0.*$/s, "");
+    else {
+      const prefix = field(345, 155);
+      const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+      longName = null;
+      if (type === "0") out.add(name.replace(/^package\//, ""));
+    }
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+
+// npm pack applies `files` and ignore rules of its own; check the result rather than
+// trusting the staging tree, so a kit can never ship without the savings report's driver.
+if (odpnetFiles.length > 0) {
+  const inTarball = tarballFiles(join(repoRoot, finalName));
+  const lost = odpnetFiles.filter((f) => !inTarball.has(f));
+  if (lost.length > 0) die(`${finalName} is missing ${lost.join(", ")} — check package.json "files" in the staging tree`);
+}
+
 const mb = (statSync(join(repoRoot, finalName)).size / 1024 / 1024).toFixed(1);
-console.log(`\n✓ ${finalName} (${mb} MB) — ${included.length} grammars vendored, ${staged.bundleDependencies.length} dependencies bundled`);
+console.log(
+  `\n✓ ${finalName} (${mb} MB) — ${included.length} grammars vendored, ${staged.bundleDependencies.length} dependencies bundled` +
+    (odpnetFiles.length > 0 ? ", ODP.NET managed driver included" : ""),
+);
 if (missing.length > 0) {
   console.log(`  ${missing.length} grammars not bundled:`);
   for (const m of missing) console.log(`    ${m}`);

@@ -337,6 +337,51 @@ function Find-OfflinePackage {
         Select-Object -Last 1
 }
 
+# ---- Savings report: the ODP.NET managed driver shipped in graft's vendor\odpnet ----
+# graft's opt-in savings report (off until 'graft savings-report enable') reaches its Oracle database through
+# this DLL on PCs without an Oracle Client, loaded by a Windows PowerShell child like the one below
+# (runPowerShell in src/reporting/flush.ts). Nothing is sent by this check: the DLL is only loaded, in a
+# separate process so this one does not keep it locked against the next upgrade.
+# .NET Framework 4.6.2 (Release 394802) is what the net462 build of the driver targets.
+$OdpnetMinNetRelease = 394802
+function Test-SavingsReportDriver([string]$PackageDir) {
+    $ErrorActionPreference = 'Continue'
+    $dir = Join-Path $PackageDir 'vendor\odpnet'
+    $dll = Join-Path $dir 'Oracle.ManagedDataAccess.dll'
+    if (-not (Test-Path -LiteralPath $dll)) { return @{ Ok = $false; Problem = "$dll is not in the installed graft package" } }
+    $manifest = $null
+    try { $manifest = Get-Content -LiteralPath (Join-Path $dir 'VENDORED.json') -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
+    if ($manifest -and $manifest.files) {
+        foreach ($p in $manifest.files.PSObject.Properties) {
+            $f = Join-Path $dir $p.Name
+            if (-not (Test-Path -LiteralPath $f)) { return @{ Ok = $false; Problem = "$f is missing" } }
+            if ((Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash -ne $p.Value) {
+                return @{ Ok = $false; Problem = "$f does not match its SHA-256 in VENDORED.json (damaged or replaced)" }
+            }
+        }
+    }
+    # .NET refuses LoadFrom on a file still marked as downloaded from the internet
+    Get-ChildItem -LiteralPath $dir -File | Unblock-File -ErrorAction SilentlyContinue
+    $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Release
+    if (-not $release -or $release -lt $OdpnetMinNetRelease) {
+        return @{ Ok = $false; Problem = '.NET Framework 4.6.2 or newer is not installed' }
+    }
+    $probe = 'try { $a = [Reflection.Assembly]::LoadFrom($env:GRAFT_ODPNET_DLL); "ok " + $a.GetName().Version } ' +
+             'catch { "error [" + $ExecutionContext.SessionState.LanguageMode + "] " + $_.Exception.Message; exit 1 }'
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $ps)) { $ps = 'powershell.exe' }
+    $env:GRAFT_ODPNET_DLL = $dll
+    try {
+        $out = (& $ps -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded 2>$null) -join ' '
+    } finally {
+        Remove-Item Env:GRAFT_ODPNET_DLL -ErrorAction SilentlyContinue
+    }
+    if ($out -match '^ok (\S+)') { return @{ Ok = $true; Version = $Matches[1] } }
+    $why = if ($out) { $out -replace '^error ', '' } else { "Windows PowerShell exited with code $LASTEXITCODE" }
+    return @{ Ok = $false; Problem = "Windows PowerShell could not load it: $why" }
+}
+
 # ---- LLM settings for `graft build --deep` ----
 # Resolved the way graft resolves them (Resolve-LlmTarget mirrors resolveConfig in src/ai/providers.ts):
 # GRAFT_BASE_URL, ANTHROPIC_BASE_URL, ... and, with nothing configured, the Databricks AI Gateway.
@@ -1172,6 +1217,7 @@ $ConsentItems = @(
     [pscustomobject]@{ Id = 'user-path'; Legacy = $true; Text = "add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix" }
     [pscustomobject]@{ Id = 'graft-install'; Legacy = $true; Text = "install graft globally with npm from $graftSource" }
     [pscustomobject]@{ Id = 'execution-policy'; Legacy = $true; Text = 'set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell' }
+    [pscustomobject]@{ Id = 'odpnet-check'; Text = 'check that the Oracle driver (ODP.NET) graft ships for its opt-in savings report loads on this PC (nothing is sent)' }
     [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings" }
     [pscustomobject]@{ Id = 'llm-check'; Legacy = $true; Text = 'check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL' }
 )
@@ -1321,6 +1367,19 @@ if (-not (Enable-UserScripts)) {
 $GraftCmd = Join-Path $NpmGlobal 'graft.cmd'
 if (-not (Test-Path $GraftCmd)) { $GraftCmd = 'graft' }
 & $GraftCmd --version
+
+# 5a. The savings report's Oracle driver in the installed package (problems here never fail the install)
+$GraftPackageDir = Join-Path $NpmGlobal 'node_modules\@nanonets\graft'
+try {
+    $odp = Test-SavingsReportDriver $GraftPackageDir
+    if ($odp.Ok) {
+        Write-Host "Savings report driver: ODP.NET $($odp.Version) loads (used when no Oracle Client is installed; the report stays off until 'graft savings-report enable')."
+    } else {
+        Write-Warning "Savings report driver (ODP.NET) is not usable: $($odp.Problem). Without an Oracle Client this PC cannot send the opt-in savings report; the rest of graft is not affected."
+    }
+} catch {
+    Write-Warning "Could not check the savings report driver (ODP.NET): $($_.Exception.Message)"
+}
 
 # 5b. Check what a NEW terminal will find, not this session's adjusted PATH
 $pathOk = $true

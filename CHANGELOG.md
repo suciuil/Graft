@@ -49,6 +49,40 @@
   headers, and where the prices are stored. The installer shows the same text
   before it asks whether to download the prices. The request itself is
   unchanged.
+- **`graft savings-report`: opt-in remote savings report, off by default.**
+  `graft savings-report enable` makes graft queue a copy of each saving and
+  billing entry it files in a repo's ledger (a random install id, time, day,
+  model, tokens, dollar value, and the cli / mcp / hook surface and command
+  that filed it; no repo, path, user, host or query text) in
+  `~/.graft/savings-report-outbox.ndjson`. A detached process inserts the
+  queue into the company Oracle database (`GRAFT_COST_SAVINGS`) at most every
+  5 minutes; no command waits on it and its errors are never shown. Before
+  every send it reads `DISABLE_COST_SAVINGS_REPORTING` in
+  `GRAFT_REPORTING_SETTINGS`: 1/true turns the report off on the machine and
+  discards the queue. `disable` stops it and discards the queue, `flush` sends
+  in the foreground and prints the outcome, `status` shows the install id,
+  database, queue and last send. The database comes from
+  `config/savings-report.json` (shipped, git-ignored; template in
+  `config/savings-report.example.json`) overridden by
+  `~/.graft/savings-report.json`. The Oracle driver `oracledb` 26.0.0 is
+  vendored from registry.npmjs.org under `vendor/oracledb/`
+  (`npm run vendor:oracledb`); thick mode (an installed Oracle Client) is tried
+  first because the database requires Native Network Encryption. On Windows
+  without an Oracle Client the rows go through Oracle's managed .NET driver
+  instead (`Oracle.ManagedDataAccess` 19.33.0, about 2.5 MB compressed,
+  vendored from nuget.org under `vendor/odpnet/` by `npm run vendor:odpnet`,
+  in the npm package and Windows bundles, not in Linux or macOS bundles), run
+  by Windows PowerShell 5.1 and encrypting the connection itself;
+  `mode: "odpnet"` forces it. `scripts/pack-bundle.mjs` refuses to build a
+  Windows kit when the DLL or its `LICENSE.txt` is missing or does not match
+  the SHA-256 list in `vendor/odpnet/VENDORED.json`, and checks the finished
+  tarball still contains them. `install-graft-helper.ps1` then checks the installed
+  copy against the same list, removes the downloaded-file mark, confirms .NET
+  Framework 4.6.2 or newer and test-loads the DLL in a separate Windows
+  PowerShell; a problem prints a warning and does not stop the install. The install
+  id is now minted at `npm install` (postinstall) or on first use. The owner
+  lifted the no-cloud Rule 2 for this feature only; see the decisions table in
+  `docs/no-cloud-policy.md`.
 - **Profile store, on by default: a repo's map and settings live in your
   profile.** A repo that has no `graft/` map and no `.graft/config.json` yet
   gets them in `~/.graft/repos/<folder>-<hash of the repo path>/` (`graph/` and
