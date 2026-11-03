@@ -319,12 +319,14 @@ export interface Prompter {
 export function terminalPrompter(): Prompter {
   const once = async (question: string, hidden: boolean): Promise<string> => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    let onClose = () => {};
     const cancel = new Promise<never>((_, reject) => {
       rl.on("SIGINT", () => {
         process.stdout.write("\n");
         reject(new PromptCancelled());
       });
-      rl.on("close", () => reject(new PromptCancelled()));
+      onClose = () => reject(new PromptCancelled());
+      rl.on("close", onClose);
     });
     if (hidden) {
       process.stdout.write(question);
@@ -336,7 +338,9 @@ export function terminalPrompter(): Prompter {
     try {
       return await Promise.race([rl.question(hidden ? "" : question), cancel]);
     } finally {
-      rl.removeAllListeners("close");
+      // Only our listener: readline's own "close" handler detaches it from stdin, and a
+      // leftover interface would echo every key of the next prompt a second time.
+      rl.off("close", onClose);
       rl.close();
     }
   };
