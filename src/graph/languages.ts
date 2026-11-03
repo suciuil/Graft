@@ -14,8 +14,14 @@
 import { depthRegistry, grammarAvailable, type Language } from "./extract.js";
 import { GENERIC_IMPORT_LANGS, GENERIC_LANGS, fallbackLangOf, genericSupport, wasmInstalled, type GenericLang } from "./generic.js";
 import { CONTAINER_LANGS } from "./container.js";
-import { missingNativePackages, nativeReady, optionalGrammarPackages } from "./native.js";
+import { depthReady, missingDepthPackages, warmDepthGrammars } from "./depth-parser.js";
+import { optionalGrammarPackages } from "./native.js";
 import { LSP_SERVERS } from "./lsp/registry.js";
+
+/** Load every depth grammar, so {@link languageSupport} sees what a build would. Await once before it. */
+export async function warmLanguageSupport(): Promise<void> {
+  await warmDepthGrammars(depthRegistry().map((e) => e.grammar));
+}
 
 /**
  * How much graft extracts from a language, best first:
@@ -205,15 +211,16 @@ export function languageSupport(packageName = "@nanonets/graft"): LanguageSuppor
     const depthFeatures: LanguageFeatures = { ...spec };
     const claimed = !g.optional || grammarAvailable(g.grammar);
     let row: LanguageSupport;
-    if (claimed && nativeReady(g.grammar)) {
+    if (claimed && depthReady(g.grammar)) {
       row = { name, level: spec.level, tier: "depth", extensions: g.exts, features: depthFeatures, lsp: null };
     } else if (claimed) {
-      // The grammar is there but its native parser will not load: the build hands
+      // The grammar is there but its parser will not load: the build hands
       // these files to the breadth-tier stand-in (or keeps a file node).
       const standIn = fallbackLangOf(g.grammar);
       const b = standIn ? breadth(standIn) : { level: "file-only" as SupportLevel, features: NONE };
-      const pkgs = missingNativePackages([g.grammar]);
-      const fix = pkgs.length ? `: npm install -g --allow-scripts=${pkgs.join(",")} ${packageName}` : "";
+      const pkgs = missingDepthPackages([g.grammar]);
+      // A WASM grammar has no install script: reinstalling the package is the fix.
+      const fix = `: npm install -g ${pkgs.length ? `--allow-scripts=${pkgs.join(",")} ` : ""}${packageName}`;
       row = {
         name,
         level: b.level,
@@ -221,7 +228,7 @@ export function languageSupport(packageName = "@nanonets/graft"): LanguageSuppor
         extensions: g.exts,
         features: b.features,
         lsp: null,
-        note: `native parser missing, ${spec.level} support needs it${fix}`,
+        note: `parser missing, ${spec.level} support needs it${fix}`,
       };
     } else {
       // An optional grammar that is not built: its extensions go to the breadth

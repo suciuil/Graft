@@ -23,7 +23,7 @@ test('empty settings gets the full Graft blocks', () => {
   // accumulator over the retrieval tools (Bash `graft …`, the graft_* MCP tools)
   // and the source-read tools (Read/Grep/Glob) it scores against.
   const savings = merged.hooks.PostToolUse[1];
-  assert.equal(savings.matcher, 'Bash|mcp__graft__|mcp__trail__|Read|Grep|Glob');
+  assert.equal(savings.matcher, 'Bash|mcp__graft__|mcp__trail__|Read|Grep|Glob|Skill');
   assert.ok(savings.hooks[0].command.includes('tool-savings'), 'savings hook wired');
   assert.ok(merged.footerLinksRegexes.includes('graft/[\\w./-]+\\.md'));
   assert.deepEqual(warnings, []);
@@ -36,7 +36,7 @@ test('a pre-fix Bash-only command (${CLAUDE_PROJECT_DIR:-.}) is replaced on re-i
     hooks: { PreToolUse: [{ matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: OLD, timeout: 5000 }] }] },
   });
   assert.equal(merged.statusLine.command, SL);
-  assert.equal(merged.hooks.PreToolUse.length, 2, 'the gate and pre-bash, the old entry replaced');
+  assert.equal(merged.hooks.PreToolUse.length, 3, 'the gate, pre-edit and pre-bash, the old entry replaced');
   assert.equal(merged.hooks.PreToolUse[0].hooks[0].command, repoShimCmd('graft-hooks.cjs', 'pre-tool'));
   assert.ok(!JSON.stringify(merged).includes(':-.}'), 'no Bash-only expansion survives');
 });

@@ -171,7 +171,7 @@ for (const entry of ["dist", "scripts", "README.md", "LICENSE"]) {
   if (existsSync(from)) cpSync(from, join(stagingDir, entry), { recursive: true });
 }
 
-// Each grammar's compiled binding, already laid out by scripts/vendor-grammars.mjs
+// Each grammar's compiled binding, already laid out by scripts/vendor-optional-grammars.mjs
 // (run as build:vendor) in exactly the shape the loader's fallback expects. Copied
 // rather than re-derived from the sibling repos so the bundle and the published package
 // ship byte-identical grammars.

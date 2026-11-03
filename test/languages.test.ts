@@ -3,14 +3,23 @@
  * extension it lists must be one a parser claims, and a native grammar that will not
  * load must show the level the build falls back to, not the one it would get.
  */
-import { afterEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { formatLanguageSupport, languageSupport, SUPPORT_LEVELS } from "../src/graph/languages.js";
+import { formatLanguageSupport, languageSupport, SUPPORT_LEVELS, warmLanguageSupport } from "../src/graph/languages.js";
 import { supportedExtensions } from "../src/graph/source-files.js";
+import { readDepthWasm, setDepthParsersForTest } from "../src/graph/depth-parser.js";
 import { realNativeRequire, setNativeRequireForTest } from "../src/graph/native.js";
 import { runCli } from "./helpers.js";
 
-afterEach(() => setNativeRequireForTest(null));
+// A stock install: a locally-built Kotlin grammar (this fork's vendor/kotlin) would otherwise take Kotlin off WASM.
+beforeEach(async () => {
+  setNativeRequireForTest(realNativeRequire);
+  await warmLanguageSupport();
+});
+afterEach(() => {
+  setDepthParsersForTest({ readWasm: null });
+  setNativeRequireForTest(null);
+});
 
 const byName = (name: string) => languageSupport().find((r) => r.name === name);
 
@@ -49,17 +58,19 @@ test("levels follow the tiers: hand-written, generic tags, walker-only, containe
   assert.equal(vue?.level, byName("TypeScript")?.level, "a .vue script block gets TypeScript's extraction");
 });
 
-test("a native grammar that won't load shows the stand-in's level and the fix", () => {
-  setNativeRequireForTest((id) => {
-    if (id === "tree-sitter-kotlin") throw new Error("No native build was found");
-    return realNativeRequire(id);
+test("a depth grammar that won't load shows the stand-in's level and the fix", async () => {
+  setDepthParsersForTest({
+    readWasm: (lang) => {
+      if (lang === "kotlin") throw new Error("ENOENT: tree-sitter-kotlin.wasm");
+      return readDepthWasm(lang);
+    },
   });
+  await warmLanguageSupport();
   const kotlin = languageSupport("@nanonets/graft").find((r) => r.name === "Kotlin");
   assert.equal(kotlin?.level, "broad", "the WASM stand-in still captures calls");
   assert.equal(kotlin?.tier, "breadth");
   assert.equal(kotlin?.features.inherits, false);
-  assert.match(kotlin?.note ?? "", /native parser missing/);
-  assert.match(kotlin?.note ?? "", /--allow-scripts=tree-sitter-kotlin @nanonets\/graft$/);
+  assert.match(kotlin?.note ?? "", /parser missing/);
   assert.equal(languageSupport().find((r) => r.name === "Java")?.level, "full", "only Kotlin falls back");
 });
 

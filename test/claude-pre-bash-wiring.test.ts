@@ -34,6 +34,7 @@ test('the repo install runs the gate and pre-bash before every Bash call, under 
     const { merged } = mergeGraftSettings({}, { name });
     assert.deepEqual(merged.hooks.PreToolUse, [
       { matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: repoShimCmd(`${name}-hooks.cjs`, 'pre-tool'), timeout: 5 }] },
+      { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: repoShimCmd(`${name}-hooks.cjs`, 'pre-edit'), timeout: 5 }] },
       { matcher: 'Bash', hooks: [{ type: 'command', command: repoShimCmd(`${name}-hooks.cjs`, 'pre-bash'), timeout: 5 }] },
     ]);
   }
@@ -44,6 +45,7 @@ test("under trail the shared settings run only session start; the personal file 
   const local = mergeTrailLocal({}, { hooks: true }).merged;
   assert.deepEqual(local.hooks.PreToolUse, [
     { matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: 'node "${CLAUDE_PROJECT_DIR:-.}/.trail/hook.cjs" pre-tool || exit 0', timeout: 5 }] },
+    { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: 'node "${CLAUDE_PROJECT_DIR:-.}/.trail/hook.cjs" pre-edit || exit 0', timeout: 5 }] },
     { matcher: 'Bash', hooks: [{ type: 'command', command: 'node "${CLAUDE_PROJECT_DIR:-.}/.trail/hook.cjs" pre-bash || exit 0', timeout: 5 }] },
   ]);
   assert.deepEqual(local.hooks.PostToolUseFailure, [
@@ -59,7 +61,7 @@ test('re-running the repo merge keeps one pre-bash entry, after the person\'s ow
   const once = mergeGraftSettings({ hooks: { PreToolUse: [THEIRS] } }, { name: 'trail' }).merged;
   const twice = mergeGraftSettings(once, { name: 'trail' }).merged;
   assert.deepEqual(twice, once);
-  assert.equal(twice.hooks.PreToolUse.length, 3, "the person's own, the gate, and pre-bash");
+  assert.equal(twice.hooks.PreToolUse.length, 4, "the person's own, the gate, the file's learnings before an edit, and pre-bash");
   assert.deepEqual(twice.hooks.PreToolUse[0], THEIRS);
   assert.equal(preBashEntries(twice.hooks).length, 1);
 });
@@ -70,6 +72,7 @@ test('the user-level merge names the shim by absolute path, and converges', () =
   assert.deepEqual(once.hooks.PreToolUse, [
     THEIRS,
     { matcher: 'Read|Grep|Bash', hooks: [{ type: 'command', command: `node "${helpers}/graft-hooks.cjs" pre-tool || exit 0`, timeout: 5 }] },
+    { matcher: 'Write|Edit|MultiEdit', hooks: [{ type: 'command', command: `node "${helpers}/graft-hooks.cjs" pre-edit || exit 0`, timeout: 5 }] },
     { matcher: 'Bash', hooks: [{ type: 'command', command: `node "${helpers}/graft-hooks.cjs" pre-bash || exit 0`, timeout: 5 }] },
   ]);
   assert.deepEqual(mergeGraftHooks(once, helpers).merged, once);

@@ -164,8 +164,8 @@
         "parser": "b63d3ab942ab82bbf2e1f26b1ad4a2f3cffc321a991670ee4d132d0bab61b07a"
       }
     },
-    "build": "cf54ab20848add0aa969dcd4b84444435df2141b95fd1963c7e4ae5239fbc76a",
-    "pack": "7330ac5e286e745b24671446e60dee5615cc6691cddcdb1c73f87d8a442afb78"
+    "build": "56c493f8cc163d67c88577f4274600d6919f1db9f3c77764b9b77c61846fbde9",
+    "pack": "653ef6d58e22493cc7c000dcc3030e7e395a84609203de0e2f776a1cb6f930ad"
   },
   "tree-sitter-scss": {
     "gen": {
