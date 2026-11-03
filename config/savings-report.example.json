@@ -1,0 +1,7 @@
+{
+  "_comment": "Database for the opt-in savings report (graft savings-report). Copy to config/savings-report.json before packing (git-ignored: it holds a password), or to ~/.graft/savings-report.json on one machine; fields there override the shipped file. mode: auto (Oracle Client if installed, else on Windows the bundled ODP.NET managed driver, else thin) | thick | odpnet (Windows) | thin. libDir: Oracle Client folder for thick mode, default the one on PATH. schema: owner of GRAFT_COST_SAVINGS and GRAFT_REPORTING_SETTINGS when it is not the user.",
+  "connectString": "host.example.com:1521/service.example.com",
+  "user": "REPORT_USER",
+  "password": "change-me",
+  "mode": "auto"
+}

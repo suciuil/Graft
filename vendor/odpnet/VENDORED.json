@@ -1,0 +1,10 @@
+{
+  "package": "Oracle.ManagedDataAccess",
+  "version": "19.33.0",
+  "source": "https://www.nuget.org/api/v2/package/Oracle.ManagedDataAccess/19.33.0",
+  "integrity": "sha512-n7tpOvDnvVuu+Zo0kf6uYK1r8slP8Y/Mv1JXsjx7k4FaW6rmV/tSWS9nfX9AB+XP9djlXajbCOvUVw7sP9Amlw==",
+  "files": {
+    "LICENSE.txt": "1192310bb2af99c9372ba52471202f960de32e1097a704ef2795451a3d45e73c",
+    "Oracle.ManagedDataAccess.dll": "03abcb0f977bcc2d9dac631735f08d43df99d294660baee41dc90eaa5ab1f02f"
+  }
+}

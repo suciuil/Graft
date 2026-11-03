@@ -115,6 +115,10 @@ const run = (batch) => spawnSync(process.execPath, ["--import", "tsx", "--test",
     // change which models the tests see priced. Its own tests turn it back on.
     GRAFT_BUNDLED_PRICES: "0",
     GRAFT_REPOS_FILE: reposFile,
+    // The opt-in savings report keeps its switch and queue in a scratch home,
+    // so a developer who enabled it never queues (or sends) a test's savings.
+    GRAFT_REPORTING_HOME: join(runTmp, "reporting-home"),
+    GRAFT_REPORTING_NO_FLUSH: "1",
     // The profile store is on by default, which would put every scratch repo's
     // map and settings in the developer's real ~/.graft/repos and break the
     // tests that expect `<repo>/graft/`. Off for the run; its own tests turn it

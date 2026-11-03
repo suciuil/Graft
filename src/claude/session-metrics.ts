@@ -156,7 +156,7 @@ export function recordToolUse(dir: string, sessionId: string, use: ToolUse): voi
     // the session file is what `graft stats` reads, the ledger what `graft
     // savings` reads back months later. MCP calls are excluded because the MCP
     // server already filed them — it runs on every host, hooks only on two.
-    if (!use.viaMcp) recordSavedTokens(dir, currentModel(dir, s.model), saved);
+    if (!use.viaMcp) recordSavedTokens(dir, currentModel(dir, s.model), saved, undefined, { channel: 'hook' });
   }
   // A graft use owes a tally in this turn's reply; the Stop hook (countTallyTurn)
   // resolves whether it got one and clears the flag. A flag, not a count — a turn

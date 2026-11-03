@@ -37,6 +37,7 @@ import {
 import { formatCount } from '../context/savings.js';
 import { callScope } from '../context/call-scope.js';
 import type { ModelUsage } from './tally.js';
+import { queueReport, type ReportMeta } from '../reporting/store.js';
 
 /** One model's running totals within one day. */
 export interface ModelLedger {
@@ -345,16 +346,21 @@ function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedge
   }
 }
 
-/** Fold one retrieval's saving into today's bucket for `model`. */
-export function recordSavedTokens(d: string, model: string, savedTokens: number, when: Date = new Date()): void {
+/** Fold one retrieval's saving into today's bucket for `model`.
+ *
+ * `meta` says which surface filed it, for the opt-in remote savings report
+ * (src/reporting/), which queues a copy only when the user has enabled it. */
+export function recordSavedTokens(d: string, model: string, savedTokens: number, when: Date = new Date(), meta?: ReportMeta): void {
   if (!(savedTokens > 0)) return;
   patchBucket(d, model, when, (b) => { b.savedTokens += savedTokens; });
+  queueReport({ kind: 'saving', when, day: dayKey(when), model: ledgerKey(model), savedTokens, meta });
 }
 
 /** Fold one turn's input spend into today's buckets, one per model the turn ran.
  * Unpriced models are recorded at zero cost: their presence names the model, and
- * a zero pair reads as "not measured" to {@link blendedRate}. */
-export function recordTurnBilling(d: string, models: ModelUsage[], when: Date = new Date()): void {
+ * a zero pair reads as "not measured" to {@link blendedRate}. Priced ones are
+ * also queued for the opt-in remote savings report, as for savings. */
+export function recordTurnBilling(d: string, models: ModelUsage[], when: Date = new Date(), meta?: ReportMeta): void {
   for (const m of models) {
     const model = m.model.trim() || UNKNOWN_MODEL;
     patchBucket(d, model, when, (b) => {
@@ -362,6 +368,9 @@ export function recordTurnBilling(d: string, models: ModelUsage[], when: Date = 
       b.costMicros += m.costMicros;
       b.tokensBilled += m.tokens;
     });
+    if (m.costMicros !== null && (m.costMicros > 0 || m.tokens > 0)) {
+      queueReport({ kind: 'billing', when, day: dayKey(when), model: ledgerKey(model), costMicros: m.costMicros, tokensBilled: m.tokens, meta });
+    }
   }
 }
 

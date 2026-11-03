@@ -15,6 +15,11 @@ graft/
 # Local database credentials for the savings report — a secret, never committed.
 config/savings-report.json
 
+# The savings-report database config with its password: shipped in the package
+# (npm pack / pack:bundle copy it when present), never committed. The
+# config/savings-report.example.json beside it is the committed template.
+/config/savings-report.json
+
 # OS
 .DS_Store
 
