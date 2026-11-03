@@ -79,7 +79,12 @@
   tarball still contains them. `install-graft-helper.ps1` then checks the installed
   copy against the same list, removes the downloaded-file mark, confirms .NET
   Framework 4.6.2 or newer and test-loads the DLL in a separate Windows
-  PowerShell; a problem prints a warning and does not stop the install. The install
+  PowerShell; a problem prints a warning and does not stop the install. At its
+  start `install-graft-helper.ps1` also asks whether to report the savings, default
+  Yes (marked recommended), after listing what an entry holds and that
+  `graft savings-report disable` turns it off, then runs `graft savings-report
+  enable` or `disable` as answered; `-Yes` takes the default and the new
+  `-NoSavingsReport` switch keeps it off. The install
   id is now minted at `npm install` (postinstall) or on first use. The owner
   lifted the no-cloud Rule 2 for this feature only; see the decisions table in
   `docs/no-cloud-policy.md`.

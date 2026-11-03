@@ -1,9 +1,11 @@
 # Helper of START-HERE-install-graft.cmd: double-click that launcher instead of running this file directly (it keeps
-# the window open and reports the result). Pass -Yes to the launcher to agree up front.
-# -Yes: agree up front (unattended runs); without it the user is asked before anything is changed
+# the window open and reports the result). Pass -Yes, -Ask or -NoSavingsReport to the launcher; it forwards them here.
+# -Yes: agree up front (unattended runs); without it the user is asked before anything is changed.
+#   -Yes also takes the default answer of every question, which turns on the savings report.
 # -Ask: ignore the answers remembered from earlier runs and ask every question again, as on a first install
+# -NoSavingsReport: do not turn on the savings report (graft savings-report disable), with or without -Yes
 # Answers are remembered in $ChoicesFile, so an upgrade asks only about what is new since the last run or what fails
-param([switch]$Yes, [switch]$Ask)
+param([switch]$Yes, [switch]$Ask, [switch]$NoSavingsReport)
 
 $ErrorActionPreference = 'Stop'
 # Shown when the installer starts: the upstream project (full documentation) and this fork's changelog of its own
@@ -1217,7 +1219,7 @@ $ConsentItems = @(
     [pscustomobject]@{ Id = 'user-path'; Legacy = $true; Text = "add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix" }
     [pscustomobject]@{ Id = 'graft-install'; Legacy = $true; Text = "install graft globally with npm from $graftSource" }
     [pscustomobject]@{ Id = 'execution-policy'; Legacy = $true; Text = 'set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell' }
-    [pscustomobject]@{ Id = 'odpnet-check'; Text = 'check that the Oracle driver (ODP.NET) graft ships for its opt-in savings report loads on this PC (nothing is sent)' }
+    [pscustomobject]@{ Id = 'savings-report'; Text = "turn graft's savings report on or off, as you choose in the next question, and check that its Oracle driver (ODP.NET) loads on this PC" }
     [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings" }
     [pscustomobject]@{ Id = 'llm-check'; Legacy = $true; Text = 'check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL' }
 )
@@ -1253,6 +1255,24 @@ if ($Yes) {
 $today = Get-Today
 foreach ($item in $newItems) { $Choices.Agreed[$item.Id] = $today }
 Save-InstallerChoices $Choices
+Write-Host ''
+
+# 0b. The savings report: asked now, applied once graft is installed (step 5a). Keep the list of what a row
+# holds in line with ReportEvent (src/reporting/store.ts) and WHAT_IS_SENT (src/reporting/command.ts).
+Write-Host "graft can report the cost savings it achieves to the company's central database, for analytics."
+Write-Host 'Each entry holds a random install id (not your Windows user name), the date and time, the AI model,'
+Write-Host 'the tokens and dollars saved or billed, and which graft command recorded it. No user name, project or'
+Write-Host 'folder name, path, file name, code or query text is sent.'
+Write-Host 'You can turn it off at any time with:  graft savings-report disable'
+if ($NoSavingsReport) {
+    $SavingsReport = $false
+    Write-Host 'Savings report: off (-NoSavingsReport was given).'
+} elseif ($Yes) {
+    $SavingsReport = $true
+    Write-Host "Savings report: on (-Yes was given; add -NoSavingsReport to keep it off)."
+} else {
+    $SavingsReport = (Read-Line 'Report graft cost savings to the central database? (recommended) [Y/n]') -notmatch '^(n|no)$'
+}
 Write-Host ''
 
 $wanted = if ($OfflineNode) { $OfflineNode.Version } else {
@@ -1368,14 +1388,24 @@ $GraftCmd = Join-Path $NpmGlobal 'graft.cmd'
 if (-not (Test-Path $GraftCmd)) { $GraftCmd = 'graft' }
 & $GraftCmd --version
 
-# 5a. The savings report's Oracle driver in the installed package (problems here never fail the install)
+# 5a. The savings report as chosen in step 0b, and its Oracle driver in the installed package
+# (problems here never fail the install)
 $GraftPackageDir = Join-Path $NpmGlobal 'node_modules\@nanonets\graft'
+$reportCmd = if ($SavingsReport) { 'enable' } else { 'disable' }
+try {
+    & $GraftCmd savings-report $reportCmd
+    if ($LASTEXITCODE -ne 0) { Write-Warning "'graft savings-report $reportCmd' failed (exit code $LASTEXITCODE); run it again later." }
+} catch {
+    Write-Warning "Could not run 'graft savings-report $reportCmd': $($_.Exception.Message)"
+}
 try {
     $odp = Test-SavingsReportDriver $GraftPackageDir
     if ($odp.Ok) {
-        Write-Host "Savings report driver: ODP.NET $($odp.Version) loads (used when no Oracle Client is installed; the report stays off until 'graft savings-report enable')."
+        Write-Host "Savings report driver: ODP.NET $($odp.Version) loads (used when no Oracle Client is installed)."
+    } elseif ($SavingsReport) {
+        Write-Warning "Savings report driver (ODP.NET) is not usable: $($odp.Problem). Without an Oracle Client this PC cannot send the savings report (entries stay queued); the rest of graft is not affected."
     } else {
-        Write-Warning "Savings report driver (ODP.NET) is not usable: $($odp.Problem). Without an Oracle Client this PC cannot send the opt-in savings report; the rest of graft is not affected."
+        Write-Host "Savings report driver (ODP.NET) is not usable on this PC: $($odp.Problem). Only matters if you turn the report on."
     }
 } catch {
     Write-Warning "Could not check the savings report driver (ODP.NET): $($_.Exception.Message)"
