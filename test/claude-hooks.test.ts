@@ -98,7 +98,9 @@ test('runSync clears dirty/syncing, recomputes stats, releases lock', () => {
     JSON.stringify({ meta: { nodeCount: 2, edgeCount: 1, languages: ['typescript'] },
       nodes: [{ id: 'a', summary_state: 'ready' }, { id: 'b', summary_state: 'pending' }],
       edges: [{ from: 'a', to: 'b' }] }));
-  runSync(d, fakeBuild);
+  let owner: unknown;
+  runSync(d, (dir) => { owner = JSON.parse(readFileSync(join(dir, 'graft', '.cache', '.sync.lock'), 'utf8')).pid; fakeBuild(dir); });
+  assert.equal(owner, process.pid, 'the lock names the process running the build, not the one that took it');
   const s = readStats(d)!;
   assert.equal(s.dirty, false);
   assert.equal(s.syncing, false);
@@ -333,6 +335,32 @@ test('prompt hook omits --in on a single-scope repo even with lastFile set', asy
     );
     const argsSeen: string[] = JSON.parse(readFileSync(argsFile, 'utf8'));
     assert.equal(argsSeen.indexOf('--in'), -1, 'single-scope repo: no --in narrowing');
+  } finally {
+    delete process.env.GRAFT_TEST_CLI;
+    delete process.env.CLAUDE_PROJECT_DIR;
+  }
+});
+
+test("prompt hook's graft child never waits for a repo's first build", async () => {
+  const d = mkdtempSync(join(tmpdir(), 'graft-prompt-wait-'));
+  mkdirSync(join(d, 'graft', '.graph'), { recursive: true });
+  writeFileSync(join(d, 'graft', '.graph', 'wiring.json'),
+    JSON.stringify({ meta: { nodeCount: 0, edgeCount: 0, languages: [] }, nodes: [], edges: [] }));
+  const stub = join(d, 'env-stub.cjs');
+  const seen = join(d, 'wait-seen.txt');
+  writeFileSync(
+    stub,
+    `require('fs').writeFileSync(${JSON.stringify(seen)}, String(process.env.GRAFT_FIRST_BUILD_WAIT_MS));\n` +
+      `process.stdout.write(JSON.stringify({ query: '', mode: 'lexical', hits: [], coverage: 1 }));\n`,
+  );
+  process.env.CLAUDE_PROJECT_DIR = d;
+  process.env.GRAFT_TEST_CLI = stub;
+  try {
+    await runWithStdin(
+      JSON.stringify({ session_id: 'p-wait', prompt: 'how does auth work here' }),
+      () => main('prompt'),
+    );
+    assert.equal(readFileSync(seen, 'utf8'), '0', 'it starts the build and answers within the hook budget');
   } finally {
     delete process.env.GRAFT_TEST_CLI;
     delete process.env.CLAUDE_PROJECT_DIR;

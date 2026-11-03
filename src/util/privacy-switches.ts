@@ -4,10 +4,12 @@
  * docs/no-cloud-policy.md):
  *
  *  - the look-back at `trail init`: reads past Claude Code sessions here and
- *    sends what it finds (and, with fetching on, merged PRs' review comments
- *    and the code they were left on) to Claude to be named;
- *  - fetching: `git fetch origin`, `gh pr list` and the PR-review read, which
- *    keep Trail's view of teammates' branches current.
+ *    sends what it finds to Claude to be named;
+ *  - fetching: `git fetch origin` and `gh pr list`, which keep Trail's view of
+ *    teammates' branches current.
+ *
+ * The PR-review read and the past-sessions read at `trail init` are not here:
+ * they are permanently off (notes/pr-reviews.ts, learn/sessions.ts).
  *
  * Each has one variable. Unset or empty means off, as if `TRAIL_NO_LOOK_BACK=1`
  * / `TRAIL_NO_FETCH=1` were set: the fork's default. `0` turns the feature on.
@@ -23,7 +25,7 @@ export function lookBackDisabled(env: NodeJS.ProcessEnv = process.env): boolean 
   return env.TRAIL_NO_LOOK_BACK !== '0';
 }
 
-/** Whether fetching (`git fetch origin`, `gh pr list`, the PR-review read) is off: unless `TRAIL_NO_FETCH=0`. */
+/** Whether fetching (`git fetch origin`, `gh pr list`) is off: unless `TRAIL_NO_FETCH=0`. */
 export function fetchDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TRAIL_NO_FETCH !== '0';
 }

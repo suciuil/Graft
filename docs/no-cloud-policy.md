@@ -37,7 +37,7 @@ fork turns them off unless the person opts in. Both are read only through
 | Variable | Off when | On only with | What it does when on |
 |---|---|---|---|
 | `TRAIL_NO_LOOK_BACK` | unset, empty, `1`, anything but `0` | `TRAIL_NO_LOOK_BACK=0` | `trail init` reads past Claude Code sessions and sends what it finds to Claude to be named |
-| `TRAIL_NO_FETCH` | unset, empty, `1`, anything but `0` | `TRAIL_NO_FETCH=0` | `git fetch origin`, `gh pr list`, and `trail init`'s read of merged PRs' review comments, which go to Claude |
+| `TRAIL_NO_FETCH` | unset, empty, `1`, anything but `0` | `TRAIL_NO_FETCH=0` | `git fetch origin` and `gh pr list` (the PR-review read is permanently off, see the decisions table) |
 
 An upstream change that reads either variable directly, or makes either feature
 run by default again, must be routed through those helpers so the default stays
@@ -177,8 +177,13 @@ quietly.
 | Trail cloud / workspace sync, login, pairing, learnings upload, activity outbox, brains over MCP | `team.trailhq.com` (Trail) | repo and workspace activity, learnings, account data | Disable | before 2026-10-30 | existing fork state |
 | Telemetry | PostHog | usage events | Disable | before 2026-10-30 | existing fork state |
 | Trail look-back in `trail init` | the configured LLM (Claude) | content of past Claude Code sessions | Keep as an opt-in (`TRAIL_NO_LOOK_BACK=0`) | before 2026-10-30 | existing fork state |
-| Trail fetching: `git fetch origin`, `gh pr list`, merged PRs' review comments | git remote, GitHub, the configured LLM (Claude) | repo identity; review comments to the LLM | Keep as an opt-in (`TRAIL_NO_FETCH=0`) | before 2026-10-30 | existing fork state |
+| Trail fetching: `git fetch origin`, `gh pr list` | git remote, GitHub | repo identity | Keep as an opt-in (`TRAIL_NO_FETCH=0`) | before 2026-10-30 | existing fork state |
 | Update check and `graft upgrade` (`npm view`, `npm install -g`), `npx` fallbacks | the fork's registry in `publishConfig.registry` (`eu.artifactory.automotive.cloud`), never `registry.npmjs.org`: passed as `--@scope:registry` and written to the user's `.npmrc` by `scripts/postinstall.mjs` | package names | Redirect to the fork's registry | 2026-11-02 | owner, in chat |
+| Past-sessions read at `trail init` (`src/learn/sessions.ts`) | the local `claude` CLI, so Anthropic | a digest of past Claude Code sessions: typed text, Claude's replies, answered questions, plans, `git commit` / `gh pr create` commands | Disable | 2026-11-03 | owner, in chat; upstream merge of 0.25.0 to 0.28.0 (#701, #703) |
+| PR-review read at `trail init` (`src/notes/pr-reviews.ts`), now with PR descriptions, discussion, review summaries, closed PRs, CONTRIBUTING.md and revert commits | GitHub (`gh` GraphQL), the local `claude` CLI | PR conversations, contributor docs, revert commit messages | Disable (replaces the earlier `TRAIL_NO_FETCH=0` opt-in for this read) | 2026-11-03 | owner, in chat; upstream merge of 0.25.0 to 0.28.0 (#696, #701) |
+| npm-downloads badge workflow (`.github/workflows/npm-downloads-badge.yml`) | `api.npmjs.org`, this repo's `gh-pages` | package names; a badge JSON committed with `GH_TOKEN` | Disable (files kept, no trigger, job `if: false`) | 2026-11-03 | owner, in chat; upstream #723 |
+| `scripts/build-grammar-wasm.mjs` (`npx tree-sitter-cli`) | the fork's registry in `publishConfig.registry` | package name and version | Redirect to the fork's registry | 2026-11-03 | owner, in chat; upstream #707 |
+| Trail cloud additions: `trail login --code`, several workspaces, late pair connect, the workspace connector in `trail mcp` (`src/mcp/connector.ts`, replaces brains), team sign-in offer from `.trail/workspace.json`, skill-run reporting | `team.trailhq.com` (Trail) | as the Trail cloud row above, plus skill names | Disable (covered by the Trail cloud row) | 2026-11-03 | upstream merge of 0.25.0 to 0.28.0 |
 
 ## Checklist when integrating from upstream
 

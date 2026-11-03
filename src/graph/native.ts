@@ -1,20 +1,20 @@
 /**
- * The depth tier's native grammars, loaded on first use and never fatally.
+ * The depth tier's native grammars: node tree-sitter and the grammar addons,
+ * loaded on first use and never fatally.
  *
- * Every depth-tier grammar is a native addon, and so is `tree-sitter` itself. Most
- * ship prebuilt binaries that load with no install step, but not all of them:
- * `tree-sitter-kotlin` ships none at all, and `tree-sitter` and
- * `tree-sitter-python` have no linux-arm64 build. Those work only if npm ran their
- * install script, which compiles one. npm 12 stopped running dependency install
- * scripts by default, so after a plain `npm install -g` the binary is not there.
+ * The core depth languages parse on WASM now (depth-parser.ts), and their grammar
+ * packages are dev dependencies only. As dependencies they made installing the
+ * package compile C: `tree-sitter-kotlin` ships no prebuilt binary at all, and
+ * `tree-sitter-python` has none for linux-arm64. This fork keeps the `tree-sitter`
+ * core as a runtime dependency: the optional grammars below (C#, C, C++, PL/SQL,
+ * ..., and the locally-built Kotlin) have no WASM build and parse on it. The core
+ * grammar addons stay for test/depth-parity.ts, which builds real repos on them
+ * and on WASM and diffs the graphs.
  *
- * These used to be static imports at the top of extract.ts. One missing binary
- * then threw while the module graph loaded and took every command down with it,
- * the MCP server and the hooks included, even in a repo with no Kotlin in it.
- * Now each is required the first time a file of its language is parsed, and a
- * failure is remembered: that language's files go to its WASM stand-in in the
- * breadth tier instead (`fallbackLangOf` in generic.ts), and the build says which
- * languages and how to get the native parser back ({@link nativeFallbackNotice}).
+ * Each module is required the first time it is asked for, and a failure is
+ * remembered: that language's files go to its WASM stand-in in the breadth tier
+ * (`fallbackLangOf` in generic.ts), and the build says which languages fell back
+ * and how to fix it ({@link nativeFallbackNotice}).
  */
 import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -272,6 +272,13 @@ export function grammarSourceOf(lang: Language): "optional" | "core" | null {
   return coreGrammarOf(lang) ? "core" : null;
 }
 
+/** Whether a locally-built native grammar stands in for a core language that
+ * otherwise parses on WASM (Kotlin). False under the test require seam, which
+ * simulates a stock install. */
+export function localGrammarPreferred(lang: Language): boolean {
+  return optionalOverridesCore && GRAMMAR_MODULES[lang] !== undefined && loadOptionalGrammar(lang) !== null;
+}
+
 /**
  * True when `lang`'s native grammar loads and the parser accepts it. The first call
  * per language does the loading; the answer is cached for the life of the process.
@@ -298,9 +305,14 @@ export function nativeReady(lang: Language): boolean {
   return ok;
 }
 
+/** What depth-parser.ts uses of a native parser. */
+export interface NativeParser {
+  parse(input: (index: number) => string): { rootNode: unknown };
+}
+
 /** The shared native parser, set to `lang`. Throws when that grammar is not
  * available; callers ask {@link nativeReady} first and send the file elsewhere. */
-export function nativeParser(lang: Language): Parser {
+export function nativeParser(lang: Language): NativeParser {
   if (!nativeReady(lang)) {
     const module = GRAMMAR_MODULES[lang]?.module;
     const why = [CORE, ...(module ? [module] : [])].map((id) => modules.get(id)).find((m) => m && !m.ok);
@@ -324,15 +336,14 @@ export function missingNativePackages(langs: Iterable<Language>): string[] {
     const module = GRAMMAR_MODULES[lang]?.module;
     for (const id of [CORE, ...(module ? [module] : [])]) {
       const m = modules.get(id);
-      // A vendored grammar has no install script for a flag to allow.
-      if (m && !m.ok && !VENDORED.has(id)) out.add(NPM_NAME[id] ?? id);
+      if (m && !m.ok) out.add(NPM_NAME[id] ?? id);
     }
   }
   return [...out].sort();
 }
 
-/** The languages a build parsed with a WASM stand-in instead of their native
- * grammar, and the packages to allow so the next install builds them. */
+/** The languages a build parsed with a breadth-tier stand-in because their own
+ * grammar didn't load, and the packages to allow so the next install builds them. */
 export interface NativeFallback {
   /** Display labels (`javascript`, not the `typescript` grammar that parses it). */
   languages: string[];
@@ -343,14 +354,16 @@ export interface NativeFallback {
  * The one line a build prints when some languages fell back, or null when none did.
  * One line on purpose: `graft init` passes on only the `⚠`/`✗` lines of the build
  * it runs, so a second line holding the fix would be dropped there.
+ *
+ * With no packages to allow, the grammar that didn't load is one of the package's
+ * own WASM files, so reinstalling it is the fix.
  */
 export function nativeFallbackNotice(fallback: NativeFallback | undefined, packageName: string): string | null {
   if (!fallback || fallback.languages.length === 0) return null;
   const langs = fallback.languages.join(", ");
-  const what = fallback.languages.length === 1 ? "the native parser is" : "the native parsers are";
-  const head = `⚠ ${langs}: basic parsing only, ${what} missing.`;
-  if (fallback.packages.length === 0) return head;
-  return `${head} To fix: npm install -g --allow-scripts=${fallback.packages.join(",")} ${packageName}`;
+  const what = fallback.languages.length === 1 ? "its parser didn't load" : "their parsers didn't load";
+  const allow = fallback.packages.length > 0 ? `--allow-scripts=${fallback.packages.join(",")} ` : "";
+  return `⚠ ${langs}: basic parsing only, ${what}. To fix: npm install -g ${allow}${packageName}`;
 }
 
 /** Test seam: replace how native modules are required (null restores the real
@@ -366,5 +379,5 @@ export function setNativeRequireForTest(fn: ((id: string) => unknown) | null): v
 
 /** The real `require` the seam above wraps, for a test's pass-through. */
 export function realNativeRequire(id: string): unknown {
-  return requireGrammar(id);
+  return nodeRequire(id);
 }

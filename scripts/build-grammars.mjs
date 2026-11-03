@@ -1087,7 +1087,7 @@ function buildBlocker(dir, scripts) {
  * name the grammar already used. prebuildify names the file after the package's
  * CURRENT name, which drifts — groovy's committed binding is `@murtaza64+…` while the
  * package is now `@bootswithdefer/…` — and it then sits beside the old one. The loader,
- * vendor-grammars.mjs and prebuiltNode() all take the first `*.node` they list, so two
+ * vendor-optional-grammars.mjs and prebuiltNode() all take the first `*.node` they list, so two
  * files mean an arbitrary pick, and both would be packed into the tarball.
  */
 function settlePrebuild(dir, previousName) {

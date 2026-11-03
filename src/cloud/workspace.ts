@@ -3,17 +3,19 @@
  * to it (trail-cloud's `/api/cli/…`).
  *
  * Trail cloud is PERMANENTLY OFF in this version: {@link cloudEnabled} is
- * always false, {@link readCloud} ignores any `~/.trail/cloud.json`,
- * {@link writeCloud} stores nothing, and every call below answers with
- * {@link CLOUD_DISABLED} without touching the network. `TRAIL_CLOUD=1`,
- * `TRAIL_URL`, `GRAFT_BRAIN_URL` and a hand-written `cloud.json` change none
- * of that. The rest of this module describes the design the disabled code was
- * written against.
+ * always false, {@link readClouds} / {@link readCloud} ignore any
+ * `~/.trail/cloud.json`, {@link writeCloud} stores nothing, and every call
+ * below answers with {@link CLOUD_DISABLED} without touching the network.
+ * `TRAIL_CLOUD=1`, `TRAIL_URL`, `GRAFT_BRAIN_URL` and a hand-written
+ * `cloud.json` change none of that. The rest of this module describes the
+ * design the disabled code was written against.
  *
- * One connection per machine, not per repo: a person signs in once, through
- * the link their agent offers, and picks which of their repos the workspace
- * gets. It lives in `~/.trail/cloud.json` next to their notes, never in a
- * repo. Learnings themselves travel through git (`.trail/` is committed);
+ * One connection per workspace, and a laptop can hold several: a person signs
+ * in through the link their agent offers and picks the workspace a repo goes
+ * to, so a client's repo and the company's can go to different teams. Each
+ * repo goes to one workspace on this machine, the newest link that has it.
+ * The connections live in `~/.trail/cloud.json` next to their notes, never in
+ * a repo. Learnings themselves travel through git (`.trail/` is committed);
  * the workspace adds what one clone can't see: who is learning what across
  * the team's repos, how often a learning is reused, and the team page.
  *
@@ -50,12 +52,15 @@ export function serverUrl(url: string | undefined): string | null {
   }
 }
 
+/** Whether `url` is on this machine (localhost, 127.0.0.1, [::1], *.localhost) or a `.test` host nothing on the internet answers. */
+export function isLocalServer(url: string): boolean {
+  const host = new URL(url).hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost") || host.endsWith(".test");
+}
+
 function testServer(env: NodeJS.ProcessEnv): string | null {
   const url = serverUrl(env[TEST_SERVER_ENV]);
-  if (!url) return null;
-  const host = new URL(url).hostname.toLowerCase();
-  const local = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost") || host.endsWith(".test");
-  return local ? url : null;
+  return url && isLocalServer(url) ? url : null;
 }
 
 /** The Trail `init --connect` or `--pair` was told with `--server`, for the rest of this process. */
@@ -117,11 +122,32 @@ function cloudPath(env: NodeJS.ProcessEnv = process.env): string {
 /** Why every workspace call fails, and what `trail login` says. */
 export const CLOUD_DISABLED = "Trail cloud is permanently disabled in this version; nothing is sent to a Trail workspace";
 
-/** Always null: Trail cloud is permanently off, so a `cloud.json` (left by an
+/** Always empty: Trail cloud is permanently off, so a `cloud.json` (left by an
  * older trail, or written by hand) is never read. The parameter is kept for
  * existing callers. */
+export function readClouds(_env: NodeJS.ProcessEnv = process.env): Cloud[] {
+  return [];
+}
+
+/** Always null: Trail cloud is permanently off (see {@link readClouds}). */
 export function readCloud(_env: NodeJS.ProcessEnv = process.env): Cloud | null {
   return null;
+}
+
+/** The connection among `clouds` that a repo's learnings and uses go to: the newest whose workspace has it. */
+export function cloudIn(clouds: Cloud[], repoKey: string): Cloud | null {
+  return clouds.find((c) => c.repos.includes(repoKey)) ?? null;
+}
+
+/** The connection a repo's learnings and uses go to, or null when no workspace on this machine has it. */
+export function cloudForRepo(repoKey: string, env: NodeJS.ProcessEnv = process.env): Cloud | null {
+  return cloudIn(readClouds(env), repoKey);
+}
+
+/** Whether two connections are to the same workspace: by its id, which a new address for the same Trail keeps. */
+export function sameWorkspace(a: Cloud, b: Cloud): boolean {
+  if (a.workspace.id && b.workspace.id) return a.workspace.id === b.workspace.id;
+  return a.url === b.url && a.workspace.slug === b.workspace.slug;
 }
 
 /**
@@ -141,9 +167,10 @@ export function writeCloud(_c: Cloud, _env: NodeJS.ProcessEnv = process.env): vo
   /* nothing: no workspace token is ever kept */
 }
 
-export function clearCloud(env: NodeJS.ProcessEnv = process.env): boolean {
+/** Remove a `cloud.json` an older trail left. With `workspace`, nothing: no connection is ever read here. */
+export function clearCloud(env: NodeJS.ProcessEnv = process.env, workspace?: string): boolean {
   const p = cloudPath(env);
-  if (!existsSync(p)) return false;
+  if (workspace !== undefined || !existsSync(p)) return false;
   rmSync(p, { force: true });
   return true;
 }
@@ -201,8 +228,8 @@ export async function registerHandoff(
   base: string,
   req: { state: string; repo: { key: string; name: string } | null; repos: HandoffRepo[]; author: string; pair?: string },
   fetchImpl?: Fetch,
-): Promise<{ url: string } | ApiError> {
-  const r = await call<{ url: string }>(base, "POST", "/api/cli/handoffs", req, { fetchImpl });
+): Promise<{ url: string; features?: string[] } | ApiError> {
+  const r = await call<{ url: string; features?: string[] }>(base, "POST", "/api/cli/handoffs", req, { fetchImpl });
   return isError(r) ? r : r.body;
 }
 
@@ -217,6 +244,17 @@ export async function postHandoffProgress(base: string, body: { state: string } 
   if (r.status === 409) return "reviewed";
   if (r.status === 404 || r.status === 410) return "gone";
   return "error";
+}
+
+/** Why a setup stopped, as Trail's page explains it. */
+export type SetupFailure = "home_folder" | "not_git" | "bad_agents" | "crashed";
+
+/**
+ * Tell the page waiting on pair code `code` why init stopped before it
+ * registered a run. Best effort: init is stopping either way.
+ */
+export async function failPair(base: string, code: string, reason: SetupFailure, fetchImpl?: Fetch): Promise<void> {
+  await call(base, "POST", "/api/cli/pairs/fail", { pair: code.trim().toUpperCase(), reason }, { fetchImpl, timeoutMs: 5_000 });
 }
 
 export type ClaimResult =
@@ -243,6 +281,30 @@ export async function claimHandoff(base: string, state: string, fetchImpl?: Fetc
     return { cloud: { token: b.token, user: b.user ?? { name: "", email: "" }, workspace: b.workspace, repos: b.repos ?? [] } };
   }
   return { pending: true };
+}
+
+/**
+ * Trade a one-time sign-in code, made for this person on Trail's web app, for
+ * this laptop's token. No browser step: the code already says who and which
+ * workspace. A code that's used or past its minutes is refused for good.
+ */
+export async function claimLoginCode(base: string, code: string, fetchImpl?: Fetch): Promise<Exclude<ClaimResult, { pending: true }> | { error: string; reason: "offline" | "invalid" }> {
+  const r = await call<{ token?: string; user?: Cloud["user"]; workspace?: WorkspaceInfo; repos?: string[] }>(
+    base,
+    "POST",
+    "/api/cli/login-codes/claim",
+    { code },
+    { fetchImpl, timeoutMs: 15_000 },
+  );
+  if (isError(r)) {
+    if (r.status === 410) return { error: "that sign-in code was already used or has expired · copy a new one from the Trail page", reason: "expired" };
+    if (r.status === 400) return { error: "that isn't a Trail sign-in code · they look like TRL-ABCD-EFGH-IJKL-MNOP", reason: "invalid" };
+    if (r.status === 404 || r.status === 405) return { error: "this Trail doesn't take sign-in codes yet", reason: "unsupported" };
+    return { error: `couldn't reach Trail (${r.error})`, reason: "offline" };
+  }
+  const b = r.body;
+  if (b?.token && b.workspace?.slug) return { cloud: { token: b.token, user: b.user ?? { name: "", email: "" }, workspace: b.workspace, repos: b.repos ?? [] } };
+  return { error: "Trail sent an answer trail couldn't read", reason: "offline" };
 }
 
 /* the workspace ------------------------------------------------------------- */
@@ -319,7 +381,8 @@ export const UPLOAD_PART_BYTES = 12 * 1024 * 1024;
 
 export async function uploadLearnings(
   c: Cloud,
-  req: { repo: { key: string; name: string }; learnings: UploadedLearning[] },
+  // removed: HEAD paths gone since the last sync on the same branch. held: how many were left out for a secret.
+  req: { repo: { key: string; name: string }; learnings: UploadedLearning[]; removed?: string[]; held?: number },
   fetchImpl?: Fetch,
 ): Promise<{ repo: string; learnings: number; added: number } | ApiError> {
   const parts: UploadedLearning[][] = [[]];
@@ -344,13 +407,16 @@ export async function uploadLearnings(
 }
 
 /**
- * One use of the learnings: a search that showed some, or a check against
- * them. Counts and which learnings, never content: no query (for the prompt
- * hook that is the person's prompt) and no file paths.
+ * One use of the learnings: a search that showed some, a check against them,
+ * or a coding agent using one of the repo's skills. Counts and which
+ * learnings, never content: no query (for the prompt hook that is the
+ * person's prompt), no file paths and no task.
  */
 export interface ActivityEvent {
   repo: string;
-  kind: "search" | "check";
+  kind: "search" | "check" | "skill";
+  /** For a skill use: the skill's folder name under `.claude/skills/`. */
+  skill?: string;
   asker: string;
   session: string;
   /** How many files the answer pointed into, or the check covered. */
