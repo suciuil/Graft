@@ -178,6 +178,7 @@ quietly.
 | Telemetry | PostHog | usage events | Disable | before 2026-10-30 | existing fork state |
 | Trail look-back in `trail init` | the configured LLM (Claude) | content of past Claude Code sessions | Keep as an opt-in (`TRAIL_NO_LOOK_BACK=0`) | before 2026-10-30 | existing fork state |
 | Trail fetching: `git fetch origin`, `gh pr list`, merged PRs' review comments | git remote, GitHub, the configured LLM (Claude) | repo identity; review comments to the LLM | Keep as an opt-in (`TRAIL_NO_FETCH=0`) | before 2026-10-30 | existing fork state |
+| Update check and `graft upgrade` (`npm view`, `npm install -g`), `npx` fallbacks | the fork's registry in `publishConfig.registry` (`eu.artifactory.automotive.cloud`), never `registry.npmjs.org`: passed as `--@scope:registry` and written to the user's `.npmrc` by `scripts/postinstall.mjs` | package names | Redirect to the fork's registry | 2026-11-02 | owner, in chat |
 
 ## Checklist when integrating from upstream
 

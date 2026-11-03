@@ -60,7 +60,7 @@
  * running Kilo, and the schema belongs to somebody else's project and may
  * change. Each of those returns null, which is precisely today's behaviour.
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalModelKey } from '../context/price.js';
@@ -161,6 +161,21 @@ function loadSqlite(): SqliteModule | null {
  */
 function normalizeDir(dir: string): string {
   return dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * The directory as given and as resolved through junctions and symlinks: Kilo
+ * stores the resolved path, so `D:\!stuff\repo` behind a junction must also
+ * match the row Kilo wrote as `D:/OneDrive/_D/!stuff/repo`.
+ */
+function dirKeys(dir: string): Set<string> {
+  const keys = new Set([normalizeDir(dir)]);
+  try {
+    keys.add(normalizeDir(realpathSync.native(dir)));
+  } catch {
+    /* a path that does not exist matches only as given */
+  }
+  return keys;
 }
 
 /**
@@ -285,7 +300,7 @@ export function kiloSessionModel(
         `select directory, model, time_updated${parented ? ', parent_id' : ''} from session order by time_updated desc limit 200`,
       )
       .all();
-    const want = normalizeDir(dir);
+    const want = dirKeys(dir);
 
     // Every session on this directory that is recent enough to be live. Kilo
     // serves one MCP server per workspace, not per chat, so a user with two
@@ -293,7 +308,7 @@ export function kiloSessionModel(
     // which of them is calling.
     const live: Array<{ model: string; updated: number; child: boolean }> = [];
     for (const row of rows) {
-      if (typeof row?.directory !== 'string' || normalizeDir(row.directory) !== want) continue;
+      if (typeof row?.directory !== 'string' || !want.has(normalizeDir(row.directory))) continue;
       const updated = Number(row.time_updated);
       // Rows are newest-first, so the first out-of-window match ends the scan:
       // every later row is older still.

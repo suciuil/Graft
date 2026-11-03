@@ -16,6 +16,7 @@ import {
   recentCallsPath,
   recordRecentCall,
   summedTally,
+  turnModels,
   type RecentCall,
 } from '../src/context/recent-calls.js';
 import {
@@ -25,6 +26,7 @@ import {
   setCompactNudge,
   setDeepDue,
   setPricing,
+  setTurnModels,
   stderrSavingsCopy,
   sumSavingsFooters,
   tallyWarnings,
@@ -113,6 +115,48 @@ test('summedTally: a mix of priced and unpriced calls -> tokens only, never a pa
     call('2026-10-23T10:01:00Z', 2000),
   ]);
   assert.equal(t, '\u{1F331} graft saved ~3,000 tokens by this turn');
+});
+
+test('summedTally: a turn priced under two models (Plan first) -> total plus one figure per model', () => {
+  const t = summedTally([
+    call('2026-10-23T10:00:00Z', 1000, { usd: 0.25, model: 'Claude Opus 5' }),
+    call('2026-10-23T10:01:00Z', 2000, { usd: 0.1, model: 'Gemini 3.8 Flash' }),
+    call('2026-10-23T10:02:00Z', 500, { usd: 0.15, model: 'Claude Opus 5' }),
+  ]);
+  assert.equal(
+    t,
+    '\u{1F331} graft saved ~3,500 tokens (~$0.50: ~$0.40 for Claude Opus 5 + ~$0.10 for Gemini 3.8 Flash) this turn',
+  );
+  assert.ok(hasSavingsTally(t));
+});
+
+test('turnModels lists the models that priced the running turn, oldest first', () => {
+  const dir = repo();
+  const t0 = new Date('2026-10-23T10:00:00Z');
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.01, model: 'Claude Opus 5' }, t0);
+  recordRecentCall(dir, { command: 'grep', tokens: 100, usd: null, model: null }, new Date(t0.getTime() + 1000));
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.002, model: 'Gemini 3.8 Flash' }, new Date(t0.getTime() + 2000));
+  assert.deepEqual(turnModels(dir, new Date(t0.getTime() + 60_000)), ['Claude Opus 5', 'Gemini 3.8 Flash']);
+  assert.deepEqual(turnModels(dir, new Date(t0.getTime() + 2000 + TURN_GAP_MS + 1)), [], 'a new turn starts empty');
+});
+
+test('nudge: a call on a second model in the turn asks for one figure per model', () => {
+  setPricing(pricingFor(certain('gemini-3.8-flash', 'Gemini 3.8 Flash')));
+  setTurnModels(['Claude Opus 5']);
+  setCompactNudge(true);
+  const short = footer();
+  setCompactNudge(false);
+  const full = footer();
+  setTurnModels([]);
+  const single = footer();
+  for (const f of [short, full]) {
+    assert.match(f, /priced for Claude Opus 5/);
+    assert.match(f, /\u{1F331} graft saved ~N tokens \(~\$X: ~\$A for Claude Opus 5 \+ ~\$B for Gemini 3\.8 Flash\) this turn/u);
+  }
+  assert.doesNotMatch(single, /priced for/);
+  assert.match(single, /\(~\$X for Gemini 3\.8 Flash\) this turn/);
+  resetClaimedSavings();
+  setPricing(null);
 });
 
 test("summedTally carries the newest call's warning lines under it", () => {

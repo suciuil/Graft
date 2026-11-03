@@ -167,8 +167,8 @@ import { savedIdLine } from "./notes/replace.js";
 import { formatOverlap, maybeRefreshBranches, overlapsWith, pushedWhen, readBranchCache, refreshBranches } from "./notes/branches.js";
 import { ensureRepoTrail, LEARNINGS_DIR } from "./notes/repo-trail.js";
 import type { AskResult } from "./ask/ask.js";
-import { claimedSummary, setClaimListener, setCompactNudge, setDeepDue, setInitDue, setModelTable, setPricing, setRepoRoot, stderrSavingsCopy, tallyWarnings } from "./context/savings.js";
-import { calledRecently, formatLastCalls, lastTurnCalls, readRecentCalls, recordRecentCall, summedTally } from "./context/recent-calls.js";
+import { claimedSummary, setClaimListener, setCompactNudge, setDeepDue, setInitDue, setModelTable, setPricing, setRepoRoot, setTurnModels, stderrSavingsCopy, tallyWarnings } from "./context/savings.js";
+import { calledRecently, formatLastCalls, lastTurnCalls, readRecentCalls, recordRecentCall, summedTally, turnModels } from "./context/recent-calls.js";
 import { initDueReason } from "./hosts/drift.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readStamp, readUpdateCache, refreshUpdateCache, wiredHostIds, wiringOpts, writeStamp } from "./upkeep.js";
 import { shouldMoveToTrail } from "./upkeep-run.js";
@@ -271,6 +271,7 @@ function noteQuery(dir: string): string {
   // A call a few minutes after another one in this repo gets the short savings
   // nudge: the agent has just read the long one (see `savingsTurnNudge`).
   setCompactNudge(calledRecently(dir));
+  setTurnModels(turnModels(dir));
   setClaimListener((tokens) => fileClaim(dir, tokens));
   return dir;
 }
@@ -753,6 +754,11 @@ grouped(program.command("build"), GROUP.setup)
   )
   .option("--no-gitignore", "skip writing graft/ into .gitignore (same as GRAFT_NO_GITIGNORE=1)")
   .option("--no-ignore", "skip writing .ignore for ripgrep re-admit (same as GRAFT_NO_IGNORE=1)")
+  .option(
+    "--workspace <file>",
+    "build the folders of this VS Code .code-workspace file, and remember it (default: the one `graft init` chose in [dir], else ask when [dir] holds one)",
+  )
+  .option("--no-workspace", "this time, ignore .code-workspace files and build [dir] itself")
   .action(async (
     dir: string,
     opts: {
@@ -773,6 +779,7 @@ grouped(program.command("build"), GROUP.setup)
       followNestedRepos?: boolean;
       gitignore?: boolean;
       ignore?: boolean;
+      workspace?: string | false;
     },
     command: Command,
   ) => {
@@ -862,8 +869,21 @@ grouped(program.command("build"), GROUP.setup)
     if (followNestedReposWasExplicit && typeof opts.followNestedRepos === "boolean") {
       buildConfigPatch.followNestedRepos = opts.followNestedRepos;
     }
+    // Same choice as `init`: a VS Code workspace's folders (wherever they live) are the roots to build.
+    const buildRoot = resolve(dir);
+    const codeWsChoice = await chooseCodeWorkspace(buildRoot, { workspace: opts.workspace }, "build");
+    if (codeWsChoice === undefined) {
+      console.log("Cancelled — nothing was built.");
+      process.exit(130);
+    }
+    const codeWs = codeWsChoice.ws;
+    // `--no-workspace` is a one-off here (init's own builds pass it), so only a pick or `--workspace` is saved.
+    if (opts.workspace !== false && codeWsChoice.remember !== undefined) {
+      patchBuildConfig(buildRoot, { codeWorkspace: codeWsChoice.remember });
+    }
+    const roots = codeWs ? codeWs.folders : [buildRoot];
     if (Object.keys(buildConfigPatch).length > 0) {
-      patchBuildConfig(resolve(dir), buildConfigPatch);
+      for (const root of roots) patchBuildConfig(root, buildConfigPatch);
     }
     // Databricks gateway: check the key, then use the model already set when the
     // gateway serves it; only otherwise ask which of its models to use.
@@ -919,7 +939,6 @@ grouped(program.command("build"), GROUP.setup)
         }
       }
     }
-    const engine = engineFrom();
     const fmt = (o: Record<string, number>) =>
       Object.entries(o)
         .sort((a, b) => b[1] - a[1])
@@ -956,159 +975,173 @@ grouped(program.command("build"), GROUP.setup)
       );
     }
 
-    // Workspace parent: build each child into its OWN graft/ + a workspace index.
-    const buildRoot = resolve(dir);
     const buildGlobalDir = program.opts<GlobalOpts>().dir;
-    if (isWorkspaceBuildRoot(buildRoot, buildGlobalDir)) {
-      await runWorkspaceBuild(buildRoot, {
-        deep: !!deep,
-        force: !!deep && !!opts.force,
-        extensions: opts.extensions,
-        concurrency,
-        synthConcurrency,
-        childConfig: cliConfig(),
-        override: buildGlobalDir,
-        includeDirs: opts.includeDir,
-        excludeDirs: opts.excludeDir,
-        followSubmodules: followSubmodulesWasExplicit ? opts.followSubmodules : undefined,
-        followNestedRepos: followNestedReposWasExplicit ? opts.followNestedRepos : undefined,
-        packageName: readPackageName(import.meta.url),
-      });
-      return;
+    const label = (target: string) => relative(buildRoot, target).split("\\").join("/") || ".";
+    // `--dir` names the map of [dir] itself; each workspace folder keeps its own.
+    const overrideFor = (target: string) => (target === buildRoot ? buildGlobalDir : undefined);
+    if (codeWs) {
+      console.error(`· VS Code workspace ${basename(codeWs.file)}: building ${roots.length} folder(s): ${roots.map(label).join(", ")}`);
     }
 
-    // --deep: concept nodes first, then the wiring graph links cards up to them.
-    let conceptErrors: string[] = [];
-    let conceptFatal: string | undefined;
-    if (deep) {
-      const conceptProgress = startProgressLine();
-      const c = await engine.init(dir, {
-        extensions: opts.extensions,
+    const buildOne = async (target: string, override: string | undefined): Promise<void> => {
+      // Workspace parent: build each child into its OWN graft/ + a workspace index.
+      if (isWorkspaceBuildRoot(target, override)) {
+        await runWorkspaceBuild(target, {
+          deep: !!deep,
+          force: !!deep && !!opts.force,
+          extensions: opts.extensions,
+          concurrency,
+          synthConcurrency,
+          childConfig: cliConfig(),
+          override,
+          includeDirs: opts.includeDir,
+          excludeDirs: opts.excludeDir,
+          followSubmodules: followSubmodulesWasExplicit ? opts.followSubmodules : undefined,
+          followNestedRepos: followNestedReposWasExplicit ? opts.followNestedRepos : undefined,
+          packageName: readPackageName(import.meta.url),
+        });
+        return;
+      }
+
+      const engine = new Graft({ ...cliConfig(), contextDir: override });
+      // --deep: concept nodes first, then the wiring graph links cards up to them.
+      let conceptErrors: string[] = [];
+      let conceptFatal: string | undefined;
+      if (deep) {
+        const conceptProgress = startProgressLine();
+        const c = await engine.init(target, {
+          extensions: opts.extensions,
+          onlyDirs,
+          force: opts.force,
+          synthConcurrency,
+          onProgress: ({ phase, index, total, file }) =>
+            conceptProgress.update(
+              `${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
+            ),
+        }).catch(async (err: unknown) => {
+          conceptProgress.end();
+          // Only the stage and a code enum; the message stays on this machine.
+          track("build_failed", { stage: "summarize", code: errorCode(err) }, { repo: target });
+          await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
+          await offerLlmFix([err instanceof Error ? err.message : String(err)]);
+          throw err;
+        });
+        conceptProgress.end();
+        if (c.failedBatches > 0 || c.skippedBatches > 0) {
+          // Not a ✓: the node set was not written (see buildContext), so "0 nodes"
+          // would read as if the concept map had been emptied.
+          console.log(
+            `✗ concepts: synthesis incomplete (${c.batches - c.failedBatches - c.skippedBatches}/${c.batches} batches): ` +
+              `existing concept nodes kept; ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
+          );
+        } else {
+          const conceptLine = `concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`;
+          if (c.nodes === 0) console.error(`⚠ ${conceptLine}`);
+          else console.log(`✓ ${conceptLine}`);
+        }
+        for (const e of c.errors) console.error(`✗ ${e}`);
+        conceptErrors = c.errors;
+        conceptFatal = c.fatal;
+      }
+
+      // Wiring graph — always; LLM meaning only with --deep.
+      const graphProgress = startProgressLine();
+      const g = await engine.graph(target, {
+        llm: deep,
+        force: deep ? opts.force : undefined,
+        concurrency,
+        reuse: opts.reuse,
+        lsp: opts.lsp,
         onlyDirs,
-        force: opts.force,
-        synthConcurrency,
         onProgress: ({ phase, index, total, file }) =>
-          conceptProgress.update(
-            `${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
+          graphProgress.update(
+            `${phase === "enrich" ? "summarizing" : "parsing"} ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
           ),
       }).catch(async (err: unknown) => {
-        conceptProgress.end();
-        // Only the stage and a code enum; the message stays on this machine.
-        track("build_failed", { stage: "summarize", code: errorCode(err) }, { repo: buildRoot });
-        await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
-        await offerLlmFix([err instanceof Error ? err.message : String(err)]);
+        graphProgress.end();
+        track("build_failed", { stage: "graph", code: errorCode(err) }, { repo: target });
+        if (deep) {
+          await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
+          await offerLlmFix([err instanceof Error ? err.message : String(err)]);
+        }
         throw err;
       });
-      conceptProgress.end();
-      if (c.failedBatches > 0 || c.skippedBatches > 0) {
-        // Not a ✓: the node set was not written (see buildContext), so "0 nodes"
-        // would read as if the concept map had been emptied.
-        console.log(
-          `✗ concepts: synthesis incomplete (${c.batches - c.failedBatches - c.skippedBatches}/${c.batches} batches): ` +
-            `existing concept nodes kept; ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
-        );
-      } else {
-        const conceptLine = `concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`;
-        if (c.nodes === 0) console.error(`⚠ ${conceptLine}`);
-        else console.log(`✓ ${conceptLine}`);
-      }
-      for (const e of c.errors) console.error(`✗ ${e}`);
-      conceptErrors = c.errors;
-      conceptFatal = c.fatal;
-    }
-
-    // Wiring graph — always; LLM meaning only with --deep.
-    const graphProgress = startProgressLine();
-    const g = await engine.graph(dir, {
-      llm: deep,
-      force: deep ? opts.force : undefined,
-      concurrency,
-      reuse: opts.reuse,
-      lsp: opts.lsp,
-      onlyDirs,
-      onProgress: ({ phase, index, total, file }) =>
-        graphProgress.update(
-          `${phase === "enrich" ? "summarizing" : "parsing"} ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
-        ),
-    }).catch(async (err: unknown) => {
       graphProgress.end();
-      track("build_failed", { stage: "graph", code: errorCode(err) }, { repo: buildRoot });
+      console.log(`✓ wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
+      console.log(`  parsed: ${g.parsed} of ${g.files} files (${g.reused} replayed from cache)`);
+      // Worth one line: this build started from a graph the user never built *here*.
+      if (g.seededFrom) console.log(`  seeded: copied a starting graph from ${g.seededFrom} (git worktree)`);
       if (deep) {
-        await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
-        await offerLlmFix([err instanceof Error ? err.message : String(err)]);
+        const m = g.meaning;
+        console.log(`  meaning: ${m.computed} computed, ${m.cached} cached, ${m.stale} stale, ${m.pending} pending`);
       }
-      throw err;
-    });
-    graphProgress.end();
-    console.log(`✓ wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
-    console.log(`  parsed: ${g.parsed} of ${g.files} files (${g.reused} replayed from cache)`);
-    // Worth one line: this build started from a graph the user never built *here*.
-    if (g.seededFrom) console.log(`  seeded: copied a starting graph from ${g.seededFrom} (git worktree)`);
-    if (deep) {
-      const m = g.meaning;
-      console.log(`  meaning: ${m.computed} computed, ${m.cached} cached, ${m.stale} stale, ${m.pending} pending`);
-    }
-    console.log(`  → ${g.contextDir}`);
-    // The activation event. Everything here is a bucket or a fixed label: repo
-    // scale rather than a file count, a language set rather than file names.
-    track(
-      "build_completed",
-      {
-        files_bucket: filesBucket(g.files),
-        langs: langsValue(g.languages),
-        mode: deep ? "deep" : "fast",
-        duration_bucket: durationBucket(Date.now() - buildStartedAt),
-        incremental: String(g.reused > 0),
-      },
-      { repo: buildRoot },
-    );
-    for (const e of g.errors) console.error(`✗ ${e}`);
-    // A language whose native grammar didn't load was parsed by its WASM stand-in:
-    // say which, and the install that fixes it. Nothing when everything loaded.
-    const fallbackNotice = nativeFallbackNotice(g.nativeFallback, readPackageName(import.meta.url));
-    if (fallbackNotice) console.error(fallbackNotice);
+      console.log(`  → ${g.contextDir}`);
+      // The activation event. Everything here is a bucket or a fixed label: repo
+      // scale rather than a file count, a language set rather than file names.
+      track(
+        "build_completed",
+        {
+          files_bucket: filesBucket(g.files),
+          langs: langsValue(g.languages),
+          mode: deep ? "deep" : "fast",
+          duration_bucket: durationBucket(Date.now() - buildStartedAt),
+          incremental: String(g.reused > 0),
+        },
+        { repo: target },
+      );
+      for (const e of g.errors) console.error(`✗ ${e}`);
+      // A language whose native grammar didn't load was parsed by its WASM stand-in:
+      // say which, and the install that fixes it. Nothing when everything loaded.
+      const fallbackNotice = nativeFallbackNotice(g.nativeFallback, readPackageName(import.meta.url));
+      if (fallbackNotice) console.error(fallbackNotice);
 
-    const rel = relative(process.cwd(), g.contextDir) || "graft";
-    if (isOutside(buildRoot, g.contextDir)) {
-      // The profile store (or a --dir/GRAFT_DIR elsewhere): nothing in the repo to ignore.
-      console.log(`  the map is kept outside the repo, so nothing in the repo changed; teammates run \`${cmd("graft build")}\` to get their own.`);
-    } else if (process.env.GRAFT_NO_GITIGNORE) {
-      console.log(`  ${rel}/ is a local cache: add it to your gitignore if you want it untracked.`);
-    } else {
-      console.log(`  ${rel}/ is git-ignored (added automatically), a local cache; teammates run \`${cmd("graft build")}\` to get their own.`);
-    }
+      const rel = relative(process.cwd(), g.contextDir) || "graft";
+      if (isOutside(target, g.contextDir)) {
+        // The profile store (or a --dir/GRAFT_DIR elsewhere): nothing in the repo to ignore.
+        console.log(`  the map is kept outside the repo, so nothing in the repo changed; teammates run \`${cmd("graft build")}\` to get their own.`);
+      } else if (process.env.GRAFT_NO_GITIGNORE) {
+        console.log(`  ${rel}/ is a local cache: add it to your gitignore if you want it untracked.`);
+      } else {
+        console.log(`  ${rel}/ is git-ignored (added automatically), a local cache; teammates run \`${cmd("graft build")}\` to get their own.`);
+      }
 
-    // #127: a --deep run whose LLM calls failed used to print the same success
-    // footer and exit 0, so a quota-exhausted build looked identical to a clean
-    // one and `graft check` still said "in sync" (it only ever checked Tier-1).
-    // The structural graph IS still written and every successful summary is
-    // cached, so this is a loud warning about a degraded tier, not a rollback.
-    if (deep) {
-      const m = g.meaning;
-      const failed =
-        m.failedFiles > 0 || m.fatal !== undefined || conceptErrors.length > 0 || conceptFatal !== undefined;
-      if (failed) {
-        const ready = m.computed + m.cached;
-        const total = ready + m.stale + m.pending;
-        const pct = total > 0 ? Math.round((ready / total) * 100) : 0;
-        console.error("");
-        console.error(`✗ the deep pass did not complete, so the meaning tier is incomplete.`);
-        if (conceptFatal) console.error(`  concepts: ${conceptFatal}`);
-        if (m.fatal) console.error(`  summaries: ${m.fatal}`);
-        if (m.failedFiles > 0) {
-          const skipped = m.skippedFiles > 0 ? `, ${m.skippedFiles} never attempted` : "";
-          console.error(`  ${m.failedFiles} file(s) failed to summarize${skipped}.`);
+      // #127: a --deep run whose LLM calls failed used to print the same success
+      // footer and exit 0, so a quota-exhausted build looked identical to a clean
+      // one and `graft check` still said "in sync" (it only ever checked Tier-1).
+      // The structural graph IS still written and every successful summary is
+      // cached, so this is a loud warning about a degraded tier, not a rollback.
+      if (deep) {
+        const m = g.meaning;
+        const failed =
+          m.failedFiles > 0 || m.fatal !== undefined || conceptErrors.length > 0 || conceptFatal !== undefined;
+        if (failed) {
+          const ready = m.computed + m.cached;
+          const total = ready + m.stale + m.pending;
+          const pct = total > 0 ? Math.round((ready / total) * 100) : 0;
+          console.error("");
+          console.error(`✗ the deep pass did not complete, so the meaning tier is incomplete.`);
+          if (conceptFatal) console.error(`  concepts: ${conceptFatal}`);
+          if (m.fatal) console.error(`  summaries: ${m.fatal}`);
+          if (m.failedFiles > 0) {
+            const skipped = m.skippedFiles > 0 ? `, ${m.skippedFiles} never attempted` : "";
+            console.error(`  ${m.failedFiles} file(s) failed to summarize${skipped}.`);
+          }
+          if (conceptErrors.length > 0) console.error(`  ${conceptErrors.length} concept-pass error(s).`);
+          console.error(`  meaning coverage: ${ready}/${total} symbols (${pct}%).`);
+          await printLlmFailureHints([conceptFatal, m.fatal, ...conceptErrors, ...g.errors], cliConfig());
+          console.error(
+            `  Nothing computed was lost: re-run \`${cmd("graft build --deep")}\` to resume from what is cached.\n` +
+              "  Pass --allow-partial to accept a degraded meaning tier and exit 0.",
+          );
+          await offerLlmFix([conceptFatal, m.fatal, ...conceptErrors, ...g.errors]);
+          if (!opts.allowPartial) process.exitCode = 1;
         }
-        if (conceptErrors.length > 0) console.error(`  ${conceptErrors.length} concept-pass error(s).`);
-        console.error(`  meaning coverage: ${ready}/${total} symbols (${pct}%).`);
-        await printLlmFailureHints([conceptFatal, m.fatal, ...conceptErrors, ...g.errors], cliConfig());
-        console.error(
-          `  Nothing computed was lost: re-run \`${cmd("graft build --deep")}\` to resume from what is cached.\n` +
-            "  Pass --allow-partial to accept a degraded meaning tier and exit 0.",
-        );
-        await offerLlmFix([conceptFatal, m.fatal, ...conceptErrors, ...g.errors]);
-        if (!opts.allowPartial) process.exitCode = 1;
       }
+    };
+
+    for (const target of roots) {
+      if (codeWs) console.error(`\n— ${label(target)}/`);
+      await buildOne(target, overrideFor(target));
     }
   });
 
@@ -2390,66 +2423,94 @@ function printLines(lines: string[]): void {
 /** `graft init`'s flags, as commander hands them over. */
 interface InitOptions { build?: boolean; agents?: string[]; allAgents?: boolean; listAgents?: boolean; mcp?: boolean; hooks?: boolean; statusline?: boolean; dryRun?: boolean; yes?: boolean; global?: boolean; verbose?: boolean; workspace?: string | false; connect?: string; pair?: string; server?: string; plain?: boolean; lookBack?: boolean }
 
+/** The VS Code workspace to use (`ws: null` = `repo` itself), and the choice to save for later builds when one was made. */
+interface CodeWorkspaceChoice {
+  ws: { file: string; folders: string[] } | null;
+  /** The workspace file relative to `repo`, or `false` for "none"; absent when nothing was decided. */
+  remember?: string | false;
+}
+
 /**
- * Which VS Code workspace `init` wires, if any: `--workspace <file>`, else the
- * only `.code-workspace` in `repo`, else — with several — the user's pick on a
- * terminal. `null` means none (wire `repo` itself, as before); `undefined`
- * means the user cancelled. Exits on an unusable `--workspace` file.
+ * Which VS Code workspace `init` wires (or `build` builds), if any: `--workspace <file>`, else
+ * (for `build`) the choice saved here earlier, else the only `.code-workspace` in `repo`,
+ * else — with several — the user's pick on a terminal. `ws: null` means none (wire `repo`
+ * itself, as before); `undefined` means the user cancelled. Exits on an unusable `--workspace` file.
  */
 async function chooseCodeWorkspace(
   repo: string,
-  opts: InitOptions,
-): Promise<{ file: string; folders: string[] } | null | undefined> {
-  if (opts.workspace === false) return null;
-  let file: string | null;
+  opts: Pick<InitOptions, "workspace" | "yes">,
+  command: "init" | "build" = "init",
+): Promise<CodeWorkspaceChoice | undefined> {
+  if (opts.workspace === false) return { ws: null, remember: false };
+  const verb = command === "init" ? "wire" : "build";
+  const itself = `${command === "init" ? "wiring" : "building"} this folder itself`;
+  const requested = typeof opts.workspace === "string";
+  const toRemember = (f: string) => relative(repo, f).split("\\").join("/");
+  let file: string | null = null;
+  let remember: string | false | undefined;
   if (typeof opts.workspace === "string") {
     file = resolve(repo, opts.workspace);
     if (!existsSync(file)) {
       console.error(`✗ --workspace: ${file} not found`);
       process.exit(1);
     }
+    remember = toRemember(file);
   } else {
-    const found = findCodeWorkspaces(repo);
-    if (found.length === 0) return null;
-    // Even a single workspace is asked about: wiring its folders instead of
-    // this directory is a different outcome, so it's never assumed.
-    if (process.stdin.isTTY && process.stderr.isTTY && !opts.yes) {
-      const picked = await promptCodeWorkspace(describeCodeWorkspaces(found), repo);
-      if (picked === undefined) return undefined;
-      file = picked;
-    } else {
-      const what = found.length === 1 ? "a VS Code workspace" : `${found.length} VS Code workspaces`;
-      console.error(
-        `· found ${what} here (${found.map((f) => basename(f)).join(", ")}) — wiring this folder itself; pass --workspace <file> to wire its folders`,
-      );
-      return null;
+    const saved = command === "build" ? readBuildConfig(repo)?.codeWorkspace : undefined;
+    if (saved === false) return { ws: null };
+    if (typeof saved === "string") {
+      const path = resolve(repo, saved);
+      if (existsSync(path)) {
+        file = path;
+        console.error(`· using ${saved}, the VS Code workspace chosen here before — pass --workspace <file> or --no-workspace to change`);
+      } else {
+        console.error(`⚠ ${saved}, the VS Code workspace chosen here before, is gone`);
+      }
+    }
+    if (file === null) {
+      const found = findCodeWorkspaces(repo);
+      if (found.length === 0) return { ws: null };
+      // Even a single workspace is asked about: wiring its folders instead of
+      // this directory is a different outcome, so it's never assumed.
+      if (process.stdin.isTTY && process.stderr.isTTY && !opts.yes) {
+        const picked = await promptCodeWorkspace(describeCodeWorkspaces(found), repo, {}, command);
+        if (picked === undefined) return undefined;
+        if (picked === null) return { ws: null, remember: false };
+        file = picked;
+        remember = toRemember(picked);
+      } else {
+        const what = found.length === 1 ? "a VS Code workspace" : `${found.length} VS Code workspaces`;
+        console.error(
+          `· found ${what} here (${found.map((f) => basename(f)).join(", ")}) — ${itself}; pass --workspace <file> to ${verb} its folders`,
+        );
+        return { ws: null };
+      }
     }
   }
-  if (file === null) return null;
 
   let read;
   try {
     read = readCodeWorkspaceFolders(file);
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
-    if (typeof opts.workspace === "string") {
+    if (requested) {
       console.error(`✗ --workspace: can't read ${file} (${why})`);
       process.exit(1);
     }
-    console.error(`⚠ can't read ${basename(file)} (${why}) — wiring this folder itself`);
-    return null;
+    console.error(`⚠ can't read ${basename(file)} (${why}) — ${itself}`);
+    return { ws: null };
   }
   for (const m of read.missing) console.error(`⚠ ${basename(file)}: folder ${m} not found — skipped`);
   for (const u of read.unsupported) console.error(`⚠ ${basename(file)}: ${u} is not a local folder — skipped`);
   if (read.folders.length === 0) {
-    if (typeof opts.workspace === "string") {
+    if (requested) {
       console.error(`✗ --workspace: ${file} lists no existing folders`);
       process.exit(1);
     }
-    console.error(`⚠ ${basename(file)} lists no existing folders — wiring this folder itself`);
-    return null;
+    console.error(`⚠ ${basename(file)} lists no existing folders — ${itself}`);
+    return { ws: null };
   }
-  return { file, folders: read.folders };
+  return { ws: { file, folders: read.folders }, remember };
 }
 
 /** What `init --connect` and `--pair` hear from a run of init, as it happens: the stages the web page ticks off. */
@@ -2531,11 +2592,12 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
 
     // A VS Code workspace file here means its folders are what agents open as
     // roots, so they — not this directory — get the wiring and the graphs.
-    const codeWs = await chooseCodeWorkspace(repo, opts);
-    if (codeWs === undefined) {
+    const codeWsChoice = await chooseCodeWorkspace(repo, opts);
+    if (codeWsChoice === undefined) {
       console.error("· cancelled — nothing written");
       return null;
     }
+    const codeWs = codeWsChoice.ws;
 
     // Which agents to wire, decided before anything is written. Explicit flags
     // win; otherwise prompt on a TTY, and on a pipe write nothing rather than
@@ -2627,6 +2689,8 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
       console.error("· no agents selected, nothing written");
       return null;
     }
+    // `graft build` here reuses this choice instead of asking again.
+    if (codeWsChoice.remember !== undefined) patchBuildConfig(repo, { codeWorkspace: codeWsChoice.remember });
 
     // With --pair, Trail's onboarding page is waiting on this run: tell it
     // first, so the person can sign up while the rest of init runs.

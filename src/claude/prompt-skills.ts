@@ -35,6 +35,7 @@ import { lastUsedIn } from '../skills/state.js';
 import { nameTaken } from '../skills/store.js';
 import { candidatesHere, matchCue, nameOf, normalizePrompt, refusedAtRecall, withRunParams, type Candidate, type CueResult, type NormPrompt } from '../skills/recall.js';
 import { checkLine, injectionFor, readOnlyCheck, runBlock, runProbes, useNotice, withReadyFailed, PROBE_BUDGET_MS, type ProbeOpts } from '../skills/runblock.js';
+import { testTimeScale } from '../skills/probes.js';
 import { flatLine } from '../notes/flatten.js';
 import { directive } from '../skills/directive-words.js';
 import { consent as g5consent, type Consent } from './prompt-consent.js';
@@ -72,7 +73,9 @@ const ANSWERED: Record<string, string> = { yes: 'yes', show: 'show', no: 'no', o
 /** 3.2. */
 export function promptSkills(input: any, dir: string, env: NodeJS.ProcessEnv = process.env, deps: Partial<PromptDeps> = {}): HookOut {
   const clock = deps.clock ?? Date.now;
-  const deadline = clock() + PROMPT_DEADLINE_MS;
+  // A test's own clock or git gets the real limits, as a test's own git does for the probes.
+  const scale = deps.clock || deps.probes?.git ? 1 : testTimeScale(env);
+  const deadline = clock() + PROMPT_DEADLINE_MS * scale;
   const sent: Sent = [];
   try {
     const g = (deps.gate ?? skillsGate)(input, dir, env);
@@ -98,7 +101,7 @@ export function promptSkills(input: any, dir: string, env: NodeJS.ProcessEnv = p
       own = isOwnBlockReason(st, String(input?.prompt ?? ''), ctx.transcriptPath);
       if (!own) noteCodexPrompt(st, String(input?.prompt ?? ''), env);
     } : undefined;
-    const out = withSkillSession(ctx, { catchUp: ctx.fold, waitMs: LOCK_WAIT_MS, ...(prepare ? { prepare } : {}) },
+    const out = withSkillSession(ctx, { catchUp: ctx.fold, waitMs: LOCK_WAIT_MS * scale, ...(prepare ? { prepare } : {}) },
       (st, fold) => (own ? {} : inside(ctx, st, fold, typed, d, deadline, sent)));
     sendAll(sent, d.track);
     return out ?? {};

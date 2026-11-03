@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { runCli, tmpRepo } from "./helpers.js";
 import {
@@ -169,4 +169,57 @@ test("--dry-run lists each workspace folder's writes and writes nothing", () => 
   assert.match(r.stderr, /— front\//);
   assert.match(r.stderr, /— back\//);
   assert.ok(!wired(join(dir, "front")) && !wired(join(dir, "back")));
+});
+
+test("build --workspace builds every listed folder, including one outside the dir", () => {
+  const dir = fixture("cws-build", {});
+  const outside = tmpRepo("cws-build-outside");
+  mkdirSync(join(outside, ".git"), { recursive: true });
+  writeFileSync(join(outside, "lib.ts"), "export function outsideLib(): number {\n  return 2;\n}\n");
+  writeFileSync(
+    join(dir, "app.code-workspace"),
+    JSON.stringify({ folders: [{ path: "front" }, { path: outside }] }),
+  );
+  const r = runCli(["build", dir, "--workspace", "app.code-workspace"], { home: tmpRepo("cws-build-home") });
+  assert.equal(r.status, 0, r.describe());
+  assert.match(r.stderr, /VS Code workspace app\.code-workspace: building 2 folder/);
+  assert.match(r.stderr, /— front\//, r.describe());
+  assert.ok(r.stderr.includes(`${basename(outside)}/`), "the folder outside the dir is built too");
+  assert.equal(r.stdout.match(/✓ wiring:/g)?.length, 2, "one graph per listed folder, none for back");
+});
+
+test("build with a .code-workspace and no terminal builds the dir itself, and says how to use it", () => {
+  const dir = fixture("cws-build-pipe", { "app.code-workspace": FRONT_BACK });
+  const r = runCli(["build", dir], { home: tmpRepo("cws-build-pipe-home") });
+  assert.equal(r.status, 0, r.describe());
+  assert.match(r.stderr, /found a VS Code workspace here \(app\.code-workspace\) — building this folder itself/);
+});
+
+test("build reuses the workspace init chose; --no-workspace overrides it once", () => {
+  const dir = fixture("cws-reuse", { "app.code-workspace": FRONT_BACK });
+  const home = tmpRepo("cws-reuse-home");
+  const init = runCli(["init", dir, "--agents", "claude", "--no-build", "--workspace", "app.code-workspace"], { home });
+  assert.equal(init.status, 0, init.describe());
+
+  const r = runCli(["build", dir], { home });
+  assert.equal(r.status, 0, r.describe());
+  assert.match(r.stderr, /using app\.code-workspace, the VS Code workspace chosen here before/);
+  assert.match(r.stderr, /VS Code workspace app\.code-workspace: building 2 folder/);
+  assert.equal(r.stdout.match(/✓ wiring:/g)?.length, 2, "front and back only");
+
+  const once = runCli(["build", dir, "--no-workspace"], { home });
+  assert.equal(once.status, 0, once.describe());
+  assert.doesNotMatch(once.stderr, /VS Code workspace/);
+  const again = runCli(["build", dir], { home });
+  assert.match(again.stderr, /using app\.code-workspace/, "the saved choice survives a one-off --no-workspace");
+});
+
+test("build does not ask again when init chose to wire the folder itself", () => {
+  const dir = fixture("cws-reuse-none", { "app.code-workspace": FRONT_BACK });
+  const home = tmpRepo("cws-reuse-none-home");
+  const init = runCli(["init", dir, "--agents", "claude", "--no-build", "--no-workspace"], { home });
+  assert.equal(init.status, 0, init.describe());
+  const r = runCli(["build", dir], { home });
+  assert.equal(r.status, 0, r.describe());
+  assert.doesNotMatch(r.stderr, /VS Code workspace/);
 });

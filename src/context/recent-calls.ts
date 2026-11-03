@@ -94,6 +94,19 @@ export function calledRecently(dir: string, now: Date = new Date()): boolean {
 }
 
 /**
+ * The models that priced the calls of the turn now running, oldest first, or []
+ * when the last call is older than {@link TURN_GAP_MS}. Measured rates carry no
+ * model in the tally, so they are left out.
+ */
+export function turnModels(dir: string, now: Date = new Date()): string[] {
+  if (!calledRecently(dir, now)) return [];
+  const models = lastTurnCalls(readRecentCalls(dir))
+    .filter((c) => c.usd !== null && !c.measured && typeof c.model === 'string' && c.model !== '')
+    .map((c) => c.model as string);
+  return [...new Set(models)];
+}
+
+/**
  * The latest run of calls: walking back from the newest, every call less than
  * {@link TURN_GAP_MS} after the one before it. That is the closest a CLI can get
  * to "this turn" without seeing the conversation.
@@ -107,9 +120,11 @@ export function lastTurnCalls(calls: RecentCall[]): RecentCall[] {
 
 /**
  * The tally to close a reply with, summed over `calls`, in the same shapes the
- * footers use. Dollars appear only when every call was priced under the same
- * model, because adding a priced figure to an unpriced one would show a total
- * that covers only part of the tokens. Warnings come from the newest call.
+ * footers use. Dollars appear only when every call was priced, because adding a
+ * priced figure to an unpriced one would show a total that covers only part of
+ * the tokens. A turn priced under several models (Kilo's "Plan first": Plan
+ * model, then Code/Debug model) gets its total plus one figure per model.
+ * Warnings come from the newest call.
  */
 export function summedTally(calls: RecentCall[]): string {
   const b = brand();
@@ -124,6 +139,12 @@ export function summedTally(calls: RecentCall[]): string {
     line = model && !measured
       ? `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${usd} for ${model}) this turn`
       : `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${usd}) this turn`;
+  } else if (priced && calls.every((c) => !c.measured && c.model)) {
+    const per = new Map<string, number>();
+    for (const c of calls) per.set(c.model!, (per.get(c.model!) ?? 0) + (c.usd ?? 0));
+    const total = formatDollars([...per.values()].reduce((n, v) => n + v, 0));
+    const parts = [...per].map(([m, v]) => `~${formatDollars(v)} for ${m}`).join(' + ');
+    line = `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${total}: ${parts}) this turn`;
   }
   return line + (calls.at(-1)?.warnings ?? '');
 }

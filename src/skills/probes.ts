@@ -213,6 +213,11 @@ function testScale(env: NodeJS.ProcessEnv, opts: ProbeOpts): number {
   return isTestHome(env) ? Math.min(20, n) : 1;
 }
 
+/** The same slack for a hook's own wall-clock deadline; TRAIL_PERF=1 times the real limits. */
+export function testTimeScale(env: NodeJS.ProcessEnv): number {
+  return process.env.TRAIL_PERF === '1' ? 1 : testScale(env, {});
+}
+
 /** Allowlisted local probes only, without a shell, 300 ms total, cached 10 min in <home>/state/probes.json keyed by checkout+probe. */
 export function runProbes(s: ParsedSkill, checkout: string, now: Date = new Date(), env: NodeJS.ProcessEnv = process.env, opts: ProbeOpts = {}): ProbeResult[] {
   const scale = testScale(env, opts);

@@ -121,7 +121,7 @@ function walk(cli: Cli, src: string, deadline: number): Walked | null {
   } catch { /* the bins were read from it a moment ago */ }
   const stack = [src];
   while (stack.length) {
-    if (Date.now() > deadline) return null;
+    if (Date.now() >= deadline) return null;
     const d = stack.pop()!;
     let entries;
     try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
@@ -164,7 +164,7 @@ const sigOf = (cli: Cli, parts: string[]) => createHash('sha256').update(`${cli.
 function scanNames(files: string[], deadline: number): string[] | null {
   const names = new Set<string>();
   for (const f of files) {
-    if (Date.now() > deadline) return null;
+    if (Date.now() >= deadline) return null;
     const text = readSmall(f, MAX_SRC_BYTES);
     if (text === null || !registrations(text, names)) return [];
   }

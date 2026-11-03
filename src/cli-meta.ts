@@ -5,7 +5,7 @@
  * injected results instead of hitting the network from tests.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toPosixPath } from "./util/paths.js";
@@ -39,6 +39,27 @@ export function readPackageName(moduleUrl: string): string {
 
 const PKG_NAME = readPackageName(import.meta.url);
 
+/** The fork's npm registry: `publishConfig.registry` in package.json, or null. */
+export function readForkRegistry(moduleUrl: string): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(resolvePackageJsonPath(moduleUrl), "utf8")) as { publishConfig?: { registry?: string } };
+    return pkg.publishConfig?.registry ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const FORK_REGISTRY = readForkRegistry(import.meta.url);
+
+/** npm flags that send every lookup of this code's packages to the fork's registry, whatever .npmrc says. */
+export function registryArgs(
+  registry: string | null = FORK_REGISTRY,
+  names: string[] = [PKG_NAME, ...Object.values(PACKAGE_FOR)],
+): string[] {
+  if (!registry) return [];
+  return [...new Set(names.map((n) => (n.startsWith("@") ? `--${n.split("/")[0]}:registry=${registry}` : `--registry=${registry}`)))];
+}
+
 /** Reads the version of the graft package this module was loaded from. */
 export function readCurrentVersion(moduleUrl: string): string {
   const raw = readFileSync(resolvePackageJsonPath(moduleUrl), "utf8");
@@ -62,12 +83,28 @@ export interface NpmViewResult {
   version?: string;
 }
 
+/** `npm <args>` as one cmd line, or null when an argument holds anything cmd could read as syntax. */
+export function npmCommandLine(args: string[]): string | null {
+  return args.every((a) => /^[\w@/:.=+-]+$/.test(a)) ? ["npm", ...args].join(" ") : null;
+}
+
+/** Runs npm. On Windows npm is `npm.cmd`, which Node can only start through cmd. */
+function spawnNpm(args: string[], opts: Omit<SpawnSyncOptionsWithStringEncoding, "encoding" | "shell">): SpawnSyncReturns<string> {
+  if (process.platform !== "win32") return spawnSync("npm", args, { ...opts, encoding: "utf8" });
+  const line = npmCommandLine(args);
+  if (line === null) {
+    const error = new Error(`refusing to pass an argument with shell characters to cmd: ${args.join(" ")}`);
+    return { pid: 0, output: [], stdout: "", stderr: "", status: null, signal: null, error };
+  }
+  // One string, no args array: cmd gets only the checked line, and Node raises no DEP0190.
+  return spawnSync(line, { ...opts, encoding: "utf8", shell: true });
+}
+
 /** `npm view <pkg> version`, offline-safe: any failure (no npm, no network,
  * timeout) resolves to `{ ok: false }` rather than throwing. */
 export function getNpmViewVersion(pkgName: string = PKG_NAME, timeoutMs = 2000): NpmViewResult {
   try {
-    const res = spawnSync("npm", ["view", pkgName, "version"], {
-      encoding: "utf8",
+    const res = spawnNpm(["view", pkgName, "version", ...registryArgs()], {
       timeout: timeoutMs,
       windowsHide: true,
     });
@@ -161,7 +198,7 @@ export function runUpgrade(moduleUrl: string): UpgradeResult {
   // `graft upgrade` is the handover: it also installs the `trail` command, once
   // that package is published. One npm call, so the two land at one version.
   const alongside = PKG_NAME === PACKAGE_FOR.graft && getNpmViewVersion(PACKAGE_FOR.trail).ok ? [`${PACKAGE_FOR.trail}@latest`] : [];
-  const res = spawnSync("npm", ["install", "-g", `${PKG_NAME}@latest`, ...alongside], { stdio: "inherit" });
+  const res = spawnNpm(["install", "-g", `${PKG_NAME}@latest`, ...alongside, ...registryArgs()], { stdio: "inherit" });
   if (res.error || (res.status ?? 1) !== 0) {
     return { ran: true, ok: false, oldVersion, errorMessage: res.error?.message };
   }

@@ -13,8 +13,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, writeFileSync, utimesSync, symlinkSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   MAX_SESSION_AGE_MS,
   kiloDbPath,
@@ -151,6 +152,39 @@ test('Windows separators and drive-letter case still match', { skip: noSqlite },
   for (const spelling of ['D:\\work\\VED-ChAIR', 'd:/work/ved-chair', 'D:/work/VED-ChAIR/']) {
     assert.equal(kiloSessionModel(spelling, { home, env: {}, now }), 'claude-opus-5', spelling);
   }
+});
+
+test('a repo opened through a junction or symlink matches the resolved path Kilo stores', { skip: noSqlite }, () => {
+  const home = tmpRepo('kilo-db-link');
+  const real = join(home, 'real', 'repo');
+  const link = join(home, 'link');
+  mkdirSync(real, { recursive: true });
+  symlinkSync(join(home, 'real'), link, 'junction');
+  const now = Date.now();
+  kiloDb(home, [{ dir: realpathSync.native(real).replace(/\\/g, '/'), model: { id: 'claude-opus-5-5' }, updated: now }]);
+  assert.equal(kiloSessionModel(join(link, 'repo'), { home, env: {}, now }), 'claude-opus-5-5');
+});
+
+test('in Kilo\'s agent shell inside VS Code, no Kilo answer is never priced at the Copilot chat\'s model', { skip: noSqlite }, () => {
+  const home = tmpRepo('kilo-db-no-fallthrough');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const chat = join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage', 'ws1');
+  mkdirSync(join(chat, 'chatSessions'), { recursive: true });
+  writeFileSync(join(chat, 'workspace.json'), JSON.stringify({ folder: pathToFileURL(repo).href }));
+  writeFileSync(
+    join(chat, 'chatSessions', 'a.jsonl'),
+    `${JSON.stringify({ kind: 0, v: { requests: [{ requestId: 'r1', modelId: 'copilot/claude-opus-5.5' }] } })}\n`,
+  );
+  const now = Date.now();
+  // Two live sessions that disagree and are both idle: Kilo cannot say which is calling.
+  kiloDb(home, [
+    { dir: repo.replace(/\\/g, '/'), model: { id: 'claude-sonnet-5-5' }, updated: now - 5 * 60_000 },
+    { dir: repo.replace(/\\/g, '/'), model: { id: 'claude-opus-5-5' }, updated: now - 10 * 60_000 },
+  ]);
+  const vscode = { APPDATA: join(home, 'AppData', 'Roaming'), VSCODE_PID: '1234' };
+  assert.equal(hostModelFor(repo, { home, env: vscode, now }), 'copilot/claude-opus-5.5', 'Copilot\'s own terminal');
+  assert.equal(hostModelFor(repo, { home, env: { ...vscode, KILO: '1', KILO_PID: '4242' }, now }), null);
 });
 
 test('sessions on one directory that AGREE name their shared model', { skip: noSqlite }, () => {

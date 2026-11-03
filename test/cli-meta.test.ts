@@ -9,7 +9,42 @@ import {
   resolvePackageJsonPath,
   readCurrentVersion,
   isRunningViaNpx,
+  registryArgs,
+  npmCommandLine,
 } from '../src/cli-meta.js';
+
+// --- npmCommandLine: what reaches cmd on Windows ---
+
+test('npmCommandLine: plain package names, flags and URLs pass as one line', () => {
+  assert.equal(
+    npmCommandLine(['install', '-g', '@nanonets/graft@latest', '--@nanonets:registry=https://example.invalid/a_b/']),
+    'npm install -g @nanonets/graft@latest --@nanonets:registry=https://example.invalid/a_b/',
+  );
+});
+
+test('npmCommandLine: anything cmd could read as syntax is refused', () => {
+  for (const bad of ['a&b', 'a|b', 'a>b', 'a^b', '%PATH%', 'a b', '"x"', '!x!', 'a;b', '']) {
+    assert.equal(npmCommandLine(['view', bad]), null, bad);
+  }
+});
+
+// --- registryArgs: the fork's registry for every scope, whatever .npmrc says ---
+
+test('registryArgs: one per-scope flag per scope, plain --registry for an unscoped name', () => {
+  const url = 'https://example.invalid/npm/';
+  assert.deepEqual(registryArgs(url, ['@nanonets/graft', '@trailhq/trail-code', '@trailhq/trail', 'graft']), [
+    `--@nanonets:registry=${url}`,
+    `--@trailhq:registry=${url}`,
+    `--registry=${url}`,
+  ]);
+  assert.deepEqual(registryArgs(null, ['@nanonets/graft']), []);
+});
+
+test('registryArgs: package.json names the fork registry, so lookups never default to npmjs.org', () => {
+  const args = registryArgs();
+  assert.ok(args.includes('--@nanonets:registry=https://eu.artifactory.automotive.cloud/ui/repos/tree/General/a_asc_tools_graft'));
+  assert.ok(args.some((a) => a.startsWith('--@trailhq:registry=')));
+});
 
 // --- formatVersionReport: pure formatting, injected npm-view results (no network) ---
 
