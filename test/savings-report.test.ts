@@ -31,6 +31,7 @@ import {
   runPowerShell,
   schemaPrefix,
   toBinds,
+  windowsPowerShellEnv,
   type OdpnetRun,
   type OracleDriver,
 } from '../src/reporting/flush.js';
@@ -468,4 +469,31 @@ test('status never prints the password', () => {
   mkdirSync(join(h, '.graft'), { recursive: true });
   writeFileSync(join(h, '.graft', 'savings-report.json'), JSON.stringify({ connectString: 'a:1/b', user: 'U', password: 'S3cr3t-pw' }));
   assert.ok(!formatReportingStatus(h).includes('S3cr3t-pw'));
+});
+
+test('the ODP.NET sender drops PowerShell 7 module folders, so Windows PowerShell loads its own modules', () => {
+  const env = windowsPowerShellEnv({
+    PATH: 'C:\\x',
+    PSModulePath: [
+      'C:\\Users\\u\\Documents\\PowerShell\\Modules',
+      'C:\\Program Files\\PowerShell\\Modules',
+      'c:\\program files\\powershell\\7\\Modules\\',
+      'C:\\Users\\u\\Documents\\WindowsPowerShell\\Modules',
+      'C:\\Program Files\\WindowsPowerShell\\Modules',
+      'C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules',
+      'C:\\Program Files (x86)\\Microsoft Purview Information Protection\\Powershell',
+      '',
+    ].join(';'),
+  });
+  assert.equal(
+    env.PSModulePath,
+    'C:\\Users\\u\\Documents\\WindowsPowerShell\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules;' +
+      'C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files (x86)\\Microsoft Purview Information Protection\\Powershell',
+  );
+  assert.equal(env.PATH, 'C:\\x');
+  // Only PowerShell 7 folders: none left, so Windows PowerShell uses its defaults
+  assert.equal('PSModulePath' in windowsPowerShellEnv({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }), false);
+  // Whatever the variable's casing, and absent stays absent
+  assert.equal(windowsPowerShellEnv({ PSMODULEPATH: 'D:\\PowerShell\\Modules;D:\\Mine' }).PSMODULEPATH, 'D:\\Mine');
+  assert.deepEqual(windowsPowerShellEnv({ PATH: 'C:\\x' }), { PATH: 'C:\\x' });
 });
