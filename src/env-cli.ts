@@ -32,6 +32,7 @@
 import { isAbsolute } from "node:path";
 import { cmd } from "./brand.js";
 import { envSetExample } from "./ai/llm-hints.js";
+import { DATABRICKS_BASE_URL } from "./ai/llm/databricks.js";
 import { maskSecret, readSaved, type Prompter, type UserEnvStore } from "./ai/llm-settings.js";
 
 export type EnvKind = "path" | "url" | "secret" | "int" | "choice" | "text" | "store" | "switch";
@@ -158,7 +159,7 @@ export const ENV_VARS: EnvVar[] = [
     command: "api url",
     builtin: true,
     title: "Show or set GRAFT_BASE_URL: the LLM endpoint for `graft build --deep`",
-    help: "The LLM endpoint `graft build --deep` calls (any OpenAI-compatible API, or Anthropic's).",
+    help: `The LLM endpoint \`graft build --deep\` calls, e.g. the Databricks AI Gateway: ${DATABRICKS_BASE_URL}.`,
     unset: "the Databricks AI Gateway",
     kind: "url",
     examples: ["graft api url"],
@@ -200,9 +201,9 @@ export const ENV_VARS: EnvVar[] = [
     command: "api provider",
     title: "Show or set GRAFT_PROVIDER: the wire format spoken to the LLM endpoint",
     help:
-      "The wire format graft speaks to the LLM endpoint, not a vendor: openai (any OpenAI-compatible API: OpenAI, " +
-      "OpenRouter, Fireworks, a LiteLLM proxy, a local server), anthropic (Anthropic's Messages API), litellm, " +
-      "orcarouter, or llm-incubator (needs `graft api url`). Leave it unset to let graft pick: on the Databricks AI " +
+      "The wire format graft speaks to the LLM endpoint, not a vendor: openai (the OpenAI-compatible API), " +
+      "anthropic (the Anthropic Messages API format), litellm, orcarouter, or llm-incubator (needs `graft api url`). " +
+      "Leave it unset to let graft pick: on the Databricks AI " +
       "Gateway the route follows the model, elsewhere openai. The same as the global --provider option, which wins over it.",
     unset: "picked from the model on the Databricks gateway, else openai",
     kind: "choice",

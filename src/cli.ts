@@ -29,7 +29,7 @@ import {
 } from "./ai/llm-settings.js";
 import { startProgressLine } from "./util/progress-line.js";
 import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
-import { databricksTokenHint, type DatabricksListing } from "./ai/llm/databricks.js";
+import { DATABRICKS_BASE_URL, databricksTokenHint, type DatabricksListing } from "./ai/llm/databricks.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
@@ -940,7 +940,7 @@ grouped(program.command("build"), GROUP.setup)
       // would otherwise run with graft's defaults while `graft model` shows the
       // saved value. What this process sets itself still wins.
       applySavedSettings();
-      // A provider with its own endpoint plus a custom endpoint URL: ask which one (once per pair).
+      // A provider with its own endpoint plus a custom endpoint URL: the custom one is used (nothing is asked).
       const endpoint = await resolveEndpointConflict(llmGuardDeps());
       if ("cancelled" in endpoint) {
         console.log("Cancelled — nothing was built.");
@@ -1567,7 +1567,7 @@ const apiCommand = grouped(program.command("api"), GROUP.setup).description(
 apiCommand
   .command("url")
   .description(`Show or set GRAFT_BASE_URL, the LLM endpoint for \`graft build --deep\` — ${SAVED_WHERE}`)
-  .argument("[url]", "new base URL, e.g. https://my-gateway.example.com/v1 (omit to show it, and to be prompted in a terminal)")
+  .argument("[url]", `new base URL, e.g. ${DATABRICKS_BASE_URL} (omit to show it, and to be prompted in a terminal)`)
   .option("--unset", "remove the saved value")
   .option("--no-verify", "skip the check against the endpoint after saving")
   .action(async (value: string | undefined, opts: SettingOptions) => {
@@ -1747,24 +1747,6 @@ pricesCommand
       .option("--unset", `remove the saved value (then: ${v.unset})`)
       .action(async (value: string | undefined, opts: { unset?: boolean }) => {
         process.exitCode = await runVarCommand(v, value, opts, envDeps());
-        // A provider with its own endpoint next to a custom endpoint URL: settle which one now, not at the next build.
-        if (v.name === "GRAFT_PROVIDER" && value !== undefined && !opts.unset && process.exitCode === 0) {
-          // The value just saved, even where this terminal still sets an older GRAFT_PROVIDER itself.
-          const guard = llmGuardDeps();
-          const saved = guard.store?.read("GRAFT_PROVIDER");
-          if (saved) guard.env = { ...process.env, GRAFT_PROVIDER: saved };
-          const endpoint = await resolveEndpointConflict(guard);
-          if ("cancelled" in endpoint) process.exitCode = 130;
-          else if (Object.keys(endpoint.saves).length > 0) {
-            // A choice just made is saved once the endpoint it picks passes its check, as everywhere else.
-            const picked = { ...guard, env: { ...guard.env, ...endpoint.changes.env }, config: { ...guard.config, ...endpoint.changes.config } };
-            const auth = await ensureLlmAuth(picked, { pendingSaves: endpoint.saves });
-            if (auth.status === "cancelled") process.exitCode = 130;
-            else if (auth.status === "skipped" || auth.status === "failed") {
-              console.log(`  The endpoint choice is not saved either: \`${cmd("graft build --deep")}\` asks again.`);
-            }
-          }
-        }
       });
   }
 }

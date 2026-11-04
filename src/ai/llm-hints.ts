@@ -17,6 +17,7 @@ import { anthropicBaseUrl } from "./llm/anthropic.js";
 import { DEFAULT_LITELLM_BASE_URL } from "./llm/litellm.js";
 import type { ProviderKind } from "./llm/factory.js";
 import {
+  DATABRICKS_BASE_URL,
   DATABRICKS_KNOWN_MODELS,
   databricksRoot,
   databricksTokenHint,
@@ -332,7 +333,7 @@ export async function llmFailureHints(messages: (string | undefined)[], ctx: Hin
         `• The LLM endpoint ${url} could not be reached (${where}).`,
         `  Check the URL, your network/VPN and proxy, then set GRAFT_BASE_URL to a reachable endpoint${dropFlag(s)}`,
         `  — run \`${cmd(SETTINGS.url.command)}\` to save it for every new terminal, or for this one:`,
-        set("GRAFT_BASE_URL", "https://<your-llm-endpoint>/v1"),
+        set("GRAFT_BASE_URL", DATABRICKS_BASE_URL),
       );
     } else if (problem === "auth") {
       const s = settingSource("key", ctx.config, cfg, env);

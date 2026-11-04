@@ -65,8 +65,8 @@
   <div class="stat feature"><b>33</b><span>New features</span></div>
   <div class="stat fix"><b>17</b><span>Bug fixes to upstream functionality</span></div>
   <div class="stat improvement"><b>16</b><span>Improvements to upstream functionality</span></div>
-  <div class="stat change"><b>8</b><span>Change requests to upstream functionality</span></div>
-  <div class="stat"><b>74</b><span>Items in total</span></div>
+  <div class="stat change"><b>9</b><span>Change requests to upstream functionality</span></div>
+  <div class="stat"><b>75</b><span>Items in total</span></div>
 </div>
 
 <div class="panel">
@@ -75,13 +75,13 @@
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
       <tr><td><a href="#lang">Languages &amp; parsing</a></td><td>7</td><td>2</td><td>2</td><td>0</td><td>11</td></tr>
-      <tr><td><a href="#llm">LLM providers &amp; deep build</a></td><td>9</td><td>3</td><td>5</td><td>2</td><td>19</td></tr>
+      <tr><td><a href="#llm">LLM providers &amp; deep build</a></td><td>8</td><td>3</td><td>5</td><td>3</td><td>19</td></tr>
       <tr><td><a href="#savings">Savings, pricing &amp; model detection</a></td><td>6</td><td>6</td><td>2</td><td>1</td><td>15</td></tr>
       <tr><td><a href="#agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>0</td><td>10</td></tr>
-      <tr><td><a href="#cli">CLI &amp; configuration</a></td><td>7</td><td>1</td><td>3</td><td>0</td><td>11</td></tr>
+      <tr><td><a href="#cli">CLI &amp; configuration</a></td><td>8</td><td>1</td><td>3</td><td>0</td><td>12</td></tr>
       <tr><td><a href="#privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>0</td><td>3</td><td>3</td></tr>
       <tr><td><a href="#packaging">Packaging, installer, updates &amp; CI</a></td><td>2</td><td>1</td><td>0</td><td>2</td><td>5</td></tr>
-      <tr class="total"><td>Total</td><td>33</td><td>17</td><td>16</td><td>8</td><td>74</td></tr>
+      <tr class="total"><td>Total</td><td>33</td><td>17</td><td>16</td><td>9</td><td>75</td></tr>
     </tbody>
   </table>
 </div>
@@ -143,7 +143,6 @@
     <li data-type="feature"><span class="tag">Feature</span><span><b>Stale-summary notice.</b> When more than a threshold of the AI summaries (10% by default) is out of date or missing, every CLI query (on stderr) and every MCP tool result (at the end) carries a line recommending <code>graft build --deep</code>. Agents relay it under the savings tally as <code>⚠️ Run the 'graft build --deep' command — recommended (…)</code> and are told never to run the deep build unasked. <code>graft deep-threshold</code> shows, sets or resets the threshold (0–100).</span></li>
     <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft staleness [dir]</code></b> shows the share of out-of-date summaries, whether a deep build is due, and the worst files. Supports <code>--top</code>, <code>--no-refresh</code>, <code>--json</code> and a per-repo split in workspaces.</span></li>
     <li data-type="feature"><span class="tag">Feature</span><span><b>Fix the endpoint on the spot.</b> When the endpoint rejects the API key or can't be reached, including during a deep build, graft offers to change the endpoint URL and/or the key so the re-run works.</span></li>
-    <li data-type="feature"><span class="tag">Feature</span><span><b>Choose between a provider's endpoint and a custom URL.</b> If a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft asks which to use. It remembers the answer until the provider or URL changes, and also asks right after <code>graft api provider</code>.</span></li>
     <li data-type="improvement"><span class="tag">Improvement</span><span>Automatic connection and model fallbacks: the <code>/v1</code> path suffix is added or removed as needed, provider-prefixed model names are retried as bare IDs, and graft switches wire protocol when an endpoint rejects a request.</span></li>
     <li data-type="improvement"><span class="tag">Improvement</span><span>More reliable with models that are strict about tool calls. Models that refuse forced tool calls or can't turn reasoning off are handled on both the OpenAI and the Anthropic paths, and replies made of text and reasoning parts are accepted.</span></li>
     <li data-type="improvement"><span class="tag">Improvement</span><span>Failed <code>build --deep</code> runs end with a "How to fix it" block naming the setting to change (<code>GRAFT_BASE_URL</code>, <code>GRAFT_API_KEY</code>, <code>GRAFT_MODEL</code>) and listing available models. Workspace builds print it once for all child repos.</span></li>
@@ -154,6 +153,7 @@
     <li data-type="fix"><span class="tag">Bug fix</span><span><code>build --deep</code> discarded good results when a model echoed the whole target description back instead of the plain ID.</span></li>
     <li data-type="change"><span class="tag">Change</span><span>The default model is <code>claude-haiku-5-5</code> instead of <code>claude-sonnet-5-5</code> on every provider: <code>build --deep</code>, <code>graft init</code> (look-back, skill naming, PR review), help and examples. Model recommendations prefer Claude Haiku, then Claude Sonnet, then Gemini Flash, then GPT terra.</span></li>
     <li data-type="change"><span class="tag">Change</span><span>When no provider or base URL is configured, the Databricks AI Gateway is the default endpoint.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>The only endpoint URL graft suggests is the Databricks AI Gateway. Help, examples, "How to fix it" hints, URL prompts, the installer, the README and <code>.env.example</code> show it as the sample and never propose another provider's URL (OpenRouter, Groq, Ollama, Anthropic's API and so on). When a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft uses the custom URL without asking and without naming the provider's endpoint; a choice of the provider's endpoint saved earlier for the same URL is still honoured.</span></li>
   </ul>
 </section>
 

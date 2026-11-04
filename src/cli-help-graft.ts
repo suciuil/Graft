@@ -10,6 +10,7 @@
  */
 import type { Argument, Command, Help, Option } from "commander";
 import { choices, ENV_GROUPS, ENV_VARS } from "./env-cli.js";
+import { DATABRICKS_BASE_URL } from "./ai/llm/databricks.js";
 
 /**
  * The help entries of the environment-variable commands (`files store`, `refresh
@@ -78,8 +79,8 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   "api url": {
     description:
       "Show or change GRAFT_BASE_URL, the address of the LLM endpoint `graft build --deep` calls " +
-      "(any OpenAI-compatible API, or Anthropic's). Saved as a user environment variable, then checked against the endpoint.",
-    examples: ["graft api url", "graft api url https://my-gateway.example.com/v1"],
+      `(default: the Databricks AI Gateway, ${DATABRICKS_BASE_URL}). Saved as a user environment variable, then checked against the endpoint.`,
+    examples: ["graft api url", `graft api url ${DATABRICKS_BASE_URL}`],
   },
   ask: {
     description:

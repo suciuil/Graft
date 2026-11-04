@@ -631,11 +631,12 @@ function ConvertTo-EndpointKey([string]$Url) {
     return $u.TrimEnd('/').ToLowerInvariant()
 }
 
-# GRAFT_PROVIDER names a provider with its own endpoint while a different custom endpoint URL is set: use the choice
-# remembered for this provider + URL pair (GRAFT_ENDPOINT_CHOICE, shared with graft), else ask. Returns the URL object
-# to use; a choice just made rides along as its Pending settings, saved by Save-EndpointChoice once the endpoint
-# passed its check (a skip saves nothing). A Databricks gateway URL is never a conflict: graft ignores the provider there.
-function Resolve-EndpointConflict([string]$Provider, $Url, [bool]$CanPrompt) {
+# GRAFT_PROVIDER names a provider with its own endpoint while a different custom endpoint URL is set: the custom
+# endpoint is used, as graft does. The provider's own endpoint is never offered or suggested (the only endpoint ever
+# suggested is the Databricks AI Gateway); it is used only when GRAFT_ENDPOINT_CHOICE (shared with graft) already
+# records that choice for this provider + URL pair. A Databricks gateway URL is never a conflict: graft ignores the
+# provider there.
+function Resolve-EndpointConflict([string]$Provider, $Url) {
     if (-not (Get-LlmSetting 'GRAFT_PROVIDER') -or -not $Url -or $Url.Name -like 'default*') { return $Url }
     if (Get-DatabricksRoot $Url.Value) { return $Url }
     # openai and litellm name a wire format, not one service: a custom URL is how they are meant to be used
@@ -645,46 +646,10 @@ function Resolve-EndpointConflict([string]$Provider, $Url, [bool]$CanPrompt) {
     $custom = $Url.Value.Trim().TrimEnd('/')
 
     $parts = @("$(Get-LlmSetting 'GRAFT_ENDPOINT_CHOICE')" -split '\|')
-    if ($parts.Count -eq 3 -and $parts[0] -eq $Provider -and (ConvertTo-EndpointKey $parts[1]) -eq (ConvertTo-EndpointKey $custom)) {
-        if ($parts[2] -eq 'custom') { return $Url }
-        if ($parts[2] -eq 'provider') { return [pscustomobject]@{ Name = "default:the $Provider provider's own endpoint (your earlier choice)"; Value = $own } }
+    if ($parts.Count -eq 3 -and $parts[0] -eq $Provider -and $parts[2] -eq 'provider' -and (ConvertTo-EndpointKey $parts[1]) -eq (ConvertTo-EndpointKey $custom)) {
+        return [pscustomobject]@{ Name = "default:the $Provider provider's own endpoint (your earlier choice)"; Value = $own }
     }
-
-    if (-not $CanPrompt) {
-        Write-Warning "GRAFT_PROVIDER=$Provider has its own endpoint ($own), but a custom endpoint is set too: $custom ($(Format-Source $Url.Name))."
-        Write-Host "  graft uses the custom endpoint. To choose, run START-HERE-install-graft.cmd without -Yes (or 'graft api provider $Provider') in a terminal, or set"
-        Write-Host "  GRAFT_ENDPOINT_CHOICE to '$Provider|$custom|custom' (keep the custom endpoint) or '$Provider|$custom|provider' (use $own)."
-        return $Url
-    }
-    Write-Host ''
-    Write-Host 'The LLM provider and the endpoint URL point to different endpoints:'
-    Write-Host "  provider        : $Provider (from GRAFT_PROVIDER) - its own endpoint is $own"
-    Write-Host "  custom endpoint : $custom ($(Format-Source $Url.Name))"
-    Write-Host 'Which endpoint should graft use?'
-    Write-Host "  1. $custom  (the custom endpoint, spoken to in the $Provider wire format)"
-    Write-Host "  2. $own  (the $Provider provider's own endpoint)"
-    $pick = $null
-    while (-not $pick) {
-        $in = Read-Line '  Pick 1 or 2 (Enter = 1)'
-        if (-not $in -or $in -eq '1') { $pick = 'custom' }
-        elseif ($in -eq '2') { $pick = 'provider' }
-        else { Write-Host "  '$in' is not 1 or 2." }
-    }
-    $pending = [ordered]@{ GRAFT_ENDPOINT_CHOICE = "$Provider|$custom|$pick" }
-    if ($pick -eq 'custom') { return [pscustomobject]@{ Name = $Url.Name; Value = $Url.Value; Pending = $pending } }
-    # The provider's endpoint replaces the saved custom one, so graft and the installer agree on it
-    $pending['GRAFT_BASE_URL'] = $own
-    return [pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $own; Pending = $pending }
-}
-
-# Save the endpoint choice Resolve-EndpointConflict made (once the endpoint passed its check); each is saved once
-function Save-EndpointChoice($Url) {
-    if (-not $Url -or -not $Url.PSObject.Properties['Pending'] -or -not $Url.Pending) { return }
-    foreach ($name in @($Url.Pending.Keys)) {
-        if ((Get-LlmSetting $name) -cne $Url.Pending[$name]) { Save-LlmSetting $name $Url.Pending[$name] }
-    }
-    $Url.Pending = $null
-    Write-Host '  Saved the endpoint choice: asked again only when the provider or the endpoint URL changes.'
+    return $Url
 }
 
 # graft also tries a prefixed id (google/gemini-...) under its bare form, and on the Databricks gateway
@@ -805,7 +770,7 @@ function Read-LlmUrl([string]$Suggest) {
         }
         $uri = $null
         if (-not [Uri]::TryCreate($in, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -notin 'http', 'https') {
-            Write-Host "  '$in' is not a valid http(s) URL (expected e.g. https://my-gateway.example.com/v1)."
+            Write-Host "  '$in' is not a valid http(s) URL (expected e.g. $DatabricksBaseUrl)."
             continue
         }
         $in = $in.TrimEnd('/')
@@ -834,7 +799,7 @@ function Read-LlmAuthFix($Url, $Key, $Model, [string]$Provider, $Alt) {
             if (-not $in) { break }
             $uri = $null
             if (-not [Uri]::TryCreate($in, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -notin 'http', 'https') {
-                Write-Host "  '$in' is not a valid http(s) URL (expected e.g. https://my-gateway.example.com/v1)."
+                Write-Host "  '$in' is not a valid http(s) URL (expected e.g. $DatabricksBaseUrl)."
                 continue
             }
             $newUrl = $in.TrimEnd('/')
@@ -850,8 +815,8 @@ function Read-LlmAuthFix($Url, $Key, $Model, [string]$Provider, $Alt) {
         if (-not $newUrl -and -not $newKey) { Write-Host '  Nothing changed: the endpoint URL and API key stay as they are.'; return $null }
 
         if ($newUrl) {
-            # A typed URL can disagree with GRAFT_PROVIDER just as a saved one can: ask which one, as graft does
-            $Url = Resolve-EndpointConflict $Provider ([pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $newUrl }) $true
+            # A typed URL can disagree with GRAFT_PROVIDER just as a saved one can: settle it as graft does
+            $Url = Resolve-EndpointConflict $Provider ([pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $newUrl })
             # An earlier choice of the provider's endpoint for this URL: that endpoint replaces the saved URL, as graft does
             if ($Url.Name -like 'default*') { $Url = [pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $Url.Value } }
             $Model = Resolve-LlmModel $Url.Value $Provider
@@ -860,8 +825,7 @@ function Read-LlmAuthFix($Url, $Key, $Model, [string]$Provider, $Alt) {
             $Key = $newKey
             # Keep the endpoint the user just kept: pin it in GRAFT_BASE_URL, which wins over every other URL
             if ($legacyKey -and -not $newUrl -and $Url.Name -ne 'GRAFT_BASE_URL') {
-                $pending = if ($Url.PSObject.Properties['Pending']) { $Url.Pending } else { $null }
-                $Url = [pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $Url.Value; Pending = $pending }
+                $Url = [pscustomobject]@{ Name = 'GRAFT_BASE_URL'; Value = $Url.Value }
                 Write-Host "  (GRAFT_BASE_URL = $($Url.Value) is saved too: with the key in $($Key.Name), graft would otherwise send it elsewhere.)"
             }
         }
@@ -881,7 +845,6 @@ function Read-LlmAuthFix($Url, $Key, $Model, [string]$Provider, $Alt) {
         }
         if ($Url.Name -eq 'GRAFT_BASE_URL' -and (Get-LlmSetting 'GRAFT_BASE_URL') -cne $Url.Value) { Save-LlmSetting 'GRAFT_BASE_URL' $Url.Value }
         if ($Key -and (Get-LlmSetting $Key.Name) -cne $Key.Value) { Save-LlmSetting $Key.Name $Key.Value }
-        Save-EndpointChoice $Url
         if ($access.State -ne 'ok') { Write-Host '  Could not verify these values against the endpoint; saved anyway.' }
         else { Write-Host "  $($Url.Value) accepts the key." }
         return [pscustomobject]@{ Url = $Url; Key = $Key; Model = $Model; Access = $access }
@@ -936,8 +899,7 @@ function Invoke-LlmSetup {
     $target = Resolve-LlmTarget
     $provider = $target.Provider
     $script:LlmProvider = $provider
-    # -Yes runs unattended: a working setup is never stopped by the endpoint question (the warning says how to choose)
-    $url = Resolve-EndpointConflict $provider $target.Url ($canPrompt -and -not $Yes)
+    $url = Resolve-EndpointConflict $provider $target.Url
     # The other configured URLs graft would reach if the first were unset, then the Databricks gateway as the fallback
     $fallback = [pscustomobject]@{ Name = $DatabricksSource; Value = $DatabricksBaseUrl }
     $candidates = @(@($target.Candidates) + @($fallback) | Where-Object { -not $url -or (Get-UrlKey $_.Value) -ne (Get-UrlKey $url.Value) })
@@ -1008,8 +970,6 @@ function Invoke-LlmSetup {
             }
         }
         $keyState = switch ($access.State) { 'ok' { 'ok' } 'auth' { 'rejected' } default { 'unverified' } }
-        # The endpoint picked above answered without refusing the key: remember the choice (a skip saved nothing)
-        if ($access.State -in 'ok', 'unknown') { Save-EndpointChoice $url }
 
         if ($keyState -eq 'ok') {
             $modelState = $access.ModelState
