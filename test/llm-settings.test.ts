@@ -169,18 +169,19 @@ test("set a rejected key in a terminal: asks for the URL and the key again until
   assert.equal(d.store.read("GRAFT_API_KEY"), "sk-good-123456789");
 });
 
-test("set a URL while GRAFT_PROVIDER has its own endpoint: asks which one to use", async () => {
-  const prompt = scripted(["2"]);
+test("set a URL while GRAFT_PROVIDER has its own endpoint: the URL is saved as given, nothing is asked", async () => {
+  const prompt = scripted([]);
   const d = deps({ env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "k" }, prompt });
   assert.equal(await runSettingCommand("url", "https://gw.example/v1", {}, d), 0);
-  assert.match(prompt.asked.join("\n"), /Pick 1 or 2/);
-  assert.equal(d.store.read("GRAFT_BASE_URL"), "https://api.anthropic.com");
-  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), "anthropic|https://gw.example/v1|provider");
+  assert.equal(prompt.asked.length, 0);
+  assert.doesNotMatch(d.lines.join("\n"), /api\.anthropic\.com/, "the provider's own endpoint is never suggested");
+  assert.equal(d.store.read("GRAFT_BASE_URL"), "https://gw.example/v1");
+  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), undefined);
 });
 
-test("set a URL, pick the provider's endpoint, then type another URL in the recovery: the typed one stays saved", async () => {
+test("set a URL the endpoint rejects, then type another URL in the recovery: the typed one is saved", async () => {
   const other = "https://other.example/v1";
-  const prompt = scripted(["2", other, "", "1"]);
+  const prompt = scripted([other, ""]);
   const d = deps({
     env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "sk-good-123456789" },
     prompt,
@@ -190,8 +191,8 @@ test("set a URL, pick the provider's endpoint, then type another URL in the reco
     checkAuth: async (cfg) => (cfg.baseUrl === other ? { status: "ok" } : { status: "rejected", message: "401 invalid x-api-key" }),
   });
   assert.equal(await runSettingCommand("url", "https://gw.example/v1", {}, d), 0);
-  assert.equal(d.store.read("GRAFT_BASE_URL"), other, "not overwritten by the provider's endpoint picked first");
-  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), `anthropic|${other}|custom`);
+  assert.equal(d.store.read("GRAFT_BASE_URL"), other);
+  assert.equal(d.store.read("GRAFT_ENDPOINT_CHOICE"), undefined);
 });
 
 test("set a model, fix the key in a terminal: the model is then checked against the endpoint that passed", async () => {

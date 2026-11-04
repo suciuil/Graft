@@ -35,7 +35,7 @@ import {
   type SettingKind,
 } from "./llm-hints.js";
 import { bareModelFallbacks } from "./llm/factory.js";
-import { databricksTokenHint } from "./llm/databricks.js";
+import { DATABRICKS_BASE_URL, databricksTokenHint } from "./llm/databricks.js";
 import {
   candidateEfforts,
   describeEffort,
@@ -65,9 +65,10 @@ export interface UserEnvStore {
 }
 
 /**
- * Remembers which endpoint the user picked when GRAFT_PROVIDER names a provider
- * with its own endpoint while a custom endpoint URL is set too (src/ai/llm-auth.ts):
- * `<provider>|<custom url>|custom` or `…|provider`. Asked again once either changes.
+ * An endpoint choice recorded earlier for a provider with its own endpoint while a
+ * custom endpoint URL is set too (src/ai/llm-auth.ts): `<provider>|<custom url>|custom`
+ * or `…|provider`. Still honoured; graft no longer asks, and never offers the
+ * provider's own endpoint.
  */
 export const ENDPOINT_CHOICE_ENV = "GRAFT_ENDPOINT_CHOICE";
 
@@ -425,7 +426,7 @@ function validate(kind: SettingKind, value: string): string | null {
       const u = new URL(value);
       if (u.protocol !== "http:" && u.protocol !== "https:") return `"${value}" is not an http(s) URL`;
     } catch {
-      return `"${value}" is not a valid URL (expected e.g. https://my-gateway.example.com/v1)`;
+      return `"${value}" is not a valid URL (expected e.g. ${DATABRICKS_BASE_URL})`;
     }
   }
   return null;
@@ -494,7 +495,7 @@ async function promptFor(kind: SettingKind, deps: SettingDeps, prompt: Prompter)
     return v || undefined;
   }
   if (kind === "url") {
-    const v = (await prompt.ask("New base URL, e.g. https://my-gateway.example.com/v1 (Enter keeps the current one): ")).trim();
+    const v = (await prompt.ask(`New base URL, e.g. ${DATABRICKS_BASE_URL} (Enter keeps the current one): `)).trim();
     return v || undefined;
   }
   const cfg = resolveConfig(deps.config, effectiveEnv(deps));

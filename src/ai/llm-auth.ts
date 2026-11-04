@@ -3,15 +3,15 @@
  * behalf (`graft build --deep`, `graft api url|key|model`, `graft api provider`):
  *
  *   1. Endpoint choice. GRAFT_PROVIDER (or --provider) can name a provider that has
- *      one fixed endpoint of its own (anthropic → https://api.anthropic.com,
- *      orcarouter → its gateway) while a custom endpoint URL is set as well
- *      (GRAFT_BASE_URL, ANTHROPIC_BASE_URL, --base-url, …). `openai` and `litellm`
- *      only name a wire format, so a custom URL is never a conflict there. Graft never picks one
- *      silently: in a terminal it asks which to use, and remembers the answer for
- *      that provider + URL pair (GRAFT_ENDPOINT_CHOICE) once the endpoint passes its
- *      check, asking again once either changes. Without a terminal it says which
- *      one it uses and how to choose. A Databricks gateway URL is never a conflict:
- *      graft speaks each of its routes' own wire format whatever the provider says.
+ *      one fixed endpoint of its own (anthropic, orcarouter) while a custom endpoint
+ *      URL is set as well (GRAFT_BASE_URL, ANTHROPIC_BASE_URL, --base-url, …).
+ *      `openai` and `litellm` only name a wire format, so a custom URL is never a
+ *      conflict there. Graft uses the custom endpoint and never offers or suggests
+ *      the provider's own one (the only endpoint graft suggests is the Databricks
+ *      AI Gateway); a choice of the provider's endpoint already recorded in
+ *      GRAFT_ENDPOINT_CHOICE for that provider + URL pair is still honoured. A
+ *      Databricks gateway URL is never a conflict: graft speaks each of its
+ *      routes' own wire format whatever the provider says.
  *
  *   2. Auth recovery. When the endpoint rejects the key, cannot be reached, or no
  *      key (or no URL) is set, graft asks for both the endpoint URL and the API key
@@ -141,8 +141,8 @@ function customUrlOf(config: EngineConfig, env: NodeJS.ProcessEnv): { url: strin
 
 /**
  * Providers that stand for one service with one endpoint. `openai` and `litellm`
- * name a wire format instead: GRAFT_BASE_URL pointing them at OpenRouter, Groq, a
- * LiteLLM proxy… is how they are meant to be used (README), not a conflict.
+ * name a wire format instead: GRAFT_BASE_URL pointing them at a gateway is how
+ * they are meant to be used, not a conflict.
  */
 const FIXED_ENDPOINT_PROVIDERS: ReadonlySet<string> = new Set<ProviderKind>(["anthropic", "orcarouter"]);
 
@@ -202,13 +202,13 @@ export interface EndpointResult {
   saves: Record<string, string>;
 }
 
-/** Conflicts already announced in this process (without a terminal): said once, not before every call. */
-const announced = new Set<string>();
-
 /**
- * Settle a provider-endpoint vs custom-endpoint conflict: the remembered choice
- * for this pair, else ask (in a terminal), else announce that the custom
- * endpoint is used. `changes` point this run at the chosen endpoint.
+ * Settle a provider-endpoint vs custom-endpoint conflict: the custom endpoint is
+ * used, unless {@link ENDPOINT_CHOICE_ENV} already records that the provider's own
+ * endpoint was chosen for this pair. The provider's own endpoint is never offered
+ * or suggested: the only endpoint graft ever suggests is the Databricks AI
+ * Gateway. Nothing is asked and nothing is saved (`saves` stays empty); `changes`
+ * point this run at the endpoint in use.
  */
 export async function resolveEndpointConflict(
   deps: LlmGuardDeps,
@@ -217,56 +217,8 @@ export async function resolveEndpointConflict(
   const { config, env } = current(deps, base);
   const c = endpointConflict(config, env);
   if (!c) return { changes: noChanges(), saves: {} };
-
-  const remembered = rememberedPick(c, env);
-  if (remembered) return { changes: useUrl(c, remembered === "custom" ? c.customUrl : c.providerUrl), saves: {} };
-
-  const providerLine = `${c.providerFrom}=${c.provider}`;
-  if (!deps.prompt) {
-    const key = endpointChoiceValue(c, "custom");
-    if (!announced.has(key)) {
-      announced.add(key);
-      deps.err(
-        `⚠ ${providerLine} has its own endpoint (${c.providerUrl}), but a custom endpoint is set too: ${c.customUrl} (from ${c.urlFrom}).`,
-      );
-      deps.err(
-        `  Using the custom endpoint. To choose (and stop this warning), run this command once in a terminal, or set ${ENDPOINT_CHOICE_ENV}=${key} ` +
-          `(keep the custom endpoint) or ${ENDPOINT_CHOICE_ENV}=${endpointChoiceValue(c, "provider")} (use ${c.providerUrl}).`,
-      );
-    }
-    return { changes: useUrl(c, c.customUrl), saves: {} };
-  }
-
-  deps.out("");
-  deps.out("The LLM provider and the endpoint URL point to different endpoints:");
-  deps.out(`  provider:         ${c.provider} (from ${c.providerFrom}) — its own endpoint is ${c.providerUrl}`);
-  deps.out(`  custom endpoint:  ${c.customUrl} (from ${c.urlFrom})`);
-  deps.out("Which endpoint should graft use?");
-  deps.out(`  1. ${c.customUrl}  (the custom endpoint, spoken to in the ${c.provider} wire format)`);
-  deps.out(`  2. ${c.providerUrl}  (the ${c.provider} provider's own endpoint)`);
-  let pick: EndpointPick | undefined;
-  while (!pick) {
-    let answer: string;
-    try {
-      answer = (await deps.prompt.ask("Pick 1 or 2 (Enter = 1): ")).trim();
-    } catch (err) {
-      if (err instanceof PromptCancelled) return { cancelled: true };
-      throw err;
-    }
-    if (answer === "" || answer === "1") pick = "custom";
-    else if (answer === "2") pick = "provider";
-    else deps.err(`✗ "${answer}" is not 1 or 2.`);
-  }
-
-  const url = pick === "custom" ? c.customUrl : c.providerUrl;
-  const saves: Record<string, string> = { [ENDPOINT_CHOICE_ENV]: endpointChoiceValue(c, pick) };
-  // The provider's endpoint replaces the saved custom one, so every graft (and the installer) agrees on it.
-  if (pick === "provider" && c.urlFrom !== "--base-url") saves.GRAFT_BASE_URL = url;
-  deps.out(`✓ graft uses ${url}.`);
-  if (pick === "provider" && c.urlFrom !== "--base-url" && c.urlFrom !== "GRAFT_BASE_URL") {
-    deps.out(`  (${c.urlFrom} is still set; GRAFT_BASE_URL = ${url} takes precedence over it.)`);
-  }
-  return { changes: useUrl(c, url), saves };
+  const url = rememberedPick(c, env) === "provider" ? c.providerUrl : c.customUrl;
+  return { changes: useUrl(c, url), saves: {} };
 }
 
 /** Save the settings {@link resolveEndpointConflict} returned, once the chosen endpoint passed its check. */

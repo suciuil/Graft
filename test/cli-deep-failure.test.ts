@@ -198,5 +198,6 @@ test("hints: an unreachable endpoint names GRAFT_BASE_URL", async () => {
   const r = await runBuild(repo(3), url);
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, new RegExp(`${url.replace(/[.]/g, "\\.")} could not be reached \\(from --base-url\\)`));
-  assert.match(r.stderr, /GRAFT_BASE_URL\s*=\s*"https:\/\/<your-llm-endpoint>\/v1"/);
+  // The only endpoint graft suggests is the Databricks AI Gateway.
+  assert.match(r.stderr, /GRAFT_BASE_URL\s*=\s*"https:\/\/dbc-[^"]*\.cloud\.databricks\.com"/);
 });

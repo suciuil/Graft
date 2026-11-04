@@ -78,39 +78,22 @@ test("conflict: openai and litellm name a wire format, so a custom URL is never 
   assert.equal(endpointConflict({}, { GRAFT_PROVIDER: "litellm", GRAFT_BASE_URL: "http://proxy.corp:4000" }), undefined);
 });
 
-test("conflict: asks which endpoint, saves the choice once committed, and does not ask again for the same pair", async () => {
+test("conflict: the custom endpoint is used without asking, naming the provider's endpoint, or saving anything", async () => {
   const store = memoryStore({ GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: CUSTOM });
-  const prompt = scripted(["2"]);
+  const prompt = scripted([]);
   const d = deps({ store, prompt });
   const r = await resolveEndpointConflict(d);
   assert.ok(!("cancelled" in r));
-  assert.equal(r.changes.env.GRAFT_BASE_URL, "https://api.anthropic.com");
-  assert.equal(store.vars.get("GRAFT_BASE_URL"), CUSTOM, "nothing is saved before the endpoint passed its check");
-  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), undefined);
+  assert.equal(r.changes.env.GRAFT_BASE_URL, CUSTOM);
+  assert.deepEqual(r.saves, {});
+  assert.equal(prompt.asked.length, 0, "nothing is asked");
+  assert.equal(d.lines.length, 0, "nothing is printed");
   commitEndpointChoice(d, r.saves);
-  assert.equal(store.vars.get("GRAFT_BASE_URL"), "https://api.anthropic.com", "the provider's endpoint replaces the saved custom one");
-  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), `anthropic|${CUSTOM}|provider`);
-  assert.equal(prompt.asked.length, 1);
-
-  // Choosing the custom endpoint is remembered as well: no second question.
-  const store2 = memoryStore({ GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: CUSTOM });
-  const d2 = deps({ store: store2, prompt: scripted([""]) });
-  const r1 = await resolveEndpointConflict(d2);
-  assert.ok(!("cancelled" in r1));
-  commitEndpointChoice(d2, r1.saves);
-  assert.equal(store2.vars.get(ENDPOINT_CHOICE_ENV), `anthropic|${CUSTOM}|custom`);
-  const again = scripted([]);
-  const r2 = await resolveEndpointConflict(deps({ store: store2, prompt: again }));
-  assert.equal(again.asked.length, 0);
-  assert.ok(!("cancelled" in r2) && r2.changes.env.GRAFT_BASE_URL === CUSTOM);
-
-  // A different URL is a new pair: asked again.
-  const changed = scripted(["1"]);
-  await resolveEndpointConflict(deps({ store: store2, env: { GRAFT_BASE_URL: "https://other.example.com" }, prompt: changed }));
-  assert.equal(changed.asked.length, 1);
+  assert.equal(store.vars.get("GRAFT_BASE_URL"), CUSTOM);
+  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), undefined);
 });
 
-test("conflict without a terminal: says which endpoint is used, how to choose, saves nothing, and says it once", async () => {
+test("conflict without a terminal: the custom endpoint is used, silently", async () => {
   const store = memoryStore();
   const env = { GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: "https://once.example.com/v1" };
   const d = deps({ store, env });
@@ -118,13 +101,17 @@ test("conflict without a terminal: says which endpoint is used, how to choose, s
   assert.ok(!("cancelled" in r) && r.changes.env.GRAFT_BASE_URL === env.GRAFT_BASE_URL);
   assert.deepEqual(r.saves, {});
   assert.equal(store.vars.size, 0);
-  const text = d.lines.join("\n");
-  assert.match(text, /Using the custom endpoint/);
-  assert.match(text, /run this command once in a terminal/);
-  assert.ok(text.includes(`${ENDPOINT_CHOICE_ENV}=anthropic|https://once.example.com/v1|custom`));
-  const d2 = deps({ store, env });
-  await resolveEndpointConflict(d2);
-  assert.equal(d2.lines.length, 0, "not repeated before every call of the same process");
+  assert.equal(d.lines.length, 0);
+  assert.ok(!d.lines.join("\n").includes("api.anthropic.com"), "the provider's own endpoint is never named");
+});
+
+test("conflict: a recorded choice of the provider's own endpoint for the same pair is still honoured", async () => {
+  const env = { GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: CUSTOM, [ENDPOINT_CHOICE_ENV]: `anthropic|${CUSTOM}|provider` };
+  const r = await resolveEndpointConflict(deps({ env }));
+  assert.ok(!("cancelled" in r) && r.changes.env.GRAFT_BASE_URL === "https://api.anthropic.com");
+  // A different URL is a new pair: the custom endpoint is used.
+  const other = await resolveEndpointConflict(deps({ env: { ...env, GRAFT_BASE_URL: "https://other.example.com" } }));
+  assert.ok(!("cancelled" in other) && other.changes.env.GRAFT_BASE_URL === "https://other.example.com");
 });
 
 test("conflict: a Databricks gateway URL is never one (graft ignores the provider there)", () => {
@@ -140,7 +127,7 @@ test("conflict: a skip during the recovery saves no endpoint choice", async () =
     deps({
       store,
       env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "sk-bad-1234567890" },
-      prompt: scripted(["https://typed.example.com", "", "2", "s"]),
+      prompt: scripted(["https://typed.example.com", "", "s"]),
       check: gate("x", "y"),
     }),
   );
@@ -148,13 +135,13 @@ test("conflict: a skip during the recovery saves no endpoint choice", async () =
   assert.equal(store.vars.size, 0);
 });
 
-test("conflict from --base-url: the choice replaces the flag for this run only", async () => {
+test("conflict from --base-url: the flag's URL is used for this run, nothing is saved", async () => {
   const store = memoryStore();
-  const r = await resolveEndpointConflict(
-    deps({ store, config: { provider: "anthropic", baseUrl: CUSTOM }, prompt: scripted(["2"]) }),
-  );
+  const prompt = scripted([]);
+  const r = await resolveEndpointConflict(deps({ store, config: { provider: "anthropic", baseUrl: CUSTOM }, prompt }));
   assert.ok(!("cancelled" in r));
-  assert.equal(r.changes.config.baseUrl, "https://api.anthropic.com");
+  assert.equal(r.changes.config.baseUrl, CUSTOM);
+  assert.equal(prompt.asked.length, 0);
   assert.equal(store.vars.get("GRAFT_BASE_URL"), undefined);
 });
 
@@ -297,21 +284,23 @@ test("recovery: a key from ANTHROPIC_AUTH_TOKEN is replaced there, keeping its B
   assert.equal(store.vars.get("GRAFT_API_KEY"), undefined);
 });
 
-test("recovery: a typed URL that disagrees with the provider asks which endpoint to use", async () => {
+test("recovery: a typed URL that disagrees with the provider is used as typed, without a question", async () => {
   const store = memoryStore();
-  const prompt = scripted(["https://typed.example.com", "", "2"]);
+  const typed = "https://typed.example.com";
+  const prompt = scripted([typed, ""]);
   const r = await ensureLlmAuth(
     deps({
       store,
       env: { GRAFT_PROVIDER: "anthropic", GRAFT_API_KEY: "sk-good-123456789" },
       prompt,
-      // The first check fails (the gate wants an explicit URL), so the URL is asked for.
-      check: gate("https://api.anthropic.com", "sk-good-123456789"),
+      // The first check fails (the gate wants the typed URL), so the URL is asked for.
+      check: gate(typed, "sk-good-123456789"),
     }),
   );
   assert.equal(r.status, "ok");
-  assert.equal(store.vars.get("GRAFT_BASE_URL"), "https://api.anthropic.com");
-  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), "anthropic|https://typed.example.com|provider");
+  assert.equal(prompt.asked.length, 2, "only the URL and the key are asked");
+  assert.equal(store.vars.get("GRAFT_BASE_URL"), typed);
+  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), undefined);
 });
 
 test("checkLlmAuth: no endpoint URL and a provider without one → no-url, nothing is sent", async () => {
@@ -401,14 +390,14 @@ test("recovery: a URL typed meanwhile replaces the caller's endpoint choice inst
     deps({
       store,
       env: { GRAFT_PROVIDER: "anthropic", GRAFT_BASE_URL: "https://api.anthropic.com", GRAFT_API_KEY: "sk-good-123456789" },
-      prompt: scripted([other, "", "1"]),
+      prompt: scripted([other, ""]),
       check: gate(other, "sk-good-123456789"),
     }),
     { pendingSaves },
   );
   assert.equal(r.status, "ok");
   assert.equal(store.vars.get("GRAFT_BASE_URL"), other);
-  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), `anthropic|${other}|custom`);
+  assert.equal(store.vars.get(ENDPOINT_CHOICE_ENV), undefined, "the caller's choice for the old URL is not saved");
 });
 
 test("checkLlmAuth on Databricks: the caller's failed listing of every route is judged, not repeated", async () => {
