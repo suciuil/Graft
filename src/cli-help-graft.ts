@@ -57,6 +57,16 @@ const QUERY: GlobalGroup[] = ["dir", "agent-model"];
 
 /** Keyed by the command path without the program name (`api key`). */
 export const GRAFT_HELP: Record<string, CommandHelp> = {
+  about: {
+    description:
+      "Find information about graft. Without a target it prints what graft is for, the project homepage " +
+      "(https://github.com/trailhq/Trail-Code) and the path of the fork report (docs/fork-report.html, shipped " +
+      "with this build), which lists every change this fork makes that upstream does not have. " +
+      "`graft about home` opens the homepage in your browser; `graft about fork` opens the fork report. " +
+      "The addresses are also printed, in case no browser opens (or GRAFT_NO_BROWSER is set). " +
+      "Nothing is sent: it only opens a page. `graft info` is the same command.",
+    examples: ["graft about", "graft about home", "graft about fork"],
+  },
   "api key": {
     description:
       "Show or change GRAFT_API_KEY, the API key `graft build --deep` sends to the LLM endpoint. " +

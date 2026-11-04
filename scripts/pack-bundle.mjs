@@ -32,7 +32,8 @@
  *                 refused when either is older than its sources
  *
  * On Windows it also writes graft-<version>-win-<arch>.zip, the offline installer kit:
- * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1 and the latest LTS node-vX.Y.Z-win-<arch>.zip,
+ * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/fork-report.html (as
+ * fork-report.html, which the installer shows and offers to open) and the latest LTS node-vX.Y.Z-win-<arch>.zip,
  * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
  * there). Offline, it falls back to the newest such zip already in the repo root. The
  * standalone tarball is then deleted, together with kits and tarballs left by earlier
@@ -167,7 +168,8 @@ const keyToPkg = extract.optionalGrammarPackages();
 rmSync(stagingDir, { recursive: true, force: true });
 mkdirSync(stagingDir, { recursive: true });
 
-for (const entry of ["dist", "scripts", "README.md", "LICENSE"]) {
+// docs/fork-report.html rides along so `graft about fork` can open it after install.
+for (const entry of ["dist", "scripts", "README.md", "LICENSE", join("docs", "fork-report.html")]) {
   const from = join(repoRoot, entry);
   if (existsSync(from)) cpSync(from, join(stagingDir, entry), { recursive: true });
 }
@@ -216,7 +218,7 @@ delete staged.optionalDependencies;
 delete staged.devDependencies;
 delete staged.allowScripts;
 staged.scripts = pkg.scripts?.postinstall ? { postinstall: pkg.scripts.postinstall } : {};
-staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE"];
+staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE", "docs/fork-report.html"];
 writeFileSync(join(stagingDir, "package.json"), `${JSON.stringify(staged, null, 2)}\n`);
 
 // The 19 optional grammars are in `vendor/` by now, but `dependencies` — tree-sitter
@@ -445,6 +447,8 @@ if (kitName) {
   try {
     cpSync(join(repoRoot, nodeZipSource), join(kitDir, nodeZipName));
     for (const f of [finalName, "install-graft-helper.ps1", "START-HERE-install-graft.cmd"]) cpSync(join(repoRoot, f), join(kitDir, f));
+    // The installer shows (and offers to open) this fork's report of its changes, looked up next to itself
+    cpSync(join(repoRoot, "docs", "fork-report.html"), join(kitDir, "fork-report.html"));
     const zipped = spawnSync(
       "powershell.exe",
       [
@@ -466,7 +470,7 @@ if (kitName) {
   rmSync(join(repoRoot, finalName), { force: true });
   removeStaleArtifacts(kitName);
   const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
-  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd`);
+  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, fork-report.html`);
 }
 
 if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);
