@@ -159,8 +159,23 @@ function loadSqlite(): SqliteModule | null {
  * Case is folded because Windows paths are case-insensitive and the two
  * processes need not agree on the drive letter's case.
  */
-function normalizeDir(dir: string): string {
+export function normalizeDir(dir: string): string {
   return dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * When the database was last written to, as the newer mtime of the main file and
+ * its write-ahead log. A missing `-wal` (a checkpointed or non-WAL database) is
+ * not an error; a missing main file is, and throws.
+ */
+function dbLastWritten(path: string): number {
+  let newest = statSync(path).mtimeMs;
+  try {
+    newest = Math.max(newest, statSync(`${path}-wal`).mtimeMs);
+  } catch {
+    /* no WAL beside it */
+  }
+  return newest;
 }
 
 /**
@@ -168,7 +183,7 @@ function normalizeDir(dir: string): string {
  * stores the resolved path, so `D:\!stuff\repo` behind a junction must also
  * match the row Kilo wrote as `D:/OneDrive/_D/!stuff/repo`.
  */
-function dirKeys(dir: string): Set<string> {
+export function dirKeys(dir: string): Set<string> {
   const keys = new Set([normalizeDir(dir)]);
   try {
     keys.add(normalizeDir(realpathSync.native(dir)));
@@ -281,8 +296,13 @@ export function kiloSessionModel(
   // The whole-file mtime is a cheap pre-filter: if Kilo has not written to the
   // database at all within the window, no row inside it can be recent either,
   // and we skip opening it.
+  //
+  // Kilo runs the database in WAL mode, where a write lands in `kilo.db-wal` and
+  // only reaches `kilo.db` at a checkpoint (roughly every few MB of writes). The
+  // main file's mtime can therefore be hours old while the session being served
+  // was updated seconds ago, so the newer of the two files decides.
   try {
-    if (now - statSync(path).mtimeMs > maxAge) return null;
+    if (now - dbLastWritten(path) > maxAge) return null;
   } catch {
     return null;
   }

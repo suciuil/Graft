@@ -32,10 +32,11 @@
  *                 refused when either is older than its sources
  *
  * On Windows it also writes graft-<version>-win-<arch>.zip, the offline installer kit:
- * the tarball, install-graft.ps1/.cmd and the latest LTS node-vX.Y.Z-win-<arch>.zip,
+ * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1 and the latest LTS node-vX.Y.Z-win-<arch>.zip,
  * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
  * there). Offline, it falls back to the newest such zip already in the repo root. The
- * standalone tarball is then deleted: the kit is the only artifact left.
+ * standalone tarball is then deleted, together with kits and tarballs left by earlier
+ * packs (any version): the new kit is the only artifact left.
  *
  * Either way vendor/ is re-staged from the sibling repos' prebuilds (build:vendor) and
  * verified byte-for-byte against them before packing, so the tarball cannot carry
@@ -347,7 +348,7 @@ if (unprebuilt.length > 0) {
   for (const u of unprebuilt) console.log(`    ${u}`);
 }
 
-// Same pattern and minimum major (20) as $OfflineNodeRegex / $MinNodeMajor in install-graft.ps1.
+// Same pattern and minimum major (20) as $OfflineNodeRegex / $MinNodeMajor in install-graft-helper.ps1.
 const nodeZipRe = new RegExp(`^node-v(\\d+)\\.(\\d+)\\.(\\d+)-win-${process.arch}(.*)\\.zip$`, "i");
 const cmpVersion = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 const localNodeZips = () =>
@@ -363,6 +364,30 @@ function removeOlderNodeZips(keep) {
     if (cmpVersion(v, keepVersion) >= 0) continue;
     rmSync(join(repoRoot, name), { force: true });
     console.log(`• removed older ${name}`);
+  }
+}
+
+/**
+ * Removes earlier pack outputs from the repo root once `keep` (the kit just written) is
+ * there: every other graft-X.Y.Z-win-<arch>*.zip kit, and every
+ * <pkg>-X.Y.Z-win32-<arch>*.tgz/.zip tarball, whatever its version — the current one is
+ * inside `keep`. The trailing (.*) also catches "- Copy" / " (1)" duplicates, as the
+ * installer's own patterns do.
+ */
+function removeStaleArtifacts(keep) {
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ver = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
+  const kitRe = new RegExp(`^graft-${ver}-win-${escape(process.arch)}(.*)\\.zip$`, "i");
+  const pkgPrefix = escape(pkg.name.replace(/^@/, "").replace(/\//g, "-"));
+  const tarballRe = new RegExp(`^${pkgPrefix}-${ver}-${escape(PLATFORM)}(.*)\\.(?:tgz|zip)$`, "i");
+  for (const name of readdirSync(repoRoot)) {
+    if (name === keep || !(kitRe.test(name) || tarballRe.test(name))) continue;
+    try {
+      rmSync(join(repoRoot, name), { force: true });
+      console.log(`• removed previous ${name}`);
+    } catch (err) {
+      console.warn(`! could not remove previous ${name} (${err.message})`);
+    }
   }
 }
 
@@ -419,7 +444,7 @@ if (kitName) {
   const kitDir = mkdtempSync(join(tmpdir(), "graft-kit-"));
   try {
     cpSync(join(repoRoot, nodeZipSource), join(kitDir, nodeZipName));
-    for (const f of [finalName, "install-graft.ps1", "install-graft.cmd"]) cpSync(join(repoRoot, f), join(kitDir, f));
+    for (const f of [finalName, "install-graft-helper.ps1", "START-HERE-install-graft.cmd"]) cpSync(join(repoRoot, f), join(kitDir, f));
     const zipped = spawnSync(
       "powershell.exe",
       [
@@ -435,12 +460,16 @@ if (kitName) {
   } finally {
     rmSync(kitDir, { recursive: true, force: true });
   }
+  // The kit now carries the tarball, so the standalone copy goes, and with it any
+  // tarballs and kits left by earlier packs (another version, a "- Copy" duplicate):
+  // the new kit is the only artifact left in the repo root.
   rmSync(join(repoRoot, finalName), { force: true });
+  removeStaleArtifacts(kitName);
   const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
-  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft.ps1, install-graft.cmd`);
+  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd`);
 }
 
-if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and run install-graft.cmd, or from the unzipped folder:`);
+if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);
 else console.log(`\n  Install on another ${PLATFORM} machine with:`);
 console.log(`    npm i -g ./${finalName} --ignore-scripts\n`);
 console.log("  (--ignore-scripts: every binding in here is prebuilt, so nothing compiles on the\n   target. Without it npm 12 warns about unapproved install scripts, then installs anyway.)\n");

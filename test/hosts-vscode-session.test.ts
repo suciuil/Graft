@@ -15,7 +15,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, writeFileSync, utimesSync, symlinkSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -247,4 +247,96 @@ test('the registry does not read Kilo\'s database for a non-Kilo client', () => 
   // server is spawned by the client that just named itself.
   const home = tmpRepo('vsc-kilo-gate');
   assert.equal(hostModelFor(join(home, 'repo'), { home, env: {}, mcpClient: 'Cursor' }), null);
+});
+
+// ── Claude Opus / Sonnet 5.5 at every reasoning effort ────────────────────
+
+/** A chat log as VS Code writes it for a request that has run: the picker id
+ * with its `copilot/` route, the model that actually answered, and the reasoning
+ * effort chosen in the picker. */
+function effortLog(modelId: string, resolved: string | null, effort: string): string {
+  const req = { requestId: 'r1', modelId, ...(resolved ? { resolvedModel: resolved } : {}) };
+  return `${JSON.stringify({
+    kind: 0,
+    v: {
+      requests: [req],
+      inputState: { selectedModel: { identifier: modelId } },
+      modelConfiguration: { reasoningEffort: effort },
+    },
+  })}\n`;
+}
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+for (const [picked, resolved] of [
+  ['copilot/claude-opus-5.5', 'claude-opus-5-5'],
+  ['copilot/claude-sonnet-5.5', 'claude-sonnet-5-5'],
+] as const) {
+  test(`${resolved} is named at every reasoning effort; the effort never changes the model`, () => {
+    for (const effort of EFFORTS) {
+      const home = tmpRepo(`vsc-effort-${effort}`);
+      const repo = join(home, 'repo');
+      mkdirSync(repo, { recursive: true });
+      workspaceEntry(home, 'ws1', { folder: pathToFileURL(repo).href }, [
+        { name: 'a.jsonl', body: effortLog(picked, resolved, effort) },
+      ]);
+      assert.equal(
+        vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }),
+        resolved,
+        `${resolved} at ${effort}`,
+      );
+      // Through the registry the CLI actually calls, with the terminal gate on.
+      assert.equal(hostModelFor(repo, { home, env: envFor(home) }), resolved, `hostModelFor at ${effort}`);
+    }
+  });
+
+  test(`${resolved}: the first turn, before any result is recorded, still names the picked model`, () => {
+    const home = tmpRepo('vsc-first-turn');
+    const repo = join(home, 'repo');
+    mkdirSync(repo, { recursive: true });
+    workspaceEntry(home, 'ws1', { folder: pathToFileURL(repo).href }, [
+      { name: 'a.jsonl', body: effortLog(picked, null, 'high') },
+    ]);
+    // The route prefix stays on for `price.ts` to strip; the id is the picked one.
+    assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), picked);
+  });
+}
+
+test('a repo opened through a junction matches the folder VS Code recorded, in both directions', () => {
+  const home = tmpRepo('vsc-junction');
+  const real = join(home, 'real', 'repo');
+  const link = join(home, 'link');
+  mkdirSync(real, { recursive: true });
+  symlinkSync(join(home, 'real'), link, 'junction');
+
+  // VS Code recorded the junction spelling; graft resolved the real path (git
+  // reports the real location).
+  workspaceEntry(home, 'ws-link', { folder: pathToFileURL(join(link, 'repo')).href }, [
+    { name: 'a.jsonl', body: effortLog('copilot/claude-opus-5.5', 'claude-opus-5-5', 'max') },
+  ]);
+  assert.equal(vscodeSessionModel(realpathSync.native(real), { home, env: envFor(home), os: 'win32' }), 'claude-opus-5-5');
+
+  // And the reverse: VS Code recorded the real path, graft was started in the link.
+  const home2 = tmpRepo('vsc-junction-rev');
+  const real2 = join(home2, 'real', 'repo');
+  const link2 = join(home2, 'link');
+  mkdirSync(real2, { recursive: true });
+  symlinkSync(join(home2, 'real'), link2, 'junction');
+  workspaceEntry(home2, 'ws-real', { folder: pathToFileURL(realpathSync.native(real2)).href }, [
+    { name: 'a.jsonl', body: effortLog('copilot/claude-sonnet-5.5', 'claude-sonnet-5-5', 'low') },
+  ]);
+  assert.equal(vscodeSessionModel(join(link2, 'repo'), { home: home2, env: envFor(home2), os: 'win32' }), 'claude-sonnet-5-5');
+});
+
+test('a junction does not make an unrelated workspace match', () => {
+  const home = tmpRepo('vsc-junction-other');
+  const mine = join(home, 'real', 'mine');
+  const theirs = join(home, 'real', 'theirs');
+  mkdirSync(mine, { recursive: true });
+  mkdirSync(theirs, { recursive: true });
+  symlinkSync(join(home, 'real'), join(home, 'link'), 'junction');
+  workspaceEntry(home, 'ws', { folder: pathToFileURL(join(home, 'link', 'theirs')).href }, [
+    { name: 'a.jsonl', body: effortLog('copilot/claude-opus-5.5', 'claude-opus-5-5', 'high') },
+  ]);
+  assert.equal(vscodeSessionModel(mine, { home, env: envFor(home), os: 'win32' }), null);
 });

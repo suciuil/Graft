@@ -46,6 +46,8 @@ import { readSession, writeSession, sessionDir, listSessionIds, type SessionStat
 import type { AgentHost } from '../telemetry/contract.js';
 import { GRAFT_MCP_TOOL_NAMES } from '../mcp/tool-names.js';
 import { brand, cmd } from '../brand.js';
+import { mcpClient } from '../mcp/client.js';
+import { MAX_SESSION_AGE_MS } from '../hosts/kilo-session.js';
 
 export type ToolKind = 'graft' | 'source';
 
@@ -172,6 +174,10 @@ export interface SessionSummary extends SessionState {
 /** The most-recently-touched session file for a repo, or null when none exist —
  *  what `graft stats` shows by default: the session you were just in. */
 export function latestSession(dir: string): SessionSummary | null {
+  return latestSessionFile(dir)?.session ?? null;
+}
+
+function latestSessionFile(dir: string): { session: SessionSummary; mtimeMs: number } | null {
   const sdir = sessionDir(dir);
   let bestId: string | null = null;
   let bestMtime = -Infinity;
@@ -181,7 +187,48 @@ export function latestSession(dir: string): SessionSummary | null {
     if (mtime > bestMtime) { bestMtime = mtime; bestId = id; }
   }
   if (bestId === null) return null;
-  return { id: bestId, ...readSession(dir, bestId) };
+  return { session: { id: bestId, ...readSession(dir, bestId) }, mtimeMs: bestMtime };
+}
+
+/** Whether the caller is Claude Code: its hooks and shells set `CLAUDECODE`, and
+ * over MCP it introduces itself as `claude-code`. Not `claude-ai`, which is a
+ * different product with no Stop hook and no transcript. */
+export function callerIsClaudeCode(
+  opts: { env?: NodeJS.ProcessEnv; client?: string | null } = {},
+): boolean {
+  const env = opts.env ?? process.env;
+  if (env.CLAUDECODE !== undefined) return true;
+  const client = opts.client === undefined ? mcpClient() : opts.client;
+  return client !== null && /claude[\s_-]*code/i.test(client);
+}
+
+/**
+ * The repo's latest session, but only when what it recorded can be trusted as a
+ * statement about the call being priced now.
+ *
+ * The session file's `model` and `inputCostMicros` are written by exactly one
+ * thing: Claude Code's Stop hook, from its own transcript. They describe a
+ * Claude Code conversation, so they say nothing about a Kilo or Copilot call
+ * arriving in the same repo — and `latestSession` has no notion of age, so in
+ * any repo Claude Code had ever touched, that stamp outranked the model the
+ * agent named and the model the host's own record named. Every saving was then
+ * filed under whichever Claude model ran last, at that session's blended rate,
+ * weeks later.
+ *
+ * Trusted therefore only when BOTH hold: the caller is Claude Code, and the file
+ * was touched within {@link MAX_SESSION_AGE_MS}. Anything else returns null and
+ * lets the agent's flag and the host's record decide.
+ */
+export function liveClaudeSession(
+  dir: string,
+  opts: { now?: number; env?: NodeJS.ProcessEnv; client?: string | null; maxAgeMs?: number } = {},
+): SessionSummary | null {
+  if (!callerIsClaudeCode(opts)) return null;
+  const latest = latestSessionFile(dir);
+  if (latest === null) return null;
+  const now = opts.now ?? Date.now();
+  if (now - latest.mtimeMs > (opts.maxAgeMs ?? MAX_SESSION_AGE_MS)) return null;
+  return latest.session;
 }
 
 /**
@@ -212,7 +259,7 @@ export function latestSession(dir: string): SessionSummary | null {
  * reply the number is about to appear in.
  */
 export function sessionPricing(dir: string): Pricing {
-  const s = latestSession(dir);
+  const s = liveClaudeSession(dir);
   // The host's display name is attached here rather than at the naming site:
   // `--agent-model` and a transcript stamp both carry a wire id, while the user
   // picked that model from a menu showing something friendlier.

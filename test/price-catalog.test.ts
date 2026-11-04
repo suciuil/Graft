@@ -14,6 +14,7 @@ import {
   parseLiteLlmCatalog,
   priceCatalogPath,
   priceCatalogStatus,
+  priceUpdateNotice,
   updatePriceCatalog,
   type PriceCatalog,
 } from '../src/context/price-catalog.js';
@@ -183,6 +184,17 @@ test('update: a failed download keeps the previous catalog', async () => {
   const garbage = (async () => new Response('<html>', { status: 200 })) as unknown as typeof fetch;
   await assert.rejects(updatePriceCatalog({ fetchImpl: garbage }), /valid JSON/);
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), previous);
+});
+
+test('update notice: says it is only a public .json price file and that nothing private is sent', () => {
+  const text = priceUpdateNotice('/tmp/x.json').join('\n');
+  assert.ok(text.includes(LITELLM_PRICES_URL), 'names the exact file that is downloaded');
+  assert.ok(text.includes('/tmp/x.json'), 'names where the prices are stored');
+  assert.match(text, /\.json file/);
+  assert.match(text, /no code/);
+  assert.match(text, /API keys/);
+  assert.match(text, /IP address/, 'honest about what any download exposes');
+  assert.doesNotMatch(text, /provider/i, 'not to be confused with GRAFT_PROVIDER=litellm, which does receive prompts');
 });
 
 /** Run `fn` with the bundled snapshot enabled and holding `models`, fetched `daysOld` ago. */

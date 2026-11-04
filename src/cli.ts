@@ -43,6 +43,7 @@ import {
   catalogPrice,
   priceCatalogPath,
   priceCatalogStatus,
+  priceUpdateNotice,
   updatePriceCatalog,
 } from "./context/price-catalog.js";
 import { hostModelFor } from "./hosts/host-model.js";
@@ -61,6 +62,7 @@ import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
 import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
+import { diagnoseEmptyBuild, formatEmptyBuild } from "./graph/empty-build.js";
 import { normalizeExcludeEntry } from "./ingest/fs.js";
 import {
   CONFIG_APPLY_NOTE,
@@ -130,7 +132,7 @@ import {
   runVarCommand,
   type EnvDeps,
 } from "./env-cli.js";
-import { latestSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
+import { latestSession, liveClaudeSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { readRepoRegistry, registerDiscovered, repoRegistryPath } from "./claude/repo-registry.js";
 import { knownFolders } from "./hosts/known-folders.js";
 import { aggregateAllSavings, aggregateSavings, currentModel, formatAllSavingsReport, formatSavingsReport, isPeriod, readLedger, recordSavedTokens, registerExistingLedger, setAgentModel, setHostModel } from "./claude/ledger.js";
@@ -304,7 +306,7 @@ let runningCommand = "";
  */
 function fileClaim(repo: string, tokens: number): void {
   if (runningCommand === "mcp") return;
-  recordSavedTokens(repo, currentModel(repo, latestSession(repo)?.model), tokens);
+  recordSavedTokens(repo, currentModel(repo, liveClaudeSession(repo)?.model), tokens);
   const s = claimedSummary(tokens);
   recordRecentCall(repo, { command: queryNote.command ?? runningCommand, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
   if (!process.stdout.isTTY && process.env.CLAUDECODE === undefined && process.env.GRAFT_STDERR_SAVINGS !== "0") {
@@ -1081,7 +1083,10 @@ grouped(program.command("build"), GROUP.setup)
         throw err;
       });
       graphProgress.end();
-      console.log(`✓ wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
+      const wiringLine = `wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`;
+      // No files at all is not a success: no ✓, and the reason follows the footer.
+      if (g.files === 0) console.error(`⚠ ${wiringLine}`);
+      else console.log(`✓ ${wiringLine}`);
       console.log(`  parsed: ${g.parsed} of ${g.files} files (${g.reused} replayed from cache)`);
       // Worth one line: this build started from a graph the user never built *here*.
       if (g.seededFrom) console.log(`  seeded: copied a starting graph from ${g.seededFrom} (git worktree)`);
@@ -1118,6 +1123,17 @@ grouped(program.command("build"), GROUP.setup)
         console.log(`  ${rel}/ is a local cache: add it to your gitignore if you want it untracked.`);
       } else {
         console.log(`  ${rel}/ is git-ignored (added automatically), a local cache; teammates run \`${cmd("graft build")}\` to get their own.`);
+      }
+
+      // A build that found no files used to end on the footer above, a "✓ 0 nodes"
+      // that read like a broken install. The usual cause is a folder git-ignored by
+      // the repo it sits in: graft lists files as git does, and git lists nothing.
+      if (g.files === 0) {
+        const cause = diagnoseEmptyBuild(target, g.contextDir, onlyDirs);
+        if (cause) {
+          console.error("");
+          for (const l of formatEmptyBuild(cause, target, deep ? "graft build --deep" : "graft build")) console.error(l);
+        }
       }
 
       // #127: a --deep run whose LLM calls failed used to print the same success
@@ -1625,6 +1641,8 @@ pricesCommand
     `Download LiteLLM's public model price catalog (one anonymous GET, nothing about you or your models is sent) and store it in ${priceCatalogPath()}`,
   )
   .action(async () => {
+    // Shown before the download, outside the try, so it is printed even when the download fails
+    console.log(priceUpdateNotice().join("\n"));
     try {
       const { catalog, path } = await updatePriceCatalog();
       const count = Object.keys(catalog.models).length;
