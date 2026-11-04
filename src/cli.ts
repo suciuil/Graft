@@ -101,7 +101,7 @@ import { installBrainsServer, installCursorBrainsServer, removeBrainsServer, rem
 import { upsertCodexToml } from "./hosts/mcp-config.js";
 import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, resolvePackageJsonPath, runUpgrade } from "./cli-meta.js";
-import { ABOUT_TARGETS, PROJECT_URL, fileUri, findForkReport, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
+import { ABOUT_TARGETS, PROJECT_URL, fileUri, findChangelog, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
 import { nativeFallbackNotice } from "./graph/native.js";
 import {
   DEFAULT_DEEP_STALE_THRESHOLD,
@@ -672,12 +672,12 @@ grouped(program.command("issues"), GROUP.setup)
 
 grouped(program.command("about"), GROUP.setup)
   .alias("info")
-  .description(`Where to read about ${brand()}: the project homepage, or the report of the changes in this fork`)
+  .description(`Where to read about ${brand()}: the project homepage, or the changelog of the changes in this fork`)
   .argument("[target]", `open one in your browser: ${ABOUT_TARGETS.join(" or ")}`)
   .action((raw: string | undefined) => {
-    const report = findForkReport(resolvePackageJsonPath(import.meta.url));
+    const changelog = findChangelog(resolvePackageJsonPath(import.meta.url));
     if (raw === undefined) {
-      console.log(formatAbout(brand(), currentVersion, report));
+      console.log(formatAbout(brand(), currentVersion, changelog));
       return;
     }
     const target = parseAboutTarget(raw);
@@ -687,14 +687,14 @@ grouped(program.command("about"), GROUP.setup)
       return;
     }
     if (target === "fork") {
-      if (!report) {
-        console.error("✗ the fork report is not in this installation (expected docs/fork-report.html next to package.json).");
+      if (!changelog) {
+        console.error("✗ the fork changelog is not in this installation (expected docs/changelog.html next to package.json).");
         process.exit(1);
         return;
       }
-      console.log(`Fork report: ${report}`);
-      console.log(`             ${fileUri(report)}`);
-      openLocalFile(report);
+      console.log(`Fork changelog: ${changelog}`);
+      console.log(`                ${fileUri(changelog)}`);
+      openLocalFile(changelog);
       return;
     }
     console.error(`✗ unknown target "${raw}": expected ${ABOUT_TARGETS.join(" or ")}, or nothing to print both`);
@@ -728,7 +728,7 @@ function moveHereToTrail(dir: string): void {
   // An `--agents auto` run moves the same way: the main agents' repo files, laptop settings for the ones installed.
   const agents = o.laptop ? ["auto"] : hosts;
   console.log(`· moving this repo to trail: trail init ${agents.length ? `--agents ${agents.join(" ")} ` : ""}${flags.join(" ")}`.trimEnd());
-  spawnSync("trail", ["init", root, "--agents", ...agents, ...flags], { stdio: "inherit" });
+    spawnSync("trail", ["init", root, "--agents", ...agents, ...flags], { stdio: "inherit", windowsHide: true });
 }
 
 grouped(program.command("build"), GROUP.setup)
@@ -1996,7 +1996,8 @@ program
     console.log(`${cmd("graft viz")} → ${srv.url}  (ctrl-c to stop)`);
     if (opts.open) {
       const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-      spawn(opener, [srv.url], { stdio: "ignore", detached: true, shell: process.platform === "win32" }).unref();
+      // windowsHide stays off: the browser is the window asked for (see util/browser.ts).
+      spawn(opener, [srv.url], { stdio: "ignore", detached: true, shell: process.platform === "win32", windowsHide: false }).unref();
     }
   });
 
@@ -3054,7 +3055,7 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
           continue;
         }
         const changedTops = tops.filter((t) => {
-          const r = spawnSync("git", ["status", "--porcelain", "--", t], { cwd: root, encoding: "utf8" });
+          const r = spawnSync("git", ["status", "--porcelain", "--", t], { cwd: root, encoding: "utf8", windowsHide: true });
           return r.status !== 0 || r.stdout.trim().length > 0;
         });
         if (changedTops.length)

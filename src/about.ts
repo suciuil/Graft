@@ -1,7 +1,7 @@
 /**
  * `graft about`: where to read about this tool. Two sources: the upstream
- * project's homepage, and the report of what this fork changes
- * (`docs/fork-report.html`, shipped in the npm package and the offline kit).
+ * project's homepage, and the changelog of what this fork changes
+ * (`docs/changelog.html`, shipped in the npm package and the offline kit).
  *
  * Nothing is sent: the command prints addresses and, when asked, opens one
  * in the local browser.
@@ -14,8 +14,8 @@ import { pathToFileURL } from "node:url";
 /** The upstream project's homepage. */
 export const PROJECT_URL = "https://github.com/trailhq/Trail-Code";
 
-/** The fork report, relative to the package (or repo) root. */
-export const FORK_REPORT_RELATIVE = join("docs", "fork-report.html");
+/** The fork changelog, relative to the package (or repo) root. */
+export const CHANGELOG_RELATIVE = join("docs", "changelog.html");
 
 /** What `graft about <target>` accepts. */
 export const ABOUT_TARGETS = ["home", "fork"] as const;
@@ -28,13 +28,13 @@ export function parseAboutTarget(raw: string | undefined): AboutTarget | null {
 }
 
 /**
- * The fork report next to the running package: `<root>/docs/fork-report.html`,
- * or `<root>/fork-report.html` as the offline kit lays it out. Null when
- * neither exists (an install made before the report shipped).
+ * The fork changelog next to the running package: `<root>/docs/changelog.html`,
+ * or `<root>/changelog.html` as the offline kit lays it out. Null when
+ * neither exists (an install made before the changelog shipped).
  */
-export function findForkReport(packageJsonPath: string, exists: (p: string) => boolean = existsSync): string | null {
+export function findChangelog(packageJsonPath: string, exists: (p: string) => boolean = existsSync): string | null {
   const root = dirname(packageJsonPath);
-  for (const c of [join(root, FORK_REPORT_RELATIVE), join(root, "fork-report.html")]) {
+  for (const c of [join(root, CHANGELOG_RELATIVE), join(root, "changelog.html")]) {
     if (exists(c)) return c;
   }
   return null;
@@ -46,7 +46,7 @@ export function fileUri(path: string): string {
 }
 
 /** The text `graft about` prints. */
-export function formatAbout(name: string, version: string, report: string | null): string {
+export function formatAbout(name: string, version: string, changelog: string | null): string {
   const lines = [
     `${name} ${version}: a context graph of your repo for AI coding agents.`,
     `It indexes the code into small linked notes with exact file:line spans, so an agent finds`,
@@ -57,13 +57,13 @@ export function formatAbout(name: string, version: string, report: string | null
     "",
     "Changes in this fork (not in upstream):",
   ];
-  if (report) lines.push(`  ${report}`, `  ${fileUri(report)}`);
-  else lines.push(`  not found in this installation (expected ${FORK_REPORT_RELATIVE} next to package.json)`);
+  if (changelog) lines.push(`  ${changelog}`, `  ${fileUri(changelog)}`);
+  else lines.push(`  not found in this installation (expected ${CHANGELOG_RELATIVE} next to package.json)`);
   lines.push(
     "",
     "Open one in your browser:",
     `  ${name} about home    the project homepage`,
-    `  ${name} about fork    the fork report`,
+    `  ${name} about fork    the fork changelog`,
     "",
     "Nothing is sent: these commands only open a page in your browser.",
   );
@@ -80,7 +80,9 @@ export function openLocalFile(path: string): void {
   if (process.env.GRAFT_NO_BROWSER) return;
   const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
   try {
-    const child = spawn(opener, [path], { stdio: "ignore", detached: true });
+    // windowsHide stays off: the opener shows a window the person asked for, and `detached` already
+    // starts it without a console (test/windows-hide.test.ts holds every other spawn to windowsHide: true).
+    const child = spawn(opener, [path], { stdio: "ignore", detached: true, windowsHide: false });
     child.on("error", () => {
       /* the printed path is the fallback */
     });

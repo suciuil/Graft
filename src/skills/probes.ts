@@ -102,7 +102,7 @@ function socketWords(path: string): { why: string; fix: string } {
 const defaultGit: ProbeGit = (args, cwd, timeoutMs) => {
   try {
     const out = execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', ...args], {
-      cwd, timeout: timeoutMs, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 20,
+      cwd, timeout: timeoutMs, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 20, windowsHide: true,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
     });
     return { code: 0, out, timedOut: false };

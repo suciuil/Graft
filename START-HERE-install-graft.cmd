@@ -4,8 +4,8 @@ rem Double-click to install or upgrade graft. Keep install-graft-helper.ps1 in t
 rem offline package nanonets-graft-X.Y.Z-win32-x64.tgz (the newest one is used; otherwise the npm registry)
 rem and optionally an offline Node.js zip node-vX.Y.Z-win-x64.zip (the newest one is used when Node.js has to
 rem be installed; otherwise the latest LTS is downloaded from nodejs.org and checked against its SHA-256).
-rem It first explains what graft is for and shows this fork's report of its changes (fork-report.html next to
-rem this file, offering to open it in the browser).
+rem It first explains what graft is for and shows where this fork's changelog of its changes is (changelog.html
+rem next to this file).
 rem It asks for agreement before changing anything; "START-HERE-install-graft.cmd -Yes" agrees up front (including the
 rem download of LiteLLM's model price list with "graft prices update" after graft is installed).
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-graft-helper.ps1" %*

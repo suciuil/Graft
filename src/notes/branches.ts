@@ -107,13 +107,15 @@ export function readBranchCache(repo: string): BranchCache | null {
 
 function git(repo: string, args: string[], timeout = 15_000): string | null {
   try {
-    // Never a credential prompt: this runs detached, where nobody could answer it.
+    // Never a credential prompt: this runs detached, where nobody could answer it. Detached also means
+    // no console, so without windowsHide Windows opens a console window for every git call.
     return execFileSync("git", args, {
       cwd: repo,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout,
       maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
   } catch {
@@ -172,6 +174,7 @@ function closedPrHeads(repo: string): ClosedHeads | null {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10_000,
+      windowsHide: true,
       env: { ...process.env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" },
     });
   } catch {

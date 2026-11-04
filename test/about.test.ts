@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { PROJECT_URL, fileUri, findForkReport, formatAbout, parseAboutTarget } from "../src/about.js";
+import { PROJECT_URL, fileUri, findChangelog, formatAbout, parseAboutTarget } from "../src/about.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "..", "..");
 
@@ -14,22 +14,22 @@ test("parseAboutTarget accepts home and fork, case-insensitively, and nothing el
   assert.equal(parseAboutTarget(undefined), null);
 });
 
-test("findForkReport finds docs/fork-report.html next to package.json, then the kit layout", () => {
+test("findChangelog finds docs/changelog.html next to package.json, then the kit layout", () => {
   const pkg = join("root", "package.json");
-  const docs = join("root", "docs", "fork-report.html");
-  const kit = join("root", "fork-report.html");
-  assert.equal(findForkReport(pkg, (p) => p === docs || p === kit), docs);
-  assert.equal(findForkReport(pkg, (p) => p === kit), kit);
-  assert.equal(findForkReport(pkg, () => false), null);
+  const docs = join("root", "docs", "changelog.html");
+  const kit = join("root", "changelog.html");
+  assert.equal(findChangelog(pkg, (p) => p === docs || p === kit), docs);
+  assert.equal(findChangelog(pkg, (p) => p === kit), kit);
+  assert.equal(findChangelog(pkg, () => false), null);
 });
 
-test("the repo ships the fork report where findForkReport looks", () => {
-  assert.ok(existsSync(join(repoRoot, "docs", "fork-report.html")));
-  assert.equal(findForkReport(join(repoRoot, "package.json")), join(repoRoot, "docs", "fork-report.html"));
+test("the repo ships the fork changelog where findChangelog looks", () => {
+  assert.ok(existsSync(join(repoRoot, "docs", "changelog.html")));
+  assert.equal(findChangelog(join(repoRoot, "package.json")), join(repoRoot, "docs", "changelog.html"));
 });
 
-test("formatAbout names the homepage, the report path and its file URI, and how to open each", () => {
-  const report = join(repoRoot, "docs", "fork-report.html");
+test("formatAbout names the homepage, the changelog path and its file URI, and how to open each", () => {
+  const report = join(repoRoot, "docs", "changelog.html");
   const text = formatAbout("graft", "1.2.3", report);
   assert.match(text, /^graft 1\.2\.3: /);
   assert.ok(text.includes(PROJECT_URL));

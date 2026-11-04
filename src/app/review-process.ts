@@ -196,7 +196,7 @@ async function runInChild(
 
   // The job key as argv makes `ps` in a container say which pull request each
   // review is; the token stays out of it.
-  const child = fork(entry, [jobKey(job)], { stdio: ["ignore", "inherit", "inherit", "ipc"] });
+  const child = fork(entry, [jobKey(job)], { stdio: ["ignore", "inherit", "inherit", "ipc"], windowsHide: true });
   track(child);
 
   try {

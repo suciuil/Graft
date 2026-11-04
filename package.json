@@ -43,7 +43,7 @@
     "vendor/*/prebuilds/**",
     "README.md",
     "LICENSE",
-    "docs/fork-report.html"
+    "docs/changelog.html"
   ],
   "scripts": {
     "build": "npm run build:prices && npm run build:code",
