@@ -356,8 +356,8 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   "prices update": {
     description:
       "Download LiteLLM's public model price catalog and store it locally (~/.graft/prices.json), so savings for " +
-      "models graft's built-in table does not list are priced in dollars. One anonymous GET of the whole catalog: " +
-      "nothing about you, your repo or your models is sent. Kept until you run it again. graft already ships a " +
+      "models graft's built-in table does not list are priced in dollars. One anonymous GET of the whole catalog, " +
+      "a public .json file hosted on GitHub: no code, prompts, model names, keys or anything else about you or your repo is sent. Kept until you run it again. graft already ships a " +
       "snapshot of this catalog; whichever of the two is newer is used first.",
     examples: ["graft prices update"],
   },

@@ -15,7 +15,7 @@ import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSur
 import { calledRecently, recordRecentCall, turnModels } from '../context/recent-calls.js';
 import { initDueReason } from '../hosts/drift.js';
 import { runInCallScope } from '../context/call-scope.js';
-import { latestSession, sessionPricing } from '../claude/session-metrics.js';
+import { liveClaudeSession, sessionPricing } from '../claude/session-metrics.js';
 import { kiloModelRows } from '../hosts/models.js';
 import { isKiloClient, mcpClient } from './client.js';
 import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel, setHostModel } from '../claude/ledger.js';
@@ -332,7 +332,7 @@ async function callToolScoped(
     // other client that config describes somebody else's models. Skipped once
     // anything has named the model, whether that was the agent or the host's own
     // session record above, since one exact figure beats a menu.
-    const named = currentModel(root, latestSession(root)?.model) !== UNKNOWN_MODEL;
+    const named = currentModel(root, liveClaudeSession(root)?.model) !== UNKNOWN_MODEL;
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     // A call a few minutes after another one in this repo gets the short savings
     // nudge: the agent has just read the long one (see `savingsTurnNudge`).
@@ -390,7 +390,7 @@ function recordMcpSavings(root: string, res: { text: string; isError: boolean },
   if (res.isError) return;
   const saved = sumSavingsFooters(res.text);
   if (saved <= 0) return;
-  recordSavedTokens(root, currentModel(root, latestSession(root)?.model), saved);
+  recordSavedTokens(root, currentModel(root, liveClaudeSession(root)?.model), saved);
   // What `graft savings --last` reads back, and what makes the next call's
   // nudge short.
   const s = claimedSummary(saved);

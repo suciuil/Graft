@@ -247,6 +247,23 @@ export function parseLiteLlmCatalog(json: unknown, fetchedAt: string, url: strin
   return { version: 1, source: 'LiteLLM', url, fetchedAt, models };
 }
 
+/**
+ * What `graft prices update` tells the user before it downloads anything: LiteLLM is only
+ * the source of one public .json price file, and nothing about the user is sent to it.
+ * The file is hosted on GitHub, so the host does see an IP address and the standard
+ * request headers of any download, and the text says so rather than claiming "nothing".
+ */
+export function priceUpdateNotice(path: string = priceCatalogPath()): string[] {
+  return [
+    "ℹ️ Downloading LiteLLM's public model price list (one read-only .json file, hosted on GitHub):",
+    `   ${LITELLM_PRICES_URL}`,
+    '   It is used only to look up model prices. graft sends nothing to it: no code, file or repository',
+    '   names, prompts, model names, API keys, credentials or usage data.',
+    "   As with any download, the server sees only your IP address and Node.js's standard request headers.",
+    `   The prices are stored locally in ${path}; every price lookup afterwards stays on this machine.`,
+  ];
+}
+
 export interface UpdateOptions {
   fetchImpl?: typeof fetch;
   path?: string;

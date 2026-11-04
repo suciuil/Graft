@@ -165,6 +165,45 @@ test('a repo opened through a junction or symlink matches the resolved path Kilo
   assert.equal(kiloSessionModel(join(link, 'repo'), { home, env: {}, now }), 'claude-opus-5-5');
 });
 
+test('a session still sitting in the write-ahead log is fresh even when kilo.db itself is old', { skip: noSqlite }, () => {
+  // Kilo runs WAL mode: a write lands in kilo.db-wal and reaches kilo.db only at
+  // a checkpoint. The main file's mtime can be hours old while the session being
+  // served was updated seconds ago, and the old pre-filter read that as "stale".
+  const home = tmpRepo('kilo-db-wal');
+  const dir = join(home, '.local', 'share', 'kilo');
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'kilo.db');
+  const db = new sqlite!.DatabaseSync(path);
+  try {
+    db.exec('pragma journal_mode=wal');
+    db.exec('pragma wal_autocheckpoint=0');
+    db.exec('create table session (id text primary key, parent_id text, directory text, model text, time_updated integer)');
+    db.exec('pragma wal_checkpoint(truncate)');
+    // From here on the row exists only in the -wal file.
+    const now = Date.now();
+    db.prepare('insert into session (id, parent_id, directory, model, time_updated) values (?, ?, ?, ?, ?)')
+      .run('ses_wal', null, 'D:/work/VED-ChAIR', JSON.stringify({ id: 'claude-opus-5-5', variant: 'max' }), now);
+
+    const old = (now - MAX_SESSION_AGE_MS - 3_600_000) / 1000;
+    utimesSync(path, old, old);
+
+    assert.equal(
+      kiloSessionModel('D:/work/VED-ChAIR', { home, env: {}, now }),
+      'claude-opus-5-5',
+      'the live -wal decides, not the old main file',
+    );
+
+    // Control: with no WAL beside it, an old main file IS stale.
+    const lonely = tmpRepo('kilo-db-nowal');
+    kiloDb(lonely, [{ dir: 'D:/work/VED-ChAIR', model: { id: 'claude-opus-5-5' }, updated: now }]);
+    const lonelyPath = join(lonely, '.local', 'share', 'kilo', 'kilo.db');
+    utimesSync(lonelyPath, old, old);
+    assert.equal(kiloSessionModel('D:/work/VED-ChAIR', { home: lonely, env: {}, now }), null);
+  } finally {
+    db.close();
+  }
+});
+
 test('in Kilo\'s agent shell inside VS Code, no Kilo answer is never priced at the Copilot chat\'s model', { skip: noSqlite }, () => {
   const home = tmpRepo('kilo-db-no-fallthrough');
   const repo = join(home, 'repo');

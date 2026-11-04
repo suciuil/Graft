@@ -1,3 +1,5 @@
+# Helper of START-HERE-install-graft.cmd: double-click that launcher instead of running this file directly (it keeps
+# the window open and reports the result). Pass -Yes to the launcher to agree up front.
 # -Yes: agree up front (unattended runs); without it the user is asked before anything is changed
 param([switch]$Yes)
 
@@ -646,7 +648,7 @@ function Resolve-EndpointConflict([string]$Provider, $Url, [bool]$CanPrompt) {
 
     if (-not $CanPrompt) {
         Write-Warning "GRAFT_PROVIDER=$Provider has its own endpoint ($own), but a custom endpoint is set too: $custom ($(Format-Source $Url.Name))."
-        Write-Host "  graft uses the custom endpoint. To choose, run this installer without -Yes (or 'graft api provider $Provider') in a terminal, or set"
+        Write-Host "  graft uses the custom endpoint. To choose, run START-HERE-install-graft.cmd without -Yes (or 'graft api provider $Provider') in a terminal, or set"
         Write-Host "  GRAFT_ENDPOINT_CHOICE to '$Provider|$custom|custom' (keep the custom endpoint) or '$Provider|$custom|provider' (use $own)."
         return $Url
     }
@@ -1163,7 +1165,7 @@ if ($offline) {
     $installArgs += $offline.File.FullName
 } else {
     if ($Registry -match '<[^>]+>') {
-        throw "No offline graft package (nanonets-graft-X.Y.Z-win32-x64.tgz) next to this script, and the npm registry in install-graft.ps1 is still a placeholder: $Registry"
+        throw "No offline graft package (nanonets-graft-X.Y.Z-win32-x64.tgz) next to this script, and the npm registry in install-graft-helper.ps1 is still a placeholder: $Registry"
     }
     Write-Host "No offline graft package (nanonets-graft-X.Y.Z-win32-x64.tgz) next to this script; installing from $Registry"
     & npm config set '@nanonets:registry' $Registry --location=user
@@ -1186,7 +1188,7 @@ if (-not (Enable-UserScripts)) {
     # Same for npm/npx in the per-user Node: without npm.ps1, PowerShell runs npm.cmd
     $ps1Shims = @((Join-Path $NpmGlobal 'graft.ps1'), (Join-Path $NodeHome 'npm.ps1'), (Join-Path $NodeHome 'npx.ps1'))
     foreach ($s in $ps1Shims) { if (Test-Path $s) { Remove-Item $s -Force } }
-    Write-Host "PowerShell blocks scripts on this PC, so 'graft' and 'npm' will run through graft.cmd / npm.cmd. Run this installer again after 'graft upgrade'."
+    Write-Host "PowerShell blocks scripts on this PC, so 'graft' and 'npm' will run through graft.cmd / npm.cmd. Run START-HERE-install-graft.cmd again after 'graft upgrade'."
 }
 
 # The graft just installed, not another copy earlier in PATH (e.g. in another Node.js installation's folder)
@@ -1223,8 +1225,13 @@ if (-not $pathOk) {
 # 5c. LiteLLM's public model price/info catalog, so graft can price savings for models its built-in table
 # does not list (one anonymous GET; problems here never fail the install)
 Write-Host ''
-Write-Host "graft can download LiteLLM's latest public model price/info list ('graft prices update': one anonymous"
-Write-Host 'download, nothing about you, this PC or your repositories is sent) to price its savings for newer models.'
+Write-Host "graft can download LiteLLM's latest public model price list ('graft prices update') to price its savings for"
+Write-Host 'newer models. This is ONE read-only .json file, hosted on GitHub:'
+Write-Host '    https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
+Write-Host '  - LiteLLM is used only as the source of this price list; graft sends nothing to it: no code, file or repository'
+Write-Host '    names, prompts, model names, API keys, credentials or usage data, nothing about you or this PC.'
+Write-Host "  - As with any download, the server sees only your IP address and Node.js's standard request headers."
+Write-Host '  - The prices are stored locally in %USERPROFILE%\.graft\prices.json; every price lookup afterwards stays on this PC.'
 $getPrices = $Yes
 if (-not $Yes) {
     $getPrices = (Read-Line 'Download the latest model prices from LiteLLM now? [Y/n]') -notmatch '^(n|no)$'

@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`graft prices update` says what it downloads before it downloads.** It
+  prints that LiteLLM is only the source of one public `.json` price file (the
+  exact URL, hosted on GitHub), that graft sends nothing to it (no code, file
+  or repository names, prompts, model names, API keys or usage data), that like
+  any download the server sees only your IP address and Node.js's standard
+  headers, and where the prices are stored. The installer shows the same text
+  before it asks whether to download the prices. The request itself is
+  unchanged.
 - **Profile store, on by default: a repo's map and settings live in your
   profile.** A repo that has no `graft/` map and no `.graft/config.json` yet
   gets them in `~/.graft/repos/<folder>-<hash of the repo path>/` (`graph/` and

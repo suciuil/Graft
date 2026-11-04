@@ -17,10 +17,10 @@
  * the saving is filed under {@link UNKNOWN_MODEL} and reported in tokens alone,
  * never priced at a guess (see `context/price.ts` for why).
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { cacheDir, readJson, writeJsonAtomic } from '../util/state.js';
+import { cacheDir, writeJsonAtomic } from '../util/state.js';
 import { locateLedger, pathKey, readRepoRegistry, registerRepo, repoRegistryPath } from './repo-registry.js';
 import {
   NO_MODEL,
@@ -215,8 +215,76 @@ export function readLedger(d: string): SavingsLedger {
 /** {@link readLedger} by file path, for ledgers found through the user's repo
  * registry rather than resolved from a repo root. */
 export function readLedgerFile(p: string): SavingsLedger {
-  const l = readJson<SavingsLedger>(p);
-  return l && typeof l.days === 'object' && l.days !== null ? l : { days: {} };
+  try {
+    return readLedgerStrict(p, false);
+  } catch (e) {
+    // A reader shows what it can: an unreadable ledger is an empty report plus a
+    // warning, never an exception in `graft savings`.
+    warnLedgerUnreadable(p, e);
+    return { days: {} };
+  }
+}
+
+function errCode(e: unknown): string | undefined {
+  return (e as NodeJS.ErrnoException | undefined)?.code;
+}
+
+/** A OneDrive (or other cloud-sync) placeholder whose provider is not running
+ * fails to read with `EUNKNOWN` / "The cloud file provider is not running". */
+function isCloudPlaceholderError(e: unknown): boolean {
+  return errCode(e) === 'EUNKNOWN' || /cloud file provider/i.test(e instanceof Error ? e.message : String(e));
+}
+
+const warnedLedgers = new Set<string>();
+
+/** One stderr line per ledger per process, saying why nothing was recorded. */
+function warnLedgerUnreadable(p: string, e: unknown): void {
+  if (warnedLedgers.has(p)) return;
+  warnedLedgers.add(p);
+  const why = e instanceof Error ? e.message : String(e);
+  const hint = isCloudPlaceholderError(e)
+    ? ' This looks like an online-only cloud file (OneDrive) whose client is not running: start OneDrive, or mark the graft folder "Always keep on this device".'
+    : '';
+  console.error(`[graft] savings ledger ${p} could not be read (${why}); leaving it untouched, so this saving is not recorded.${hint}`);
+}
+
+/**
+ * Read the ledger for a read-modify-write.
+ *
+ * Only a file that is genuinely absent counts as an empty ledger. Every other
+ * read failure THROWS, because the caller is about to overwrite the file:
+ * treating "could not read it" as "it is empty" turned a transient failure (a
+ * OneDrive placeholder whose client was not running, a lock, a permissions
+ * blip) into the loss of the whole history on the next saving.
+ *
+ * Content that reads but is not a ledger (truncated, hand-edited, wrong shape)
+ * is set aside as `savings.json.corrupt-<time>` before starting fresh, so the
+ * bytes survive for recovery. `backup` is false for pure readers, which write
+ * nothing.
+ */
+function readLedgerStrict(p: string, backup: boolean): SavingsLedger {
+  let raw: string;
+  try {
+    raw = readFileSync(p, 'utf8');
+  } catch (e) {
+    if (errCode(e) === 'ENOENT') return { days: {} };
+    throw e;
+  }
+  let parsed: SavingsLedger | null = null;
+  try {
+    parsed = JSON.parse(raw) as SavingsLedger;
+  } catch {
+    parsed = null;
+  }
+  if (parsed && typeof parsed.days === 'object' && parsed.days !== null) return parsed;
+  if (backup && raw.trim() !== '') {
+    try {
+      renameSync(p, `${p}.corrupt-${Date.now()}`);
+    } catch {
+      /* the rewrite below still replaces it; nothing more to save */
+    }
+  }
+  return { days: {} };
 }
 
 /**
@@ -252,13 +320,21 @@ function ledgerKey(model: string): string {
  * normalised HERE: a writer that forgot would silently start a second row for a
  * model already in the file. */
 function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedger) => void): void {
+  const file = ledgerPath(d);
+  let ledger: SavingsLedger;
   try {
-    const ledger = readLedger(d);
+    ledger = readLedgerStrict(file, true);
+  } catch (e) {
+    // Not "empty" — unreadable. Writing now would replace the history with one
+    // day's worth, so this saving is dropped instead.
+    warnLedgerUnreadable(file, e);
+    return;
+  }
+  try {
     const day = (ledger.days[dayKey(when)] ??= {});
     const key = ledgerKey(model);
     const bucket = (day[key] ??= { savedTokens: 0, costMicros: 0, tokensBilled: 0 });
     patch(bucket);
-    const file = ledgerPath(d);
     writeJsonAtomic(file, ledger);
     // Note the folder in the user's profile so `graft savings --all` can find
     // this ledger from anywhere. Throttled to one write per repo per day, and

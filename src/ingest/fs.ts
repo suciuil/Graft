@@ -180,6 +180,24 @@ export function walkDir(
   return remapWalkPaths(requested, root, files);
 }
 
+/**
+ * What a plain filesystem walk of `dir` sees, with Git's view left out: the same
+ * skip list, `--include-dir`/`--exclude-dir` overrides and size cap as
+ * {@link walkDir}, but no `.gitignore`. Diagnostics only: set beside
+ * {@link walkDir}'s result, it shows which files Git's ignore rules are hiding,
+ * so a build that found nothing can say why rather than report "0 files".
+ */
+export function walkDirIgnoringGit(
+  dir: string,
+  includes?: ReadonlySet<string>,
+  excludes?: ReadonlySet<string>,
+): string[] {
+  const filter: DirFilter = { includes, excludes: partitionExcludes(excludes) };
+  const requested = resolve(dir);
+  const root = canonicalWalkRoot(requested);
+  return remapWalkPaths(requested, root, walkFilesystem(root, filter));
+}
+
 /** The per-repo directory overrides, carried together because every layer of
  * the walk needs all of them to answer "is this dir source". */
 interface DirFilter {

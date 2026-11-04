@@ -51,7 +51,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MAX_SESSION_AGE_MS } from './kilo-session.js';
+import { MAX_SESSION_AGE_MS, dirKeys } from './kilo-session.js';
 
 /** VS Code's user-data directory per platform, for each flavour in the field. */
 const FLAVOURS = ['Code', 'Code - Insiders'] as const;
@@ -198,16 +198,25 @@ export function editorWorkspaceFolders(
   return out;
 }
 
-function normalize(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+function within(f: string, r: string): boolean {
+  return r === f || r.startsWith(`${f}/`);
 }
 
 /** Whether `repo` is `folder` or lives inside it. A workspace folder is the repo
- * root in the normal case, but graft may be invoked from a subdirectory. */
-function covers(folder: string, repo: string): boolean {
-  const f = normalize(folder);
-  const r = normalize(repo);
-  return r === f || r.startsWith(`${f}/`);
+ * root in the normal case, but graft may be invoked from a subdirectory.
+ *
+ * Compared as given AND as resolved through junctions and symlinks, on both
+ * sides: VS Code records the folder the way it was opened (`d:/work/repo`, a
+ * junction), while git and the process cwd may report the real location
+ * (`D:/OneDrive/_D/work/repo`). Plain string equality missed that pair, so a
+ * Copilot session in a junctioned checkout named no model at all. `repoKeys` is
+ * built once by the caller, since this runs for every workspace on the machine. */
+function covers(folder: string, repoKeys: Set<string>): boolean {
+  const folderKeys = dirKeys(folder);
+  for (const f of folderKeys) {
+    for (const r of repoKeys) if (within(f, r)) return true;
+  }
+  return false;
 }
 
 /**
@@ -255,6 +264,7 @@ export function vscodeSessionModel(
   const maxAge = opts.maxAgeMs ?? MAX_SESSION_AGE_MS;
 
   const candidates: Array<{ mtime: number; file: string }> = [];
+  const repoKeys = dirKeys(repo);
 
   for (const userDir of userDataDirs(home, env, opts.os ?? platform())) {
     const storage = join(userDir, 'workspaceStorage');
@@ -272,7 +282,7 @@ export function vscodeSessionModel(
       if (!existsSync(sessions)) continue;
       const meta = join(dir, 'workspace.json');
       if (!existsSync(meta)) continue;
-      if (!workspaceFolders(meta).some((f) => covers(f, repo))) continue;
+      if (!workspaceFolders(meta).some((f) => covers(f, repoKeys))) continue;
 
       let files: string[];
       try {
