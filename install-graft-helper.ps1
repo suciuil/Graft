@@ -1,7 +1,9 @@
 # Helper of START-HERE-install-graft.cmd: double-click that launcher instead of running this file directly (it keeps
 # the window open and reports the result). Pass -Yes to the launcher to agree up front.
 # -Yes: agree up front (unattended runs); without it the user is asked before anything is changed
-param([switch]$Yes)
+# -Ask: ignore the answers remembered from earlier runs and ask every question again, as on a first install
+# Answers are remembered in $ChoicesFile, so an upgrade asks only about what is new since the last run or what fails
+param([switch]$Yes, [switch]$Ask)
 
 $ErrorActionPreference = 'Stop'
 # Shown when the installer starts: the upstream project (full documentation) and this fork's changelog of its own
@@ -84,6 +86,12 @@ $DefaultLlmModels = @{
     'llm-incubator' = 'gemini-3.8-flash'
 }
 $LlmTimeoutSec   = 15
+# The answers given in earlier runs (agreement items, the price list question); never any key or password
+$ChoicesFile = Join-Path $env:USERPROFILE '.graft\installer-choices.json'
+# The public price list 'graft prices update' downloads; the question about it is keyed on this URL, so a new
+# source is asked about again
+$PricesUrl = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
+$PricesAnswerId = "prices-download|$PricesUrl"
 
 # $null when $exe does not run (e.g. a version manager's shim or link pointing at a removed version)
 function Get-NodeVersion([string]$exe) {
@@ -1026,6 +1034,89 @@ function Invoke-LlmSetup {
     }
 }
 
+# ---- Answers remembered between runs ----
+# An upgrade asks only about what was not answered before: a new agreement item or question, or one whose meaning
+# changed (give it a new id). The LLM check asks whenever something fails, whatever was answered before.
+# Nothing secret is stored: API keys stay in the user environment variables, as before.
+
+function Get-Today { return (Get-Date).ToString('yyyy-MM-dd') }
+
+# @{ Agreed = @{ <item id> = <date> }; Answers = @{ <question id> = @{ Value; Date } }; Found }
+# Empty with -Ask (-Ignore), when there is no file yet, or when it cannot be read
+function Read-InstallerChoices([switch]$Ignore) {
+    $c = @{ Agreed = @{}; Answers = @{}; Found = $false }
+    if ($Ignore -or -not (Test-Path -LiteralPath $ChoicesFile -PathType Leaf)) { return $c }
+    try {
+        $j = Get-Content -LiteralPath $ChoicesFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($j.agreed) { foreach ($p in $j.agreed.PSObject.Properties) { if ($p.Value) { $c.Agreed[$p.Name] = "$($p.Value)" } } }
+        if ($j.answers) {
+            foreach ($p in $j.answers.PSObject.Properties) {
+                if ($p.Value -and $p.Value.value) { $c.Answers[$p.Name] = @{ Value = "$($p.Value.value)"; Date = "$($p.Value.date)" } }
+            }
+        }
+        $c.Found = $true
+    } catch {
+        Write-Warning "Could not read your earlier installer answers in ${ChoicesFile}: $($_.Exception.Message). You will be asked again."
+        # The file exists: answers are not taken over from an earlier installer either, so everything is asked
+        $c.Found = $true
+    }
+    return $c
+}
+
+# Problems here never fail the install: the next run asks again
+function Save-InstallerChoices($Choices) {
+    $agreed = [ordered]@{}
+    foreach ($k in @($Choices.Agreed.Keys | Sort-Object)) { $agreed[$k] = $Choices.Agreed[$k] }
+    $answers = [ordered]@{}
+    foreach ($k in @($Choices.Answers.Keys | Sort-Object)) { $answers[$k] = [ordered]@{ value = $Choices.Answers[$k].Value; date = $Choices.Answers[$k].Date } }
+    $json = [ordered]@{
+        note    = 'Answers given to START-HERE-install-graft.cmd, reused on upgrades. Delete this file, or run the installer with -Ask, to be asked again.'
+        agreed  = $agreed
+        answers = $answers
+    } | ConvertTo-Json -Depth 5
+    try {
+        New-Item -ItemType Directory -Force (Split-Path $ChoicesFile) | Out-Null
+        [IO.File]::WriteAllText($ChoicesFile, $json, (New-Object Text.UTF8Encoding $false))
+    } catch {
+        Write-Warning "Could not save your installer answers to ${ChoicesFile}: $($_.Exception.Message). The next run will ask again."
+    }
+}
+
+# graft installed by an installer from before answers were remembered: $GraftNodeMarker shows the user agreed to the
+# items it listed (-Legacy ones: every installer writing the marker listed them), and a downloaded price list shows the
+# answer to the price list question. Returns $true when earlier answers were taken over this way.
+function Add-EarlierInstallerChoices($Choices, $Items) {
+    if ($Choices.Found -or -not (Test-Path -LiteralPath $GraftNodeMarker -PathType Leaf)) { return $false }
+    $date = (Get-Item -LiteralPath $GraftNodeMarker).LastWriteTime.ToString('yyyy-MM-dd')
+    foreach ($i in $Items) { if ($i.Legacy -and -not $Choices.Agreed.ContainsKey($i.Id)) { $Choices.Agreed[$i.Id] = $date } }
+    $prices = Get-LlmSetting 'GRAFT_PRICES_FILE'
+    if (-not $prices) { $prices = Join-Path $env:USERPROFILE '.graft\prices.json' }
+    if (-not $Choices.Answers.ContainsKey($PricesAnswerId) -and (Test-Path -LiteralPath $prices -PathType Leaf)) {
+        $Choices.Answers[$PricesAnswerId] = @{ Value = 'yes'; Date = (Get-Item -LiteralPath $prices).LastWriteTime.ToString('yyyy-MM-dd') }
+    }
+    return $true
+}
+
+# What the price list download does and does not send, shown before asking about it
+function Show-PricesNotice {
+    Write-Host "graft can download LiteLLM's latest public model price list ('graft prices update') to price its savings for"
+    Write-Host 'newer models. This is ONE read-only .json file, hosted on GitHub:'
+    Write-Host "    $PricesUrl"
+    Write-Host '  - LiteLLM is used only as the source of this price list; graft sends nothing to it: no code, file or repository'
+    Write-Host '    names, prompts, model names, API keys, credentials or usage data, nothing about you or this PC.'
+    Write-Host "  - As with any download, the server sees only your IP address and Node.js's standard request headers."
+    Write-Host '  - The prices are stored locally in %USERPROFILE%\.graft\prices.json; every price lookup afterwards stays on this PC.'
+}
+
+# $true when npm already holds a valid login for $Url, so 'npm login' would only ask for credentials again
+function Test-NpmLoggedIn([string]$Url) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        & npm whoami --registry $Url *> $null
+        return $LASTEXITCODE -eq 0
+    } catch { return $false }
+}
+
 # changelog.html next to this script (offline kit), else docs\changelog.html (checkout of the fork), else $null
 function Find-Changelog {
     if (-not $PSScriptRoot) { return $null }
@@ -1073,22 +1164,49 @@ $OfflineNode = Find-OfflineNode
 $NodeDownloadVersion = $null
 $nodeSource = if ($OfflineNode) { "install Node.js $($OfflineNode.Version) from the offline package $($OfflineNode.File.Name) next to this script" }
 else { "download the latest Node.js LTS from nodejs.org" }
+# What the user agrees to. An Id stays the same across versions so an upgrade does not ask about it again; give an
+# item a new Id when what it does changes in a way the user should agree to again. A NEW item (no Legacy) is asked
+# about even on PCs where an installer from before answers were remembered already ran.
+$ConsentItems = @(
+    [pscustomobject]@{ Id = 'node-install'; Legacy = $true; Text = "$nodeSource into $NodeHome, if no suitable Node.js is found" }
+    [pscustomobject]@{ Id = 'user-path'; Legacy = $true; Text = "add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix" }
+    [pscustomobject]@{ Id = 'graft-install'; Legacy = $true; Text = "install graft globally with npm from $graftSource" }
+    [pscustomobject]@{ Id = 'execution-policy'; Legacy = $true; Text = 'set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell' }
+    [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings" }
+    [pscustomobject]@{ Id = 'llm-check'; Legacy = $true; Text = 'check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL' }
+)
+$Choices = Read-InstallerChoices -Ignore:$Ask
+$fromEarlierInstall = (-not $Ask) -and (Add-EarlierInstallerChoices $Choices $ConsentItems)
+$newItems = @($ConsentItems | Where-Object { -not $Choices.Agreed.ContainsKey($_.Id) })
+$agreedBefore = $newItems.Count -lt $ConsentItems.Count
 Write-Host "This script will install or upgrade graft for user $env:USERNAME (no admin rights needed). It may:"
-Write-Host "  - $nodeSource into $NodeHome, if no suitable Node.js is found"
-Write-Host "  - add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix"
-Write-Host "  - install graft globally with npm from $graftSource"
-Write-Host '  - set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell'
-Write-Host "  - offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings"
-Write-Host '  - check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL'
+foreach ($item in $ConsentItems) {
+    if ($agreedBefore -and -not $Choices.Agreed.ContainsKey($item.Id)) { Write-Host "  - NEW: $($item.Text)" -ForegroundColor Yellow }
+    else { Write-Host "  - $($item.Text)" }
+}
 if ($Yes) {
     Write-Host 'Proceeding (-Yes was given).'
+} elseif (-not $newItems.Count) {
+    $agreedOn = @($ConsentItems | ForEach-Object { $Choices.Agreed[$_.Id] } | Sort-Object) | Select-Object -Last 1
+    if ($fromEarlierInstall) { Write-Host "You agreed to all of this when graft was installed on this PC ($agreedOn); continuing without asking again." }
+    else { Write-Host "You agreed to all of this on $agreedOn; continuing without asking again." }
+    Write-Host '(Run START-HERE-install-graft.cmd -Ask to be asked every question again.)'
 } elseif (-not (Test-CanPrompt)) {
-    Write-Host 'No interactive console to ask for agreement; nothing was changed. Run again with -Yes to install unattended.'
+    $what = if ($agreedBefore) { 'the NEW items' } else { 'agreement' }
+    Write-Host "No interactive console to ask for $what; nothing was changed. Run again with -Yes to install unattended."
     exit 2
-} elseif ((Read-Line 'Do you agree and want to continue? [y/N]') -notmatch '^(y|yes)$') {
-    Write-Host 'Installation cancelled; nothing was downloaded, installed or changed.'
-    exit 2
+} else {
+    $question = if ($agreedBefore) { 'You agreed to the other items earlier. Do you agree to the NEW items and want to continue? [y/N]' }
+    else { 'Do you agree and want to continue? [y/N]' }
+    if ((Read-Line $question) -notmatch '^(y|yes)$') {
+        Write-Host 'Installation cancelled; nothing was downloaded, installed or changed.'
+        exit 2
+    }
 }
+# Remembered from here on (nothing else has been changed yet); the earlier date stays for items agreed to before
+$today = Get-Today
+foreach ($item in $newItems) { $Choices.Agreed[$item.Id] = $today }
+Save-InstallerChoices $Choices
 Write-Host ''
 
 $wanted = if ($OfflineNode) { $OfflineNode.Version } else {
@@ -1172,7 +1290,12 @@ if ($offline) {
     }
     Write-Host "No offline graft package (nanonets-graft-X.Y.Z-win32-x64.tgz) next to this script; installing from $Registry"
     & npm config set '@nanonets:registry' $Registry --location=user
-    & npm login --registry $Registry --scope=@nanonets     # remove if anonymous read is allowed
+    # Credentials are asked for only when npm holds no valid login for the registry (remove if anonymous read is allowed)
+    if (Test-NpmLoggedIn $Registry) {
+        Write-Host "Already logged in to $Registry; no npm login needed."
+    } else {
+        & npm login --registry $Registry --scope=@nanonets
+    }
     $installArgs += '@nanonets/graft'
 }
 
@@ -1227,17 +1350,36 @@ if (-not $pathOk) {
 
 # 5c. LiteLLM's public model price/info catalog, so graft can price savings for models its built-in table
 # does not list (one anonymous GET; problems here never fail the install)
+# Asked once: later runs reuse the answer (a new download address is asked about again)
 Write-Host ''
-Write-Host "graft can download LiteLLM's latest public model price list ('graft prices update') to price its savings for"
-Write-Host 'newer models. This is ONE read-only .json file, hosted on GitHub:'
-Write-Host '    https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
-Write-Host '  - LiteLLM is used only as the source of this price list; graft sends nothing to it: no code, file or repository'
-Write-Host '    names, prompts, model names, API keys, credentials or usage data, nothing about you or this PC.'
-Write-Host "  - As with any download, the server sees only your IP address and Node.js's standard request headers."
-Write-Host '  - The prices are stored locally in %USERPROFILE%\.graft\prices.json; every price lookup afterwards stays on this PC.'
-$getPrices = $Yes
-if (-not $Yes) {
+$pricesBefore = $Choices.Answers[$PricesAnswerId]
+$getPrices = $false
+if ($Yes) {
+    Show-PricesNotice
+    $getPrices = $true
+} elseif ($pricesBefore) {
+    $getPrices = $pricesBefore.Value -eq 'yes'
+    if ($getPrices) {
+        Write-Host "Updating LiteLLM's public model price list, as you chose on $($pricesBefore.Date) (one read-only file; graft sends"
+        Write-Host "nothing to it): $PricesUrl"
+    } else {
+        Write-Host "Not downloading LiteLLM's public model price list, as you chose on $($pricesBefore.Date). Run 'graft prices update'"
+        Write-Host 'to download it later, or START-HERE-install-graft.cmd -Ask to be asked again.'
+    }
+} elseif (Test-CanPrompt) {
+    Show-PricesNotice
     $getPrices = (Read-Line 'Download the latest model prices from LiteLLM now? [Y/n]') -notmatch '^(n|no)$'
+    if (-not $getPrices) { Write-Host "Skipped. Run 'graft prices update' later to download them." }
+} else {
+    Write-Host "No interactive console to ask about downloading LiteLLM's public model price list; skipped. Run 'graft prices update'"
+    Write-Host 'later to download it.'
+}
+# A new answer (asked now, or -Yes changing an earlier one) is remembered; no console means nothing was answered
+$pricesAnswer = if ($getPrices) { 'yes' } else { 'no' }
+$pricesAnswered = if ($Yes) { -not $pricesBefore -or $pricesBefore.Value -ne 'yes' } else { -not $pricesBefore -and (Test-CanPrompt) }
+if ($pricesAnswered) {
+    $Choices.Answers[$PricesAnswerId] = @{ Value = $pricesAnswer; Date = (Get-Today) }
+    Save-InstallerChoices $Choices
 }
 if ($getPrices) {
     try {
@@ -1246,8 +1388,6 @@ if ($getPrices) {
     } catch {
         Write-Warning "Could not run 'graft prices update': $($_.Exception.Message)"
     }
-} else {
-    Write-Host "Skipped. Run 'graft prices update' later to download them."
 }
 
 # 6. LLM endpoint, key and model for `graft build --deep` (problems here never fail the install)

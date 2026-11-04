@@ -38,7 +38,8 @@ build-bundle/
 # a downloaded nodejs.org artifact for the installer, not a build input.
 /node-v*-win-x64*.zip
 
-# Offline installer kit written by `npm run pack:bundle` on Windows.
+# Offline installer kit written by `npm run pack:bundle` on Windows. (Its record,
+# kit-build.json, IS committed: the next kit's build number continues from it.)
 /graft-*-win-*.zip
 
 # graft's local repository settings — not committed.

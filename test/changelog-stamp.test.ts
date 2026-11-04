@@ -30,6 +30,16 @@ test("stampChangelog adds to the same build's group when the version is packed a
   assert.ok(html.indexOf("<li>a</li>") < html.indexOf("<li>b</li>"));
 });
 
+test("stampChangelog heads a group by kit and graft version for a kit build, else by package build", () => {
+  const li = "    <li>a</li>\n";
+  assert.ok(stampChangelog(page(li), { date: "2026-11-05", version: "1.2.3" }).html.includes("<small>package build 1.2.3</small>"));
+  const kit = stampChangelog(page(li), { date: "2026-11-05", version: "1.2.3.4" }).html;
+  assert.ok(kit.includes('data-version="1.2.3.4"'));
+  assert.ok(kit.includes("<small>kit 1.2.3.4, graft 1.2.3</small>"));
+  const pre = stampChangelog(page(li), { date: "2026-11-05", version: "1.2.3.2-beta.1" }).html;
+  assert.ok(pre.includes("<small>kit 1.2.3.2-beta.1, graft 1.2.3-beta.1</small>"));
+});
+
 test("stampChangelog leaves the page alone when nothing is pending", () => {
   const html = page("");
   assert.deepEqual(stampChangelog(html, { date: "2026-11-05", version: "1.2.3" }), { html, count: 0 });

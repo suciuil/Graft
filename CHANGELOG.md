@@ -4,6 +4,24 @@
 
 ### Added
 
+- **The Windows installer remembers your answers.** An upgrade with
+  `START-HERE-install-graft.cmd` no longer asks again what you already
+  answered: it shows what it will do and continues, asks only about items that
+  are new since your last run (marked NEW), reuses your answer about the model
+  price list, and asks about the LLM endpoint, API key or model only when their
+  check fails. `npm login` runs only when you are not logged in to the registry.
+  On a PC where an earlier installer already ran, that agreement counts. The
+  answers are kept in `%USERPROFILE%\.graft\installer-choices.json` (no keys or
+  passwords); `START-HERE-install-graft.cmd -Ask` asks everything again.
+- **The Windows offline installer kit carries a build number.** `npm run
+  pack:bundle` now writes `graft-a.b.c.d-win-<arch>.zip`: `a.b.c` is the graft
+  version inside the kit and `d` starts at 1 and goes up by 1 with each pack of
+  the same graft version, back to 1 when the version changes. The last kit is
+  recorded in `kit-build.json` in the repo root, which is committed so every
+  clone continues the same numbering; a record that cannot be read stops the
+  pack instead of guessing. Without a record the pack continues from the
+  newest kit build named in the fork changelog, then from the newest numbered
+  kit in the repo root. The fork changelog names each build by its kit version.
 - **`graft about` tells you where to read about graft.** Without a target it
   prints what graft is for, the project homepage
   (https://github.com/trailhq/Trail-Code) and the path and `file:///` link of
