@@ -22,6 +22,7 @@ function git(checkout: string, args: string[], input?: string): Buffer | null {
       stdio: ["pipe", "pipe", "ignore"],
       timeout: 15_000,
       maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
   } catch {

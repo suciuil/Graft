@@ -46,6 +46,7 @@ function gitTopLevel(dir: string): string | null {
     cwd: dir,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    windowsHide: true,
   });
   if (r.status !== 0 || r.error || typeof r.stdout !== "string") return null;
   const top = r.stdout.trim();
@@ -62,6 +63,7 @@ export function ignoringRule(dir: string, path: string, repoRoot: string): Ignor
     cwd: dir,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    windowsHide: true,
   });
   // 0 = ignored, 1 = not ignored, anything else = git could not say.
   if (r.status !== 0 || r.error || typeof r.stdout !== "string") return undefined;

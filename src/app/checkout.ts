@@ -80,6 +80,7 @@ function git(dir: string, args: string[], token?: string): { ok: boolean; out: s
       encoding: "utf8",
       timeout: GIT_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
       env: {
         ...process.env,
         // No credential prompts, no system config, no repo-supplied helpers.

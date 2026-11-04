@@ -56,7 +56,7 @@ function resolveCommand(cmd: string): string | null {
   try {
     abs = process.platform === "win32"
       ? findOnWindowsPath(cmd)
-      : execSync(`command -v ${cmd}`, { encoding: "utf8" }).trim() || null;
+      : execSync(`command -v ${cmd}`, { encoding: "utf8", windowsHide: true }).trim() || null;
   } catch { abs = null; }
   resolved.set(cmd, abs);
   return abs;

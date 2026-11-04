@@ -7,11 +7,11 @@
 - **`graft about` tells you where to read about graft.** Without a target it
   prints what graft is for, the project homepage
   (https://github.com/trailhq/Trail-Code) and the path and `file:///` link of
-  the fork report, which lists the changes this fork makes that upstream does
-  not have. `graft about home` opens the homepage in your browser and
-  `graft about fork` opens the fork report; `graft info` is the same command.
+  the fork changelog, which lists the changes this fork makes that upstream does
+  not have, newest first. `graft about home` opens the homepage in your browser and
+  `graft about fork` opens the fork changelog; `graft info` is the same command.
   Nothing is sent: it only opens a page. The npm package and the offline kit's
-  tarball now include `docs/fork-report.html`, so the report is there after
+  tarball now include `docs/changelog.html`, so the changelog is there after
   install.
 - **The Windows installer starts with what graft is for and what this fork
   changes.** `START-HERE-install-graft.cmd` first explains in a few lines what
@@ -19,10 +19,10 @@
   need, so fewer tokens and tool calls and lower costs with top-tier models),
   points to the upstream project (https://github.com/trailhq/Trail-Code) for
   the full documentation, and highlights that this is a fork: it shows the path
-  and a `file:///` link of the fork report and offers to open it in the browser
-  (not with `-Yes`). The offline kit now ships `docs/fork-report.html` as
-  `fork-report.html` next to the installer; in a checkout of the fork the
-  installer finds `docs/fork-report.html`.
+  and a `file:///` link of the fork changelog, without asking to open it. The
+  offline kit now ships `docs/changelog.html` as
+  `changelog.html` next to the installer; in a checkout of the fork the
+  installer finds `docs/changelog.html`.
 - **`graft prices update` says what it downloads before it downloads.** It
   prints that LiteLLM is only the source of one public `.json` price file (the
   exact URL, hosted on GitHub), that graft sends nothing to it (no code, file
@@ -136,6 +136,13 @@
 
 ### Fixed
 
+- **No more console windows flashing on Windows.** Graft runs some work in
+  the background (after `graft ask`, for example, it refreshes the branch
+  information), and agents such as Claude Code start graft without a console.
+  On Windows, every git, gh or npm call made from there opened its own
+  console window for a moment. Graft now starts all its helper programs with
+  their window hidden; only opening a page or file in your browser shows a
+  window. A test fails if a new spawn leaves this out.
 - **Databricks GPT models without a `model_service.models.1adp-*` id work.**
   `databricks-gpt-*` ids (for example `databricks-gpt-6-astra` and
   `databricks-gpt-5-mini`, which have no service id) now go to the gateway's

@@ -90,14 +90,16 @@ export function npmCommandLine(args: string[]): string | null {
 
 /** Runs npm. On Windows npm is `npm.cmd`, which Node can only start through cmd. */
 function spawnNpm(args: string[], opts: Omit<SpawnSyncOptionsWithStringEncoding, "encoding" | "shell">): SpawnSyncReturns<string> {
-  if (process.platform !== "win32") return spawnSync("npm", args, { ...opts, encoding: "utf8" });
+  if (process.platform !== "win32") return spawnSync("npm", args, { windowsHide: true, ...opts, encoding: "utf8" });
   const line = npmCommandLine(args);
   if (line === null) {
     const error = new Error(`refusing to pass an argument with shell characters to cmd: ${args.join(" ")}`);
     return { pid: 0, output: [], stdout: "", stderr: "", status: null, signal: null, error };
   }
   // One string, no args array: cmd gets only the checked line, and Node raises no DEP0190.
-  return spawnSync(line, { ...opts, encoding: "utf8", shell: true });
+  // windowsHide by default: a cmd.exe started by a console-less graft (a detached background job) would
+  // otherwise open a console window of its own.
+  return spawnSync(line, { windowsHide: true, ...opts, encoding: "utf8", shell: true });
 }
 
 /** `npm view <pkg> version`, offline-safe: any failure (no npm, no network,
@@ -137,6 +139,7 @@ function globalRoot(): string | null {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       shell: process.platform === "win32",
+      windowsHide: true,
     }).trim();
     return root || null;
   } catch {

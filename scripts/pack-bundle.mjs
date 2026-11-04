@@ -32,12 +32,16 @@
  *                 refused when either is older than its sources
  *
  * On Windows it also writes graft-<version>-win-<arch>.zip, the offline installer kit:
- * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/fork-report.html (as
- * fork-report.html, which the installer shows and offers to open) and the latest LTS node-vX.Y.Z-win-<arch>.zip,
+ * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/changelog.html (as
+ * changelog.html, whose path the installer shows) and the latest LTS node-vX.Y.Z-win-<arch>.zip,
  * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
  * there). Offline, it falls back to the newest such zip already in the repo root. The
  * standalone tarball is then deleted, together with kits and tarballs left by earlier
  * packs (any version): the new kit is the only artifact left.
+ *
+ * The fork changelog's "Not yet bundled" entries are dated with this build (today's date
+ * and the package version) in the shipped copies, and in docs/changelog.html once
+ * the build has succeeded.
  *
  * Either way vendor/ is re-staged from the sibling repos' prebuilds (build:vendor) and
  * verified byte-for-byte against them before packing, so the tarball cannot carry
@@ -49,6 +53,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { localDate, stampChangelog } from "./stamp-changelog.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stagingDir = join(repoRoot, "build-bundle");
@@ -168,11 +173,17 @@ const keyToPkg = extract.optionalGrammarPackages();
 rmSync(stagingDir, { recursive: true, force: true });
 mkdirSync(stagingDir, { recursive: true });
 
-// docs/fork-report.html rides along so `graft about fork` can open it after install.
-for (const entry of ["dist", "scripts", "README.md", "LICENSE", join("docs", "fork-report.html")]) {
+for (const entry of ["dist", "scripts", "README.md", "LICENSE"]) {
   const from = join(repoRoot, entry);
   if (existsSync(from)) cpSync(from, join(stagingDir, entry), { recursive: true });
 }
+// docs/changelog.html rides along so `graft about fork` can open it after install,
+// with its not-yet-bundled entries dated by this build.
+const changelogPath = join(repoRoot, "docs", "changelog.html");
+const bundleDate = localDate();
+const changelog = stampChangelog(readFileSync(changelogPath, "utf8"), { date: bundleDate, version: pkg.version });
+mkdirSync(join(stagingDir, "docs"), { recursive: true });
+writeFileSync(join(stagingDir, "docs", "changelog.html"), changelog.html);
 
 // Each grammar's compiled binding, already laid out by scripts/vendor-optional-grammars.mjs
 // (run as build:vendor) in exactly the shape the loader's fallback expects. Copied
@@ -218,7 +229,7 @@ delete staged.optionalDependencies;
 delete staged.devDependencies;
 delete staged.allowScripts;
 staged.scripts = pkg.scripts?.postinstall ? { postinstall: pkg.scripts.postinstall } : {};
-staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE", "docs/fork-report.html"];
+staged.files = ["dist", "scripts", "vendor", "README.md", "LICENSE", "docs/changelog.html"];
 writeFileSync(join(stagingDir, "package.json"), `${JSON.stringify(staged, null, 2)}\n`);
 
 // The 19 optional grammars are in `vendor/` by now, but `dependencies` — tree-sitter
@@ -447,8 +458,8 @@ if (kitName) {
   try {
     cpSync(join(repoRoot, nodeZipSource), join(kitDir, nodeZipName));
     for (const f of [finalName, "install-graft-helper.ps1", "START-HERE-install-graft.cmd"]) cpSync(join(repoRoot, f), join(kitDir, f));
-    // The installer shows (and offers to open) this fork's report of its changes, looked up next to itself
-    cpSync(join(repoRoot, "docs", "fork-report.html"), join(kitDir, "fork-report.html"));
+    // The installer shows the path of this fork's changelog of its changes, looked up next to itself
+    writeFileSync(join(kitDir, "changelog.html"), changelog.html);
     const zipped = spawnSync(
       "powershell.exe",
       [
@@ -470,7 +481,12 @@ if (kitName) {
   rmSync(join(repoRoot, finalName), { force: true });
   removeStaleArtifacts(kitName);
   const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
-  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, fork-report.html`);
+  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, changelog.html`);
+}
+
+if (changelog.count > 0) {
+  writeFileSync(changelogPath, changelog.html);
+  console.log(`\n✓ docs/changelog.html: ${changelog.count} not-yet-bundled entr${changelog.count === 1 ? "y" : "ies"} dated ${bundleDate} (build ${pkg.version})`);
 }
 
 if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);

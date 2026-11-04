@@ -78,7 +78,7 @@ export function repoRef(repo: string): RepoRef {
 export function machineName(): string {
   if (process.platform === "darwin") {
     try {
-      const name = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 }).trim();
+      const name = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000, windowsHide: true }).trim();
       if (name) return name.slice(0, 80);
     } catch {
       /* the host name below */
@@ -542,6 +542,7 @@ function git(repo: string, args: string[], timeout = 15_000): string | null {
       stdio: ["ignore", "pipe", "ignore"],
       timeout,
       maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
   } catch {
@@ -607,7 +608,7 @@ function fetchQuietly(repo: string): void {
   try {
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     if (!env.GIT_SSH_COMMAND && !git(repo, ["config", "core.sshCommand"])?.trim()) env.GIT_SSH_COMMAND = "ssh -o BatchMode=yes";
-    execFileSync("git", ["fetch", "--quiet", "--prune", "origin"], { cwd: repo, stdio: "ignore", timeout: 20_000, env });
+    execFileSync("git", ["fetch", "--quiet", "--prune", "origin"], { cwd: repo, stdio: "ignore", timeout: 20_000, env, windowsHide: true });
   } catch {
     /* offline, or no origin: the refs already here */
   }

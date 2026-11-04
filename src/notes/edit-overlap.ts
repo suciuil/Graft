@@ -58,6 +58,7 @@ function git(repo: string, args: string[]): string | null {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
       maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
   } catch {
