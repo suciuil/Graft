@@ -100,8 +100,15 @@ same change, before your final reply, without being asked.
    - `data-group="bundle"`: one per successful `npm run pack:bundle`, dated with
      that run. Never create or date these by hand:
      `scripts/stamp-changelog.mjs`, called by `scripts/pack-bundle.mjs`,
-     moves the pending entries into a new bundle group (date and package
-     version) right after `<!-- groups:start -->`.
+     moves the pending entries into a new bundle group (date and build
+     version) right after `<!-- groups:start -->`. On Windows the build version
+     is the offline kit's `a.b.c.d` (kit `graft-a.b.c.d-win-<arch>.zip`): graft
+     version `a.b.c` plus kit build `d`, which starts at 1, goes up by 1 with
+     each pack of the same graft version and restarts at 1 for a new one
+     (`scripts/kit-build.mjs`). The pack records the last kit in `kit-build.json`
+     (repo root); never edit it by hand, and commit it together with the
+     `docs/changelog.html` the same pack stamped, so every clone continues the
+     numbering. Elsewhere the build version is the package version.
    - `data-group="commit"`: entries from before build dates were recorded,
      dated by the first commit of the change ("first committed; build date not
      recorded"). Do not add new commit groups except when regenerating (rule 6).

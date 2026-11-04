@@ -31,7 +31,10 @@
  *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first;
  *                 refused when either is older than its sources
  *
- * On Windows it also writes graft-<version>-win-<arch>.zip, the offline installer kit:
+ * On Windows it also writes graft-<version>.<build>-win-<arch>.zip, the offline installer kit
+ * (<build> counts the packs of this graft version: 1, 2, … and back to 1 for a new version;
+ * see scripts/kit-build.mjs; the last kit is recorded in kit-build.json, which is committed
+ * together with docs/changelog.html so every clone continues the same numbering):
  * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/changelog.html (as
  * changelog.html, whose path the installer shows) and the latest LTS node-vX.Y.Z-win-<arch>.zip,
  * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
@@ -54,15 +57,51 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { localDate, stampChangelog } from "./stamp-changelog.mjs";
+import { kitFileName, kitVersion, latestKitInChangelog, nextKitBuild, parseKitName, parseKitRecord } from "./kit-build.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stagingDir = join(repoRoot, "build-bundle");
+/** The graft version and build number of the last kit written (see scripts/kit-build.mjs); committed. */
+const kitRecordPath = join(repoRoot, "kit-build.json");
 const skipBuild = process.argv.includes("--skip-build");
 const PLATFORM = `${process.platform}-${process.arch}`;
 
 function die(message) {
   console.error(`✗ ${message}`);
   process.exit(1);
+}
+
+/**
+ * The previous kit ({ version, build } or null), from the committed kit-build.json the last
+ * successful pack wrote. A record that exists but cannot be read stops the pack rather than
+ * guess a number. Only when there is no record: the newest build group of docs/changelog.html
+ * named by a kit version, then the newest numbered kit in the repo root.
+ */
+function previousKit() {
+  if (existsSync(kitRecordPath)) {
+    let rec = null;
+    try {
+      rec = parseKitRecord(readFileSync(kitRecordPath, "utf8"));
+    } catch (err) {
+      die(`could not read ${kitRecordPath} (${err.message}) — restore it from git (git checkout -- kit-build.json) so the kit build number continues from the last kit`);
+    }
+    if (!rec) die(`${kitRecordPath} has no valid "version" and "build" (1 or more) — restore it from git (git checkout -- kit-build.json)`);
+    return rec;
+  }
+  const fromChangelog = latestKitInChangelog(readFileSync(join(repoRoot, "docs", "changelog.html"), "utf8"));
+  if (fromChangelog) {
+    console.warn(`! no ${kitRecordPath} — continuing from the newest kit build in docs/changelog.html (${kitVersion(fromChangelog.version, fromChangelog.build)})`);
+    return fromChangelog;
+  }
+  const kits = readdirSync(repoRoot)
+    .map((name) => ({ kit: parseKitName(name, process.arch), name }))
+    .filter(({ kit }) => kit)
+    .map(({ kit, name }) => ({ ...kit, mtime: statSync(join(repoRoot, name)).mtimeMs }))
+    .sort((a, b) => a.mtime - b.mtime || a.build - b.build);
+  const newest = kits.at(-1);
+  if (newest) console.warn(`! no ${kitRecordPath} — continuing from the newest kit in the repo root (${kitVersion(newest.version, newest.build)})`);
+  else console.warn(`! no ${kitRecordPath} and no earlier numbered kit — this kit is build 1`);
+  return newest ? { version: newest.version, build: newest.build } : null;
 }
 
 /** Same shell-free npm invocation as build-grammars.mjs: the `.cmd` shim cannot be
@@ -181,7 +220,11 @@ for (const entry of ["dist", "scripts", "README.md", "LICENSE"]) {
 // with its not-yet-bundled entries dated by this build.
 const changelogPath = join(repoRoot, "docs", "changelog.html");
 const bundleDate = localDate();
-const changelog = stampChangelog(readFileSync(changelogPath, "utf8"), { date: bundleDate, version: pkg.version });
+// On Windows the build is named by its kit version (a.b.c.d, d counting the packs of this
+// graft version), so each kit gets its own changelog group; elsewhere by the package version.
+const kitBuild = process.platform === "win32" ? nextKitBuild(pkg.version, previousKit()) : null;
+const buildVersion = kitBuild ? kitVersion(pkg.version, kitBuild) : pkg.version;
+const changelog = stampChangelog(readFileSync(changelogPath, "utf8"), { date: bundleDate, version: buildVersion });
 mkdirSync(join(stagingDir, "docs"), { recursive: true });
 writeFileSync(join(stagingDir, "docs", "changelog.html"), changelog.html);
 
@@ -382,7 +425,7 @@ function removeOlderNodeZips(keep) {
 
 /**
  * Removes earlier pack outputs from the repo root once `keep` (the kit just written) is
- * there: every other graft-X.Y.Z-win-<arch>*.zip kit, and every
+ * there: every other graft-X.Y.Z[.D]-win-<arch>*.zip kit, and every
  * <pkg>-X.Y.Z-win32-<arch>*.tgz/.zip tarball, whatever its version — the current one is
  * inside `keep`. The trailing (.*) also catches "- Copy" / " (1)" duplicates, as the
  * installer's own patterns do.
@@ -390,7 +433,9 @@ function removeOlderNodeZips(keep) {
 function removeStaleArtifacts(keep) {
   const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const ver = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
-  const kitRe = new RegExp(`^graft-${ver}-win-${escape(process.arch)}(.*)\\.zip$`, "i");
+  // Kits carry a build number after a.b.c (graft-0.28.0.3-win-x64.zip); older ones did not
+  const kitVer = String.raw`\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?`;
+  const kitRe = new RegExp(`^graft-${kitVer}-win-${escape(process.arch)}(.*)\\.zip$`, "i");
   const pkgPrefix = escape(pkg.name.replace(/^@/, "").replace(/\//g, "-"));
   const tarballRe = new RegExp(`^${pkgPrefix}-${ver}-${escape(PLATFORM)}(.*)\\.(?:tgz|zip)$`, "i");
   for (const name of readdirSync(repoRoot)) {
@@ -437,7 +482,7 @@ async function downloadLtsNodeZip(arch) {
   return name;
 }
 
-const kitName = process.platform === "win32" ? `graft-${pkg.version}-win-${process.arch}.zip` : null;
+const kitName = kitBuild ? kitFileName(pkg.version, kitBuild, process.arch) : null;
 if (kitName) {
   let nodeZipSource;
   let nodeZipName;
@@ -480,15 +525,25 @@ if (kitName) {
   // the new kit is the only artifact left in the repo root.
   rmSync(join(repoRoot, finalName), { force: true });
   removeStaleArtifacts(kitName);
+  // The next pack, on any clone, numbers its kit from this one
+  const record = {
+    $comment: "Last offline kit written by npm run pack:bundle; the next kit's build number continues from it. Commit this file. See scripts/kit-build.mjs.",
+    version: pkg.version,
+    build: kitBuild,
+    kit: kitName,
+    date: bundleDate,
+  };
+  writeFileSync(kitRecordPath, `${JSON.stringify(record, null, 2)}\n`);
   const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
-  console.log(`\n✓ ${kitName} (${kitMb} MB) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, changelog.html`);
+  console.log(`\n✓ ${kitName} (${kitMb} MB, build ${kitBuild} of graft ${pkg.version}) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, changelog.html`);
 }
 
 if (changelog.count > 0) {
   writeFileSync(changelogPath, changelog.html);
-  console.log(`\n✓ docs/changelog.html: ${changelog.count} not-yet-bundled entr${changelog.count === 1 ? "y" : "ies"} dated ${bundleDate} (build ${pkg.version})`);
+  console.log(`\n✓ docs/changelog.html: ${changelog.count} not-yet-bundled entr${changelog.count === 1 ? "y" : "ies"} dated ${bundleDate} (build ${buildVersion})`);
 }
 
+if (kitName) console.log(`\n  Commit kit-build.json${changelog.count > 0 ? " and docs/changelog.html" : ""}, so the next kit continues from build ${kitBuild}.`);
 if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);
 else console.log(`\n  Install on another ${PLATFORM} machine with:`);
 console.log(`    npm i -g ./${finalName} --ignore-scripts\n`);
