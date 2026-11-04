@@ -100,7 +100,8 @@ import { buildGraphWithProgress } from "./claude/build-progress.js";
 import { installBrainsServer, installCursorBrainsServer, removeBrainsServer, removeCursorBrainsServer } from "./hosts/claude-global.js";
 import { upsertCodexToml } from "./hosts/mcp-config.js";
 import { homedir } from "node:os";
-import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, runUpgrade } from "./cli-meta.js";
+import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, resolvePackageJsonPath, runUpgrade } from "./cli-meta.js";
+import { ABOUT_TARGETS, PROJECT_URL, fileUri, findForkReport, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
 import { nativeFallbackNotice } from "./graph/native.js";
 import {
   DEFAULT_DEEP_STALE_THRESHOLD,
@@ -667,6 +668,37 @@ grouped(program.command("issues"), GROUP.setup)
   .action(() => {
     console.log(`Report issues at: ${ISSUES_URL}`);
     openBrowser(ISSUES_URL);
+  });
+
+grouped(program.command("about"), GROUP.setup)
+  .alias("info")
+  .description(`Where to read about ${brand()}: the project homepage, or the report of the changes in this fork`)
+  .argument("[target]", `open one in your browser: ${ABOUT_TARGETS.join(" or ")}`)
+  .action((raw: string | undefined) => {
+    const report = findForkReport(resolvePackageJsonPath(import.meta.url));
+    if (raw === undefined) {
+      console.log(formatAbout(brand(), currentVersion, report));
+      return;
+    }
+    const target = parseAboutTarget(raw);
+    if (target === "home") {
+      console.log(`Project homepage: ${PROJECT_URL}`);
+      openBrowser(PROJECT_URL);
+      return;
+    }
+    if (target === "fork") {
+      if (!report) {
+        console.error("✗ the fork report is not in this installation (expected docs/fork-report.html next to package.json).");
+        process.exit(1);
+        return;
+      }
+      console.log(`Fork report: ${report}`);
+      console.log(`             ${fileUri(report)}`);
+      openLocalFile(report);
+      return;
+    }
+    console.error(`✗ unknown target "${raw}": expected ${ABOUT_TARGETS.join(" or ")}, or nothing to print both`);
+    process.exit(1);
   });
 
 grouped(program.command("upgrade"), GROUP.setup)

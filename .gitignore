@@ -12,6 +12,8 @@ graft/
 # Env
 .env
 .env.local
+# Local database credentials for the savings report — a secret, never committed.
+config/savings-report.json
 
 # OS
 .DS_Store

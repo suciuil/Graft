@@ -4,6 +4,10 @@
 param([switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
+# Shown when the installer starts: the upstream project (full documentation) and this fork's report of its own
+# changes, looked up next to this script (the offline kit) and then in docs\ (a checkout of the fork)
+$ProjectUrl     = 'https://github.com/trailhq/Trail-Code'
+$ForkReportName = 'fork-report.html'
 $Registry     = 'https://<company>.jfrog.io/artifactory/api/npm/<npm-repo>/'
 # Without an offline Node.js zip next to this script, the latest LTS is downloaded from $NodeDist;
 # $NodeVersion is used only when that lookup fails
@@ -1062,7 +1066,56 @@ function Invoke-LlmSetup {
     }
 }
 
+# fork-report.html next to this script (offline kit), else docs\fork-report.html (checkout of the fork), else $null
+function Find-ForkReport {
+    if (-not $PSScriptRoot) { return $null }
+    foreach ($p in @((Join-Path $PSScriptRoot $ForkReportName), (Join-Path (Join-Path $PSScriptRoot 'docs') $ForkReportName))) {
+        if (Test-Path -LiteralPath $p -PathType Leaf) { return (Resolve-Path -LiteralPath $p).ProviderPath }
+    }
+    return $null
+}
+
+# What graft is for, where to read more, and - prominently - what this fork changes compared with upstream
+function Show-Intro {
+    Write-Host ''
+    Write-Host '=====================================================================================================' -ForegroundColor Cyan
+    Write-Host ' graft - a context map of your code for AI coding agents' -ForegroundColor Cyan
+    Write-Host '=====================================================================================================' -ForegroundColor Cyan
+    Write-Host 'graft indexes a repository locally, on this PC (every function, its file:line and who calls it), and hands'
+    Write-Host 'AI coding agents (Claude Code, GitHub Copilot, Kilo Code, Cursor, Codex, ...) the exact code they need'
+    Write-Host 'instead of letting them read whole files and search blindly. Fewer tokens and tool calls mean lower costs,'
+    Write-Host 'above all with top-tier models, and faster, more accurate answers (upstream benchmark: 46% fewer tool calls,'
+    Write-Host '42% fewer uncached input tokens, 60% less time). graft also reports what it saved, in tokens and dollars.'
+    Write-Host ''
+    Write-Host "  Project, full documentation : $ProjectUrl (upstream)"
+    Write-Host "  Later, run 'graft about' to see both addresses again ('graft about home' / 'graft about fork' open them)."
+    Write-Host ''
+    Write-Host 'IMPORTANT: this is a FORK of graft with its own changes compared with upstream (for example: nothing is sent' -ForegroundColor Yellow
+    Write-Host 'to any cloud and telemetry is off, more languages, LLM gateways such as the Databricks AI Gateway, this' -ForegroundColor Yellow
+    Write-Host 'Windows installer). Please read the fork report to see what differs from the upstream documentation:' -ForegroundColor Yellow
+    $report = Find-ForkReport
+    if (-not $report) {
+        Write-Host "  Fork report : $ForkReportName was not found next to this script (in the fork's repository it is docs\$ForkReportName)." -ForegroundColor Yellow
+        Write-Host ''
+        return
+    }
+    Write-Host "  Fork report : $report" -ForegroundColor Yellow
+    Write-Host "  In a browser: $(([Uri]$report).AbsoluteUri)" -ForegroundColor Yellow
+    Write-Host ''
+    # -Yes runs unattended: never opens a browser window
+    if ($Yes -or -not (Test-CanPrompt)) { return }
+    if ((Read-Line 'Open the fork report in your browser now? [Y/n]') -match '^(n|no)$') { return }
+    try {
+        Start-Process -FilePath $report
+        Write-Host 'Opened the fork report in your browser.'
+    } catch {
+        Write-Warning "Could not open the fork report ($($_.Exception.Message)); open $report by hand."
+    }
+    Write-Host ''
+}
+
 # 0. Nothing is downloaded, installed or changed before the user agrees
+Show-Intro
 $plannedPkg = Find-OfflinePackage
 $graftSource = if ($plannedPkg) { "the offline package $($plannedPkg.File.Name) next to this script" } else { "the npm registry $Registry (npm login may ask for credentials)" }
 # The newest offline Node.js zip next to this script wins over downloading the latest LTS

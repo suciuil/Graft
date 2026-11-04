@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graft fork: changes not in upstream</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --fg: #1d2330; --muted: #5b6475; --card: #fff; --border: #dde1e8;
+    --feature: #1f7a3d; --fix: #b3261e; --improvement: #1859b5; --change: #8a4b00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
+  header { background: #1d2330; color: #fff; padding: 28px 40px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 0; color: #c7ccd6; }
+  main { max-width: 1150px; margin: 0 auto; padding: 24px 40px 60px; }
+  h3 { font-size: 15px; margin: 0 0 8px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .stat.feature { border-left: 5px solid var(--feature); }
+  .stat.fix { border-left: 5px solid var(--fix); }
+  .stat.improvement { border-left: 5px solid var(--improvement); }
+  .stat.change { border-left: 5px solid var(--change); }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; }
+  .panel table.counts { border-collapse: collapse; }
+  .panel table.counts td, .panel table.counts th { text-align: right; padding: 4px 10px; border-top: 1px solid #eef0f4; }
+  .panel table.counts td:first-child, .panel table.counts th:first-child { text-align: left; }
+  .panel table.counts tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+  .panel ul.rules { margin: 6px 0 0 18px; padding: 0; }
+  .panel ul.rules li { padding: 2px 0; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; background: #eef0f4; padding: 1px 5px; border-radius: 4px; }
+  .toolbar { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 10px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .toolbar input[type=search] { flex: 1 1 260px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+  .toolbar button { border: 1px solid var(--border); background: var(--card); border-radius: 16px; padding: 5px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+  .toolbar button.on { background: #1d2330; color: #fff; border-color: #1d2330; }
+  nav.toc { margin: 8px 0 18px; font-size: 14px; }
+  nav.toc a { margin-right: 14px; color: var(--improvement); text-decoration: none; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 20px 14px; margin-bottom: 18px; }
+  section h2 { font-size: 19px; margin: 14px 0 8px; }
+  section h2 small { color: var(--muted); font-weight: normal; font-size: 13px; }
+  section ul { list-style: none; margin: 0; padding: 0; }
+  section li { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid #eef0f4; align-items: start; }
+  section li:first-child { border-top: none; }
+  .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: #fff; border-radius: 4px; padding: 2px 6px; text-align: center; margin-top: 2px; }
+  li[data-type=feature] .tag { background: var(--feature); }
+  li[data-type=fix] .tag { background: var(--fix); }
+  li[data-type=improvement] .tag { background: var(--improvement); }
+  li[data-type=change] .tag { background: var(--change); }
+  .note { color: var(--muted); font-size: 13px; }
+  .hidden { display: none !important; }
+  @media print { .toolbar { display: none; } section, .panel, .stat { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Graft fork: changes not in upstream</h1>
+  <p>Features, fixes, improvements and change requests in the <code>suciuil/Graft</code> fork that the upstream <code>NanoNets/Graft</code> project does not provide.</p>
+</header>
+<main>
+
+<div class="stats">
+  <div class="stat feature"><b>33</b><span>New features</span></div>
+  <div class="stat fix"><b>17</b><span>Bug fixes to upstream functionality</span></div>
+  <div class="stat improvement"><b>16</b><span>Improvements to upstream functionality</span></div>
+  <div class="stat change"><b>8</b><span>Change requests to upstream functionality</span></div>
+  <div class="stat"><b>74</b><span>Items in total</span></div>
+</div>
+
+<div class="panel">
+  <h3>Counts by area</h3>
+  <table class="counts">
+    <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#lang">Languages &amp; parsing</a></td><td>7</td><td>2</td><td>2</td><td>0</td><td>11</td></tr>
+      <tr><td><a href="#llm">LLM providers &amp; deep build</a></td><td>9</td><td>3</td><td>5</td><td>2</td><td>19</td></tr>
+      <tr><td><a href="#savings">Savings, pricing &amp; model detection</a></td><td>6</td><td>6</td><td>2</td><td>1</td><td>15</td></tr>
+      <tr><td><a href="#agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>0</td><td>10</td></tr>
+      <tr><td><a href="#cli">CLI &amp; configuration</a></td><td>7</td><td>1</td><td>3</td><td>0</td><td>11</td></tr>
+      <tr><td><a href="#privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>0</td><td>3</td><td>3</td></tr>
+      <tr><td><a href="#packaging">Packaging, installer, updates &amp; CI</a></td><td>2</td><td>1</td><td>0</td><td>2</td><td>5</td></tr>
+      <tr class="total"><td>Total</td><td>33</td><td>17</td><td>16</td><td>8</td><td>74</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h3>Classification</h3>
+  <ul class="rules">
+    <li><b>Feature</b>: functionality that upstream Graft does not have. The fork's own fixes, improvements and adjustments to it are part of the feature description, not separate items.</li>
+    <li><b>Bug fix</b>, <b>Improvement</b>, <b>Change request</b>: only for functionality that upstream Graft already has.</li>
+    <li>Every item describes the current state of the fork.</li>
+  </ul>
+</div>
+
+<div class="toolbar">
+  <input type="search" id="q" placeholder="Filter items (e.g. Kotlin, savings, Databricks)">
+  <button data-f="all" class="on">All</button>
+  <button data-f="feature">Features</button>
+  <button data-f="fix">Bug fixes</button>
+  <button data-f="improvement">Improvements</button>
+  <button data-f="change">Change requests</button>
+  <span id="count" class="note"></span>
+</div>
+
+<nav class="toc">
+  <a href="#lang">Languages &amp; parsing</a>
+  <a href="#llm">LLM providers &amp; deep build</a>
+  <a href="#savings">Savings, pricing &amp; model detection</a>
+  <a href="#agents">Agent integrations</a>
+  <a href="#cli">CLI &amp; configuration</a>
+  <a href="#privacy">Privacy / no-cloud</a>
+  <a href="#packaging">Packaging, installer, updates &amp; CI</a>
+</nav>
+
+<section id="lang">
+  <h2>Languages &amp; parsing <small>upstream indexes TypeScript, TSX, Python, Go, Java, Kotlin, Swift, PHP and R</small></h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Depth-tier support (symbols, calls, inheritance, imports) for C#, Groovy, PL/SQL, C and C++</b>, using optional native grammars. PL/SQL also covers SQL DDL tables and views, procedures called without arguments, and calls through a package or schema (<code>pkg.proc</code>, <code>schema.pkg.proc</code>). Groovy uses the <code>@bootswithdefer/tree-sitter-groovy</code> v0.2.0 grammar and records calls without parentheses that end in a closure (<code>items.collect { … }</code>, bare Jenkins steps). <code>.h</code> files containing C++ are parsed and labelled as C++, and fall back to the C grammar when the C++ grammar is not installed.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Breadth-tier support for CSS, SCSS, HTML, C# Razor, JSON, YAML, Markdown and CSV.</b></span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>XML support</b> for <code>.xml</code>, <code>.config</code>, <code>.csproj</code>, <code>.vbproj</code>, <code>.fsproj</code>, <code>.props</code>, <code>.targets</code>, <code>.nuspec</code>, <code>.resx</code> and <code>.xaml</code>. XML is indexed structurally but never sent to the AI: <code>--deep</code> skips it and <code>check</code> does not report it as pending. The Windows parser binary is bundled, so no compile step is needed.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>CMake support</b>: <code>CMakeLists.txt</code> and <code>*.cmake</code>.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Bash support</b> (<code>.sh</code>, <code>.bash</code>, <code>.bashrc</code>, <code>.bash_profile</code>): functions, calls between them, and <code>source</code> / <code>.</code> as imports resolved to in-repo scripts.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Perl support</b> (<code>.pl</code>, <code>.pm</code>, <code>.t</code>): packages and subs, <code>$self-&gt;m()</code> and <code>Pkg-&gt;m()</code> calls resolved through the package and through <code>use parent</code>, <code>use base</code> and <code>@ISA</code>, and <code>use</code>/<code>require</code> as imports resolved to in-repo <code>.pm</code> files.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Make support</b>: <code>Makefile</code>, <code>makefile</code>, <code>GNUmakefile</code>, <code>*.mk</code>, <code>*.mak</code>.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Kotlin <code>.kts</code> files (Gradle scripts) are included in the concept map built by <code>--deep</code>.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>A locally built Kotlin grammar (v0.4) is used when available, which parses more accurately than the registry version.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Kotlin inheritance edges were missing for superclasses (<code>: Base(1)</code>), delegated interfaces (<code>: Runnable by impl</code>) and qualified types (<code>: com.acme.Base()</code>).</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>One-line Kotlin objects (<code>object Keys { val A = "a" }</code>) were misread as infix calls, so their members appeared as top-level functions.</span></li>
+  </ul>
+</section>
+
+<section id="llm">
+  <h2>LLM providers, gateways &amp; <code>build --deep</code></h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Databricks AI Gateway provider.</b> Claude, OpenAI, Qwen/open models and <code>databricks-*</code> serving endpoints are routed automatically by model id. Databricks error messages are parsed correctly. <code>graft model</code> lists the GPT models the gateway serves, using checks that spend no tokens and skipping models that only support the Responses API. GPT models without a gateway service id work, and a model refused with "rate limit set to 0" is retried under its other name. Missing or rejected tokens point to where a personal access token is generated. A deep build asks for the key only once and reuses the model list it already fetched.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>LLM Incubator gateway provider</b>, with Bearer auth through <code>ANTHROPIC_AUTH_TOKEN</code> and <code>ANTHROPIC_BASE_URL</code>. It needs a base URL (<code>GRAFT_BASE_URL</code> or <code>--base-url</code>) and gives a clear error without one.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft build --deep --force</code></b> re-summarizes every file and symbol and ignores earlier results. If a forced call fails, the previous summary is kept. <code>--force</code> without <code>--deep</code> stops with a clear message.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft effort</code></b> views or sets the thinking effort the model uses in <code>build --deep</code>.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Pause and resume when the AI relay runs out of balance.</b> The build waits until the balance is refilled and then continues instead of failing. The error says "relay balance exhausted" rather than "provider rejected the API key".</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Stale-summary notice.</b> When more than a threshold of the AI summaries (10% by default) is out of date or missing, every CLI query (on stderr) and every MCP tool result (at the end) carries a line recommending <code>graft build --deep</code>. Agents relay it under the savings tally as <code>⚠️ Run the 'graft build --deep' command — recommended (…)</code> and are told never to run the deep build unasked. <code>graft deep-threshold</code> shows, sets or resets the threshold (0–100).</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft staleness [dir]</code></b> shows the share of out-of-date summaries, whether a deep build is due, and the worst files. Supports <code>--top</code>, <code>--no-refresh</code>, <code>--json</code> and a per-repo split in workspaces.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Fix the endpoint on the spot.</b> When the endpoint rejects the API key or can't be reached, including during a deep build, graft offers to change the endpoint URL and/or the key so the re-run works.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Choose between a provider's endpoint and a custom URL.</b> If a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft asks which to use. It remembers the answer until the provider or URL changes, and also asks right after <code>graft api provider</code>.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Automatic connection and model fallbacks: the <code>/v1</code> path suffix is added or removed as needed, provider-prefixed model names are retried as bare IDs, and graft switches wire protocol when an endpoint rejects a request.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>More reliable with models that are strict about tool calls. Models that refuse forced tool calls or can't turn reasoning off are handled on both the OpenAI and the Anthropic paths, and replies made of text and reasoning parts are accepted.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Failed <code>build --deep</code> runs end with a "How to fix it" block naming the setting to change (<code>GRAFT_BASE_URL</code>, <code>GRAFT_API_KEY</code>, <code>GRAFT_MODEL</code>) and listing available models. Workspace builds print it once for all child repos.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>LLM calls trust the operating system's certificate store, so corporate gateways and TLS-inspecting proxies work without <code>NODE_EXTRA_CA_CERTS</code> (Node 22.19+/24.5+; <code>GRAFT_SYSTEM_CA=0</code> turns it off).</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>When no endpoint URL is set and the provider has no default, graft says so clearly instead of silently contacting <code>api.openai.com</code>.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Summaries failed on large files and files with many symbols. Requests are now batched, batches split automatically at the output token limit, and the source window is focused on the target definitions.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>One failing concept-synthesis batch aborted the whole <code>build --deep</code>. Finished batches are now checkpointed, so a re-run only calls the AI for the missing ones.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span><code>build --deep</code> discarded good results when a model echoed the whole target description back instead of the plain ID.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>The default model is <code>claude-haiku-5-5</code> instead of <code>claude-sonnet-5-5</code> on every provider: <code>build --deep</code>, <code>graft init</code> (look-back, skill naming, PR review), help and examples. Model recommendations prefer Claude Haiku, then Claude Sonnet, then Gemini Flash, then GPT terra.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>When no provider or base URL is configured, the Databricks AI Gateway is the default endpoint.</span></li>
+  </ul>
+</section>
+
+<section id="savings">
+  <h2>Token savings, pricing &amp; model detection</h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Agents report the model they run on</b> through a <code>--agent-model</code> CLI flag and an optional <code>model</code> parameter on every MCP tool. MCP calls keep their state separate, so concurrent requests don't mix. Agent instructions and MCP parameter descriptions ask for the model ID on every call, with specific guidance for GitHub Copilot in IntelliJ IDEA so it doesn't guess.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Model detection from host session records</b> when the agent doesn't report a model: Kilo Code (including forks, VS Code Insiders installs, paired models and subagents, and shells started by Kilo's agent), VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. Repos and VS Code workspaces opened through a junction or symlink are recognised, as are Kilo sessions not yet saved to Kilo's main database file. Kilo turns are not priced at the model of a Copilot chat in the same VS Code window, and Kilo and Copilot calls are not filed under the last Claude Code model in repos where Claude Code once ran. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Lifetime savings ledger and <code>graft savings</code></b>: cumulative tokens and dollars saved per model, for all time, a year, a month or a day. <code>graft savings --all</code> totals every repo graft was used in. Earlier repos are found by a one-time, read-only scan of the folders remembered by Claude Code, Kilo, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex (<code>--discover</code> / <code>--no-discover</code>). One model spelled differently (punctuation, casing, provider prefixes, Databricks service ids and endpoint names) is kept as one row. If the savings file can't be read (for example an online-only OneDrive file), the saving is skipped with a warning instead of the history being lost, and an unreadable or corrupted file is set aside as a backup.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified (for example in Kilo Code or MCP sessions), savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Public model price catalog (LiteLLM).</b> A snapshot ships with graft and is refreshed on every build, keeping the old list when offline or when the download looks broken. <code>graft prices update</code> downloads a newer list, which is used when it is newer than the snapshot. <code>graft prices status</code> shows both lists and where each price comes from. Before downloading, <code>graft prices update</code> and the installer name the exact public price file and its GitHub address, confirm that nothing about you or your repo is sent, and show where the prices are stored. When a model can't be priced, the tally gets a <code>⚠️ Run the 'graft prices update' command — recommended (…)</code> line.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Stale agent-instructions warning</b> under the savings tally: <code>⚠️ Run the 'graft init' command — recommended (…)</code> appears when installed instruction files differ from what the running version would write.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>The built-in price table covers more models: GPT-5.6, GPT-6 Astra/Sol/Luna, GPT-6.1 Sol, Gemini 3.7/3.8 and 2.5/3.x, Claude Opus 5.5 ($4/Mtok input, 0.05× cache read) and Opus 4.8 fast mode, Grok 4.5–4.7, Kimi K3 and K2.7, MAI-Code-1.1-Flash, DeepSeek and more. Model names are matched case-insensitively.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Savings reports show where the price came from and which model was used, or why tokens could not be priced. They use readable model names ("Claude Opus 5") instead of routing IDs (<code>vertex_ai/claude-opus-5</code>).</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Token counts were unreadable on non-English locales ("1970 tokens saved" printed as "1.970").</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Model IDs with a provider prefix (<code>anthropic/</code>, <code>azure/</code>, …) were not priced.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Savings were not tracked when CLI retrieval commands ran directly in a terminal.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>The savings line was cut off in large outputs. It is now placed at the end of outputs over 20,000 characters so hosts that keep only the terminal tail still show it.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Output templates and agent instructions put quotation marks around the tally, so agents quoted it in their replies.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Claude Opus 5.5 matched the Claude Opus 5 price rule, which overstated costs and savings.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>Savings are priced at the coding agent's model, not at the enrichment model (<code>GRAFT_MODEL</code>). Dollars are only shown for a model confirmed for that turn; otherwise raw token counts are shown.</span></li>
+  </ul>
+</section>
+
+<section id="agents">
+  <h2>Agent integrations &amp; instructions</h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Kilo Code support.</b></span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Tool-call gate for Claude Code and the Codex family.</b> Wasteful tool calls are redirected to the matching graft command instead of only being advised against.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Every agent gets the tool rules stated as rules: literal search → <code>graft grep</code>, "what's in this file" → <code>graft skeleton</code>, "who calls this" → <code>graft callers</code>. This covers Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>"Verify before you assert" rules for every host and skill: agents check repo facts with graft queries instead of guessing.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Instructions for hosts that can't run commands (Copilot Ask mode, read-only modes): use graft's MCP tools or read the <code>graft/</code> files, never invent a savings line, and end with a fixed "switch to Agent mode" notice. Applied to all agents, the Claude/AdaL/Grok skill and <code>graft/INDEX.md</code>.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>Instruction templates explain how to run the CLI on every platform (plain <code>graft</code> on Windows too, with an <code>npx</code> fallback).</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Agent instruction files in existing repos were not refreshed after prompt edits unless the package version changed. Wiring now compares content fingerprints.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Instruction files stayed outdated after switching branches or merging. They are now checked on disk and restored when they drift.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Claude hooks and the status line failed under some shells. They now run under any shell, including cmd.exe and PowerShell on Windows.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Claude Code helpers could use an older graft install that appeared earlier in the lookup list. They now pick the highest installed version and only call <code>npm root -g</code> when cheaper lookups fail.</span></li>
+  </ul>
+</section>
+
+<section id="cli">
+  <h2>CLI &amp; configuration</h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Exclude folders</b> from graft commands with <code>--excludeDir</code> / the <code>exclude-dirs</code> setting.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Default <code>.graft/config.json</code></b> written by <code>graft init</code>. Missing default settings are added to an existing file. No empty connection details are written.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft config</code></b> lists and changes <code>.graft/config.json</code> settings (exclude-dirs, include-dirs, follow-submodules, follow-nested-repos) without editing JSON. Takes <code>--repo &lt;dir&gt;</code> and has per-setting help.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft init</code> and <code>graft build</code> follow VS Code <code>.code-workspace</code> files.</b> <code>graft init</code> offers to wire and build each listed folder. <code>graft build</code> can build all listed folders, including folders outside the current directory, and remembers the choice. Both are controlled by <code>--workspace &lt;file&gt;</code> and <code>--no-workspace</code>. Without a terminal or with <code>--yes</code>, a workspace is never assumed.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft api url</code>, <code>graft api key</code> (hidden input), <code>graft api provider</code> and <code>graft model</code></b> save LLM settings as user-level environment variables, so every new terminal, IDE and MCP host sees them. They show the current value and its source, list the endpoint's models with a recommended pick, verify the endpoint after saving, and support <code>--unset</code>. <code>build --deep</code> uses the configured model when the gateway serves it and says which one it used and where that came from. When the latest model is picked automatically, a "1" in a name like "1adp" is not read as a version number. Interactive prompts show each typed key once.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft languages</code></b> lists every indexed language and its support level on this install: full, broad, symbols, structural, file-only or skipped.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft issues</code></b> opens the issue tracker in the browser and also prints the address.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b><code>graft about</code></b> (also <code>graft info</code>) prints what graft is for, the upstream project homepage and the path of this fork report, which now ships inside the installed package. <code>graft about home</code> opens the homepage and <code>graft about fork</code> opens this report in the browser.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span><code>graft --help</code> is an A→Z command list with a plain-language description, arguments, options and examples for each command. <code>graft &lt;command&gt; --help</code> and <code>graft help &lt;command&gt;</code> print the same entry. Unknown commands get a "Did you mean…?" suggestion, and <code>graft --model x</code> without a command gives a short error.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span>In the <code>graft init</code> picker, Enter selects the highlighted agent, and an agent you unticked stays unticked.</span></li>
+    <li data-type="improvement"><span class="tag">Improvement</span><span><code>graft build</code> no longer ends with a success tick when it finds no files. It shows a warning and, when it can tell, explains why (for example, the folder is ignored by the repo it sits in).</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>Re-running <code>graft init</code> (picker or <code>--yes</code>) removed instructions of agents already wired in the repo, for example ones only a teammate's machine has. They are now kept and shown in the picker.</span></li>
+  </ul>
+</section>
+
+<section id="privacy">
+  <h2>Privacy / no-cloud policy</h2>
+  <ul>
+    <li data-type="change"><span class="tag">Change</span><span><b>Telemetry is permanently disabled.</b> Nothing is recorded or sent, and it cannot be turned on. <code>graft telemetry enable</code> refuses, the init usage-stats row and first-run notice are gone, and npm postinstall no longer records an install event. <code>graft telemetry</code> is not listed in <code>graft --help</code>. README and TELEMETRY.md are updated.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span><b>Trail cloud (Trail workspace) is permanently disabled.</b> Nothing is uploaded. <code>TRAIL_CLOUD</code>, <code>TRAIL_URL</code> and <code>~/.trail/cloud.json</code> are ignored, <code>trail login</code> and <code>trail workspace add</code> refuse, and <code>trail status</code> has no workspace row.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span><b>No-cloud policy</b> (<code>docs/no-cloud-policy.md</code> and agent instruction files). Users can't switch on anything that sends data to a cloud or other third party through settings, flags, commands or toggles. New upstream features that send data out stay disabled until the repository owner approves them, and each decision is recorded.</span></li>
+  </ul>
+</section>
+
+<section id="packaging">
+  <h2>Packaging, Windows installer, updates &amp; CI</h2>
+  <ul>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Self-contained npm package and offline bundle</b> (<code>npm run build:grammars</code>, <code>npm run pack:bundle</code>) with all optional native grammars and runtime dependencies. Prebuilt Windows bindings for all 19 local tree-sitter grammars ship under <code>vendor/</code>, so a machine with only graft checked out can build. Parsers too new for graft's runtime (ABI 15) are regenerated. Grammar files held open by a running graft don't block the build. Bundling works when <code>allow-scripts</code> is set in a user or global <code>.npmrc</code>. Grammars left out on purpose (such as the local Kotlin grammar) are reported as "not vendored". Installation shows fewer false warnings.</span></li>
+    <li data-type="feature"><span class="tag">Feature</span><span><b>Windows installer and offline installer kit.</b> Double-click <code>START-HERE-install-graft.cmd</code>, which runs <code>install-graft-helper.ps1</code>. It starts by explaining what graft is for, links the upstream project and shows this fork report (shipped in the kit as <code>fork-report.html</code>), offering to open it in the browser. The kit is a single zip built from the project; packing it removes kits and packages left by earlier versions. The installer installs or upgrades from offline package files (also named like <code>… - Copy.tgz</code> or <code>… (1).tgz</code>). For Node.js it uses an offline zip placed next to it, or downloads the latest LTS and verifies its checksum. It reinstalls graft when the Node.js version changes. It fixes the user PATH without damaging existing entries, runs the graft it just installed, and warns if new terminals won't find graft and npm or if another graft in PATH would be used instead. It checks the LLM setup the way graft reads it (including Databricks and Anthropic-style endpoints), lists models and test-calls the chosen one. Finally it offers to download the public price list, which you can skip.</span></li>
+    <li data-type="fix"><span class="tag">Bug fix</span><span>On Windows, running npm for the update check and <code>graft upgrade</code>, checking whether graft is installed, and waiting on a file lock did not work reliably.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>The update check and <code>graft upgrade</code> use the company npm registry instead of the public npm registry. Installing graft adds that registry to the user <code>.npmrc</code>.</span></li>
+    <li data-type="change"><span class="tag">Change</span><span>The upstream GitHub CI workflows are disabled in the fork; they stay in the repository but do not run.</span></li>
+  </ul>
+</section>
+
+</main>
+
+<script>
+  const items = [...document.querySelectorAll('section li')];
+  const q = document.getElementById('q');
+  const count = document.getElementById('count');
+  let filter = 'all';
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+    let shown = 0;
+    items.forEach(li => {
+      const ok = (filter === 'all' || li.dataset.type === filter) && (!term || li.textContent.toLowerCase().includes(term));
+      li.classList.toggle('hidden', !ok);
+      if (ok) shown++;
+    });
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('hidden', !s.querySelector('li:not(.hidden)')));
+    count.textContent = shown + ' of ' + items.length + ' items';
+  }
+  document.querySelectorAll('.toolbar button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.toolbar button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    filter = b.dataset.f;
+    apply();
+  }));
+  q.addEventListener('input', apply);
+  apply();
+</script>
+</body>
+</html>

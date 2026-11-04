@@ -4,6 +4,25 @@
 
 ### Added
 
+- **`graft about` tells you where to read about graft.** Without a target it
+  prints what graft is for, the project homepage
+  (https://github.com/trailhq/Trail-Code) and the path and `file:///` link of
+  the fork report, which lists the changes this fork makes that upstream does
+  not have. `graft about home` opens the homepage in your browser and
+  `graft about fork` opens the fork report; `graft info` is the same command.
+  Nothing is sent: it only opens a page. The npm package and the offline kit's
+  tarball now include `docs/fork-report.html`, so the report is there after
+  install.
+- **The Windows installer starts with what graft is for and what this fork
+  changes.** `START-HERE-install-graft.cmd` first explains in a few lines what
+  graft does (a local code map that hands AI coding agents the exact code they
+  need, so fewer tokens and tool calls and lower costs with top-tier models),
+  points to the upstream project (https://github.com/trailhq/Trail-Code) for
+  the full documentation, and highlights that this is a fork: it shows the path
+  and a `file:///` link of the fork report and offers to open it in the browser
+  (not with `-Yes`). The offline kit now ships `docs/fork-report.html` as
+  `fork-report.html` next to the installer; in a checkout of the fork the
+  installer finds `docs/fork-report.html`.
 - **`graft prices update` says what it downloads before it downloads.** It
   prints that LiteLLM is only the source of one public `.json` price file (the
   exact URL, hosted on GitHub), that graft sends nothing to it (no code, file
