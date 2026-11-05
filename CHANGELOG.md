@@ -15,8 +15,8 @@
   passwords); `START-HERE-install-graft.cmd -Ask` asks everything again.
 - **The Windows offline installer kit carries a build number.** `npm run
   pack:bundle` now writes `graft-a.b.c.d-win-<arch>.zip`: `a.b.c` is the graft
-  version inside the kit and `d` starts at 1 and goes up by 1 with each pack of
-  the same graft version, back to 1 when the version changes. The last kit is
+  version inside the kit and `d` starts at 0 and goes up by 1 with each pack of
+  the same graft version, back to 0 when the version changes. The last kit is
   recorded in `kit-build.json` in the repo root, which is committed so every
   clone continues the same numbering; a record that cannot be read stops the
   pack instead of guessing. Without a record the pack continues from the

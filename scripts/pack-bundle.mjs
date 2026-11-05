@@ -32,7 +32,7 @@
  *                 refused when either is older than its sources
  *
  * On Windows it also writes graft-<version>.<build>-win-<arch>.zip, the offline installer kit
- * (<build> counts the packs of this graft version: 1, 2, … and back to 1 for a new version;
+ * (<build> counts the packs of this graft version: 0, 1, 2, … and back to 0 for a new version;
  * see scripts/kit-build.mjs; the last kit is recorded in kit-build.json, which is committed
  * together with docs/changelog.html so every clone continues the same numbering):
  * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/changelog.html (as
@@ -85,7 +85,7 @@ function previousKit() {
     } catch (err) {
       die(`could not read ${kitRecordPath} (${err.message}) — restore it from git (git checkout -- kit-build.json) so the kit build number continues from the last kit`);
     }
-    if (!rec) die(`${kitRecordPath} has no valid "version" and "build" (1 or more) — restore it from git (git checkout -- kit-build.json)`);
+    if (!rec) die(`${kitRecordPath} has no valid "version" and "build" (0 or more) — restore it from git (git checkout -- kit-build.json)`);
     return rec;
   }
   const fromChangelog = latestKitInChangelog(readFileSync(join(repoRoot, "docs", "changelog.html"), "utf8"));
@@ -100,7 +100,7 @@ function previousKit() {
     .sort((a, b) => a.mtime - b.mtime || a.build - b.build);
   const newest = kits.at(-1);
   if (newest) console.warn(`! no ${kitRecordPath} — continuing from the newest kit in the repo root (${kitVersion(newest.version, newest.build)})`);
-  else console.warn(`! no ${kitRecordPath} and no earlier numbered kit — this kit is build 1`);
+  else console.warn(`! no ${kitRecordPath} and no earlier numbered kit — this kit is build 0`);
   return newest ? { version: newest.version, build: newest.build } : null;
 }
 
@@ -223,7 +223,8 @@ const bundleDate = localDate();
 // On Windows the build is named by its kit version (a.b.c.d, d counting the packs of this
 // graft version), so each kit gets its own changelog group; elsewhere by the package version.
 const kitBuild = process.platform === "win32" ? nextKitBuild(pkg.version, previousKit()) : null;
-const buildVersion = kitBuild ? kitVersion(pkg.version, kitBuild) : pkg.version;
+// kitBuild starts at 0, so test for null, not truthiness.
+const buildVersion = kitBuild !== null ? kitVersion(pkg.version, kitBuild) : pkg.version;
 const changelog = stampChangelog(readFileSync(changelogPath, "utf8"), { date: bundleDate, version: buildVersion });
 mkdirSync(join(stagingDir, "docs"), { recursive: true });
 writeFileSync(join(stagingDir, "docs", "changelog.html"), changelog.html);
@@ -482,7 +483,7 @@ async function downloadLtsNodeZip(arch) {
   return name;
 }
 
-const kitName = kitBuild ? kitFileName(pkg.version, kitBuild, process.arch) : null;
+const kitName = kitBuild !== null ? kitFileName(pkg.version, kitBuild, process.arch) : null;
 if (kitName) {
   let nodeZipSource;
   let nodeZipName;
