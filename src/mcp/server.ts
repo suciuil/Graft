@@ -160,7 +160,7 @@ export function startMcpServer(root: string, dirOverride?: string, version = '0'
         // per-model savings table is only correct for a host whose config graft
         // can actually read — without this, a Kilo config sitting on the machine
         // would feed Kilo's model list into a Cursor or Codex session.
-        setMcpClient(params?.clientInfo?.name);
+        setMcpClient(params?.clientInfo?.name, params?.clientInfo?.version);
         const local = [upkeep.length ? upkeep.join('\n') : '', brainsOnly ? '' : mcpInstructions()];
         const answer = (remote: string[]) =>
           reply(id, {

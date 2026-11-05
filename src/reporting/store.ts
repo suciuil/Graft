@@ -9,9 +9,10 @@
  *
  * What a row carries is fixed by {@link ReportEvent}: a random install id (the
  * same `randomUUID()` the disabled telemetry minted, see telemetry/identity.ts),
- * the day, the model, token and dollar figures, and which graft surface filed
- * it. No repo path, repo name, user name, host name or query text — the owner's
- * decision recorded in docs/no-cloud-policy.md.
+ * the day, the model, token and dollar figures, which graft surface filed it,
+ * and which AI assistant and editor or terminal ran graft, with their versions
+ * (src/reporting/origin.ts). No repo path, repo name, user name, machine host
+ * name or query text — the owner's decisions recorded in docs/no-cloud-policy.md.
  *
  * Nothing here ever throws or prints: a command must not notice the report.
  */
@@ -23,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { readJson, writeJsonAtomic } from '../util/state.js';
 import { appendPrivateFile, writePrivateFile } from '../util/private-file.js';
 import { installId } from '../telemetry/identity.js';
+import { processOrigin } from './origin.js';
 
 /** The repo / package root, from `src/reporting/` and `dist/reporting/` alike. */
 export const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -152,6 +154,12 @@ export interface ReportEvent {
   measured: boolean | null;
   costMicros: number;
   tokensBilled: number;
+  /** The AI assistant and its version (src/reporting/origin.ts); absent in rows queued by older versions. */
+  assistant?: string | null;
+  assistantVersion?: string | null;
+  /** The editor or terminal it ran in, and its version. */
+  hostEnv?: string | null;
+  hostEnvVersion?: string | null;
 }
 
 /** Bound on the outbox: a machine that never reaches the database must not grow
@@ -179,6 +187,7 @@ export function queueReport(input: QueueInput, home?: string): void {
     if (!reportingEnabled(home)) return;
     const meta = input.meta;
     const usd = typeof meta?.usd === 'number' && Number.isFinite(meta.usd) ? meta.usd : null;
+    const origin = processOrigin(meta?.channel ?? null);
     const event: ReportEvent = {
       eventId: randomUUID(),
       installId: installId(home).id,
@@ -193,6 +202,10 @@ export function queueReport(input: QueueInput, home?: string): void {
       measured: input.kind === 'saving' && usd !== null ? meta?.measured === true : null,
       costMicros: Math.max(0, Math.round(input.costMicros ?? 0)),
       tokensBilled: Math.max(0, Math.round(input.tokensBilled ?? 0)),
+      assistant: origin.assistant,
+      assistantVersion: origin.assistantVersion,
+      hostEnv: origin.hostEnv,
+      hostEnvVersion: origin.hostEnvVersion,
     };
     enqueueEvents([event], home);
     // Imported lazily: the flush side (spawn, driver loading) is never needed
