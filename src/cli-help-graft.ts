@@ -383,8 +383,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     description:
       "Opt-in, off until you run `graft savings-report enable`: also send each saving and billing entry graft records " +
       "to the company's Oracle database for analytics. A row holds a random install id, the day and time, the model, " +
-      "the tokens saved or billed, their dollar value, and which graft surface (cli / mcp / hook) and command filed it — " +
-      "no repo name or path, user name, host name, file name or query text. Rows are queued in ~/.graft/ and sent by a " +
+      "the tokens saved or billed, their dollar value, which graft surface (cli / mcp / hook) and command filed it, and " +
+      "which AI assistant and editor or terminal ran graft, with their versions (e.g. Kilo Code 7.8.18 in Visual Studio " +
+      "Code 1.144.0) — no repo name or path, user name, machine host name, file name or query text. Rows are queued in ~/.graft/ and sent by a " +
       "background process at most every 5 minutes; normal commands never wait on it or show its errors. `disable` stops " +
       "it and discards what was not sent; `flush` sends now and prints the outcome; `status` shows the install id, the " +
       "database, the queue and the last send. The database can turn reporting off (DISABLE_COST_SAVINGS_REPORTING in " +

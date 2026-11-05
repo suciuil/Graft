@@ -16,8 +16,9 @@ import { FLUSH_WATCHDOG_MS, odpnetAvailable, runFlush, type FlushResult } from '
 
 const WHAT_IS_SENT =
   "each saving and billing entry graft files in a repo's ledger: a random install id, the day and time, the model, " +
-  'the tokens saved or billed, their dollar value, and which graft surface filed it (cli / mcp / hook) with its command. ' +
-  'No repo name or path, user name, host name, file name or query text.';
+  'the tokens saved or billed, their dollar value, which graft surface filed it (cli / mcp / hook) with its command, ' +
+  'and which AI assistant and editor or terminal ran graft, with their versions (e.g. Kilo Code 7.8.18, Visual Studio Code 1.144.0). ' +
+  'No repo name or path, user name, machine host name, file name or query text.';
 
 function stateLine(s: ReportingState): string {
   if (s.enabled === true) return 'savings report: on';

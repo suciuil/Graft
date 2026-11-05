@@ -20,17 +20,28 @@
 
 /** The raw `clientInfo.name` from the handshake, or null before/without one. */
 let clientName: string | null = null;
+/** The raw `clientInfo.version`, kept only for the opt-in savings report
+ * (src/reporting/origin.ts); nothing behaves differently on it. */
+let clientVersion: string | null = null;
+
+const clean = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
 /** Record the client that just introduced itself. Blank and non-string both
  * clear it: a client that sends `{"name":""}` has told us nothing. */
-export function setMcpClient(name: unknown): void {
-  clientName = typeof name === 'string' && name.trim() ? name.trim() : null;
+export function setMcpClient(name: unknown, version?: unknown): void {
+  clientName = clean(name);
+  clientVersion = clientName ? clean(version) : null;
 }
 
 /** The connected client's self-reported name, or null over a non-MCP surface
  * (the CLI) or from a client that sent none. */
 export function mcpClient(): string | null {
   return clientName;
+}
+
+/** The connected client's self-reported version, or null. */
+export function mcpClientVersion(): string | null {
+  return clientVersion;
 }
 
 /**

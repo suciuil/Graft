@@ -16,8 +16,9 @@
  *      and counts as delivered.
  *
  * A failure to load the driver, connect or insert keeps the batch for the next
- * flush; a row the database rejects for its content is dropped, since it would
- * fail the same way forever. All of it is silent: the outcome goes to the state
+ * flush, and so does an error about the table rather than the row (a column
+ * not added yet, see {@link TABLE_ERRORS}); a row the database rejects for its
+ * content is dropped, since it would fail the same way forever. All of it is silent: the outcome goes to the state
  * file, where `graft savings-report status` shows it.
  *
  * Drivers. The target database requires Native Network Encryption, which
@@ -49,6 +50,7 @@ import {
   type ReportEvent,
   type ReportingConfig,
 } from './store.js';
+import { ORIGIN_NAME_MAX, ORIGIN_VERSION_MAX } from './origin.js';
 
 /** At most one background flush per this interval. */
 export const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
@@ -107,6 +109,7 @@ interface OracleConnection {
     batchErrors?: Array<{ offset: number; errorNum?: number; message: string }>;
   }>;
   commit(): Promise<void>;
+  rollback?(): Promise<void>;
   close(): Promise<void>;
 }
 export interface OracleDriver {
@@ -183,11 +186,16 @@ export function insertSql(prefix: string): string {
   return (
     `INSERT INTO ${prefix}${SAVINGS_TABLE} ` +
     '(EVENT_ID, INSTALL_ID, EVENT_KIND, EVENT_TS, EVENT_DAY, CHANNEL, COMMAND, MODEL, ' +
-    'SAVED_TOKENS, USD_SAVED, USD_MEASURED, COST_MICROS, TOKENS_BILLED) VALUES ' +
+    'SAVED_TOKENS, USD_SAVED, USD_MEASURED, COST_MICROS, TOKENS_BILLED, ' +
+    'ASSISTANT_NAME, ASSISTANT_VERSION, HOST_ENV_NAME, HOST_ENV_VERSION) VALUES ' +
     `(:eventId, :installId, :kind, FROM_TZ(TO_TIMESTAMP(:ts, 'YYYY-MM-DD"T"HH24:MI:SS.FF3'), 'UTC'), ` +
-    ':day, :channel, :command, :model, :savedTokens, :usd, :measured, :costMicros, :tokensBilled)'
+    ':day, :channel, :command, :model, :savedTokens, :usd, :measured, :costMicros, :tokensBilled, ' +
+    ':assistant, :assistantVersion, :hostEnv, :hostEnvVersion)'
   );
 }
+
+/** An optional text column: trimmed, cut to the column width, empty = null. */
+const optText = (v: unknown, max: number): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 /** One outbox event as insert binds, normalised to what the columns accept. */
 export function toBinds(e: ReportEvent): Record<string, unknown> {
@@ -208,11 +216,18 @@ export function toBinds(e: ReportEvent): Record<string, unknown> {
     measured: e.measured === null || e.measured === undefined ? null : e.measured ? 1 : 0,
     costMicros: num(e.costMicros),
     tokensBilled: num(e.tokensBilled),
+    assistant: optText(e.assistant, ORIGIN_NAME_MAX),
+    assistantVersion: optText(e.assistantVersion, ORIGIN_VERSION_MAX),
+    hostEnv: optText(e.hostEnv, ORIGIN_NAME_MAX),
+    hostEnvVersion: optText(e.hostEnvVersion, ORIGIN_VERSION_MAX),
   };
 }
 
 /** The insert's string binds with their maximum length, and its number binds. */
-const STRING_BINDS: Record<string, number> = { eventId: 36, installId: 36, kind: 10, ts: 40, day: 10, channel: 10, command: 64, model: 200 };
+const STRING_BINDS: Record<string, number> = {
+  eventId: 36, installId: 36, kind: 10, ts: 40, day: 10, channel: 10, command: 64, model: 200,
+  assistant: ORIGIN_NAME_MAX, assistantVersion: ORIGIN_VERSION_MAX, hostEnv: ORIGIN_NAME_MAX, hostEnvVersion: ORIGIN_VERSION_MAX,
+};
 const NUMBER_BINDS = ['savedTokens', 'usd', 'measured', 'costMicros', 'tokensBilled'];
 
 function bindDefs(db: OracleDriver): Record<string, OracleBindDef> {
@@ -244,6 +259,20 @@ async function readKillSwitch(conn: OracleConnection, prefix: string): Promise<b
 }
 
 const isDuplicate = (e: { errorNum?: number; message?: string }): boolean => e.errorNum === 1 || /^ORA-00001\b/.test(e.message ?? '');
+
+/**
+ * Oracle errors about the table, not the row: ORA-00904 invalid identifier (a
+ * column the database does not have yet), ORA-00942 no such table, ORA-00913 /
+ * ORA-00947 column count, ORA-01031 / ORA-01950 privileges, ORA-01653 /
+ * ORA-01654 / ORA-01688 out of space. Every row would fail the same way until
+ * the database is fixed, so the batch is kept for the next flush, never dropped.
+ */
+export const TABLE_ERRORS = [904, 942, 913, 947, 1031, 1950, 1653, 1654, 1688];
+
+export function isTableError(e: { errorNum?: number; message?: string }): boolean {
+  const num = e.errorNum ?? Number(/^ORA-(\d+)/.exec(e.message ?? '')?.[1]);
+  return TABLE_ERRORS.includes(num);
+}
 
 // ── flush ─────────────────────────────────────────────────────────────────────
 
@@ -357,8 +386,13 @@ async function deliver(conn: OracleConnection, db: OracleDriver, prefix: string,
     for (; done < events.length; done += BATCH_SIZE) {
       const batch = events.slice(done, done + BATCH_SIZE);
       const r = await conn.executeMany(sql, batch.map(toBinds), { autoCommit: false, batchErrors: true, bindDefs: defs });
-      await conn.commit();
       const errors = r.batchErrors ?? [];
+      const tableError = errors.find(isTableError);
+      if (tableError) {
+        try { await conn.rollback?.(); } catch { /* closing without a commit rolls back too */ }
+        throw new Error(tableError.message);
+      }
+      await conn.commit();
       const dup = errors.filter(isDuplicate).length;
       result.duplicates += dup;
       result.rejected += errors.length - dup;
@@ -407,7 +441,10 @@ export type OdpnetRunner = (input: string) => Promise<OdpnetRun>;
  * A batch is array-bound in one round trip; when the database refuses it, the
  * batch is rolled back and retried row by row, so ORA-00001 counts as already
  * there and a row refused for its content is dropped, as in the oracledb path.
- * An error that leaves the session unusable is fatal and keeps the rest.
+ * An error that leaves the session unusable, or one about the table rather than
+ * the row (header `fatal`: a missing column or table, no privilege, no space),
+ * is fatal and keeps the rest: every row would fail the same way until the
+ * database is fixed, and must not be dropped meanwhile.
  * The password travels on stdin only, never on a command line.
  */
 export const ODPNET_SENDER = String.raw`
@@ -508,8 +545,10 @@ try {
         $tx.Commit()
         $ins = $n
       } catch {
-        if ($null -eq (OraEx $_.Exception)) { throw }
+        $ax = OraEx $_.Exception
+        if ($null -eq $ax) { throw }
         $tx.Rollback()
+        if ($h.fatal -contains $ax.Number) { throw }
         if (-not (Alive)) { throw }
         $tx = $conn.BeginTransaction()
         foreach ($row in $batch) {
@@ -519,6 +558,7 @@ try {
           } catch {
             $ox = OraEx $_.Exception
             if ($null -eq $ox) { throw }
+            if ($h.fatal -contains $ox.Number) { try { $tx.Rollback() } catch { }; throw }
             if ($ox.Number -eq 1) { $dup++ }
             elseif (Alive) { $rej++; if ($null -eq $err) { $err = $ox.Message } }
             else { throw }
@@ -633,6 +673,7 @@ async function flushViaOdpnet(
     insertSql: insertSql(prefix),
     batchSize: BATCH_SIZE,
     binds: ODPNET_BINDS,
+    fatal: TABLE_ERRORS,
   };
   const input = [header, ...events.map(toBinds)].map((o) => JSON.stringify(o)).join('\n') + '\n';
 

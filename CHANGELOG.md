@@ -52,14 +52,20 @@
 - **`graft savings-report`: opt-in remote savings report, off by default.**
   `graft savings-report enable` makes graft queue a copy of each saving and
   billing entry it files in a repo's ledger (a random install id, time, day,
-  model, tokens, dollar value, and the cli / mcp / hook surface and command
-  that filed it; no repo, path, user, host or query text) in
+  model, tokens, dollar value, the cli / mcp / hook surface and command
+  that filed it, and the AI assistant and the editor or terminal that ran
+  graft with their versions, e.g. Kilo Code 7.8.18 in Visual Studio Code
+  1.144.0, read from the MCP handshake, the assistant's and editor's
+  environment variables and the editor's `product.json`; no repo, path,
+  user, machine host name or query text) in
   `~/.graft/savings-report-outbox.ndjson`. A detached process inserts the
   queue into the company Oracle database (`GRAFT_COST_SAVINGS`) at most every
   5 minutes; no command waits on it and its errors are never shown. Before
   every send it reads `DISABLE_COST_SAVINGS_REPORTING` in
   `GRAFT_REPORTING_SETTINGS`: 1/true turns the report off on the machine and
-  discards the queue. `disable` stops it and discards the queue, `flush` sends
+  discards the queue. An error about the table rather than a row (a missing
+  column or table, no privilege, no space) keeps the queue for the next send
+  instead of dropping it. `disable` stops it and discards the queue, `flush` sends
   in the foreground and prints the outcome, `status` shows the install id,
   database, queue and last send. The database comes from
   `config/savings-report.json` (shipped, git-ignored; template in

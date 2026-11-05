@@ -24,6 +24,7 @@ import {
   FLUSH_INTERVAL_MS,
   chooseMode,
   insertSql,
+  isTableError,
   killSwitchOn,
   maybeFlushInBackground,
   resetThickProbe,
@@ -60,7 +61,7 @@ interface FakeOpts {
 }
 
 function fakeDriver(o: FakeOpts = {}) {
-  const calls = { inserts: [] as Record<string, unknown>[][], commits: 0, closed: 0, sql: [] as string[] };
+  const calls = { inserts: [] as Record<string, unknown>[][], commits: 0, rollbacks: 0, closed: 0, sql: [] as string[] };
   const driver: OracleDriver = {
     STRING: 'STRING',
     NUMBER: 'NUMBER',
@@ -82,6 +83,7 @@ function fakeDriver(o: FakeOpts = {}) {
           return { rowsAffected: binds.length - (o.batchErrors?.length ?? 0), batchErrors: o.batchErrors };
         },
         async commit() { calls.commits++; },
+        async rollback() { calls.rollbacks++; },
         async close() { calls.closed++; },
       };
     },
@@ -139,7 +141,8 @@ test('enabled: a saving is queued with the approved fields only', () => {
   assert.match(e.installId, /^[0-9a-f-]{36}$/);
   assert.match(e.eventId, /^[0-9a-f-]{36}$/);
   assert.deepEqual(Object.keys(e).sort(), [
-    'channel', 'command', 'costMicros', 'day', 'eventId', 'installId', 'kind', 'measured', 'model', 'savedTokens', 'tokensBilled', 'ts', 'usd',
+    'assistant', 'assistantVersion', 'channel', 'command', 'costMicros', 'day', 'eventId', 'hostEnv', 'hostEnvVersion',
+    'installId', 'kind', 'measured', 'model', 'savedTokens', 'tokensBilled', 'ts', 'usd',
   ]);
   assert.ok(!readFileSync(outboxPath(h), 'utf8').includes('secret-name'), 'no repo path in the outbox');
 });
@@ -260,6 +263,40 @@ test('duplicates count as delivered, rejected rows are dropped', async () => {
   assert.equal(r.duplicates, 1);
   assert.equal(r.rejected, 1);
   assert.equal(peekOutbox(h).length, 0);
+});
+
+test('an error about the table, not the row, keeps the batch and commits nothing', async () => {
+  const h = home();
+  enableReporting(h);
+  seedOutbox(h, [event(), event()]);
+  const { driver, calls } = fakeDriver({
+    batchErrors: [{ offset: 0, errorNum: 1653, message: 'ORA-01653: unable to extend table CHAIR_DEV1.GRAFT_COST_SAVINGS by 8 in tablespace USERS' }],
+  });
+  const r = await runFlush({ home: h, driver, config: CONFIG });
+  assert.equal(r.ok, false);
+  assert.match(r.error ?? '', /ORA-01653/);
+  assert.equal(r.rejected, 0);
+  assert.equal(r.kept, 2);
+  assert.equal(calls.commits, 0);
+  assert.equal(calls.rollbacks, 1);
+  assert.equal(peekOutbox(h).length, 2);
+  assert.equal(isTableError({ message: 'ORA-00904: "ASSISTANT_NAME": invalid identifier' }), true);
+  assert.equal(isTableError({ errorNum: 942, message: '' }), true);
+  assert.equal(isTableError({ errorNum: 12899, message: 'ORA-12899: value too large for column' }), false);
+});
+
+test('the four origin columns are inserted, cut to their widths, empty as null', () => {
+  assert.match(insertSql(''), /ASSISTANT_NAME, ASSISTANT_VERSION, HOST_ENV_NAME, HOST_ENV_VERSION\) VALUES/);
+  assert.match(insertSql(''), /:assistant, :assistantVersion, :hostEnv, :hostEnvVersion\)$/);
+  const b = toBinds(event({ assistant: ' Kilo Code ', assistantVersion: '7.8.18', hostEnv: 'h'.repeat(150), hostEnvVersion: 'v'.repeat(80) }));
+  assert.equal(b.assistant, 'Kilo Code');
+  assert.equal(b.assistantVersion, '7.8.18');
+  assert.equal((b.hostEnv as string).length, 100);
+  assert.equal((b.hostEnvVersion as string).length, 50);
+  // A row queued by an older graft has none of them
+  const old = toBinds(event());
+  assert.deepEqual([old.assistant, old.assistantVersion, old.hostEnv, old.hostEnvVersion], [null, null, null, null]);
+  assert.equal(toBinds(event({ assistant: '   ' })).assistant, null);
 });
 
 test('no database configured: nothing is attempted and the queue is kept', async () => {
@@ -402,6 +439,7 @@ test('odpnet: rows and credentials go to the sender on stdin; batches settle the
   assert.match(String(seen.header?.dll), /Oracle\.ManagedDataAccess\.dll$/);
   const binds = seen.header?.binds as Array<[string, string]>;
   assert.deepEqual(binds.map(([n]) => n).sort(), Object.keys(toBinds(event())).sort(), 'every bind is described');
+  assert.ok((seen.header?.fatal as number[]).includes(904), 'a missing column keeps the batch in the sender too');
   for (const v of ['1', 'TRUE', 'yes']) assert.match(v, new RegExp(String(seen.header?.killPattern), 'i'));
   assert.doesNotMatch('0', new RegExp(String(seen.header?.killPattern), 'i'));
 });
