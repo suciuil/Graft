@@ -300,8 +300,8 @@ same change, before your final reply, without being asked.
      moves the pending entries into a new bundle group (date and build
      version) right after `<!-- groups:start -->`. On Windows the build version
      is the offline kit's `a.b.c.d` (kit `graft-a.b.c.d-win-<arch>.zip`): graft
-     version `a.b.c` plus kit build `d`, which starts at 1, goes up by 1 with
-     each pack of the same graft version and restarts at 1 for a new one
+     version `a.b.c` plus kit build `d`, which starts at 0, goes up by 1 with
+     each pack of the same graft version and restarts at 0 for a new one
      (`scripts/kit-build.mjs`). The pack records the last kit in `kit-build.json`
      (repo root); never edit it by hand, and commit it together with the
      `docs/changelog.html` the same pack stamped, so every clone continues the
