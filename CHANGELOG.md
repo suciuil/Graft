@@ -161,6 +161,15 @@
   console window for a moment. Graft now starts all its helper programs with
   their window hidden; only opening a page or file in your browser shows a
   window. A test fails if a new spawn leaves this out.
+- **`install-graft-helper.ps1` no longer fails at the execution-policy step when
+  PowerShell 7 is around.** Started from a `pwsh` terminal, or with a
+  `PSModulePath` that lists PowerShell 7's module folders, Windows PowerShell
+  5.1 tried to load PowerShell 7's `Microsoft.PowerShell.Security` and stopped
+  with "the module could not be loaded". The installer now drops those folders
+  from `PSModulePath` at its start, and a failure to read the execution policy
+  only prints a warning. With npm 12 (Node.js 26) the installer also passes
+  `--allow-scripts=@nanonets/graft`, so graft's postinstall (the fork registry
+  in `.npmrc`) runs instead of being skipped with a warning.
 - **Databricks GPT models without a `model_service.models.1adp-*` id work.**
   `databricks-gpt-*` ids (for example `databricks-gpt-6-astra` and
   `databricks-gpt-5-mini`, which have no service id) now go to the gateway's

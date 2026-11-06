@@ -6,6 +6,19 @@
 param([switch]$Yes, [switch]$Ask)
 
 $ErrorActionPreference = 'Stop'
+
+# Started from PowerShell 7 (pwsh), or with a PSModulePath that lists its folders, Windows PowerShell 5.1 autoloads
+# PowerShell 7's copies of its own modules (Microsoft.PowerShell.Security for Get-ExecutionPolicy, ...), which fail
+# to load. Keep only the other folders, with Windows PowerShell's own first; child processes inherit this.
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    $ownModules = Join-Path $PSHOME 'Modules'
+    $keptModules = @("$env:PSModulePath" -split ';' | Where-Object {
+        $_.Trim() -and $_.Trim() -notmatch '(?<![A-Za-z])PowerShell[\\/]([^\\/]+[\\/])?Modules[\\/]?$' -and
+        $_.Trim().TrimEnd('\') -ne $ownModules.TrimEnd('\')
+    })
+    $env:PSModulePath = (@($ownModules) + $keptModules) -join ';'
+}
+
 # Shown when the installer starts: the upstream project (full documentation) and this fork's changelog of its own
 # changes, looked up next to this script (the offline kit) and then in docs\ (a checkout of the fork)
 $ProjectUrl        = 'https://github.com/trailhq/Trail-Code'
@@ -1304,12 +1317,23 @@ $graftNode = Get-GraftNode
 $graftNodeId = if ($graftNode) { "$($graftNode.Path)|$($graftNode.Version.Major)".ToLowerInvariant() } else { '' }
 if (-not (Test-Path $GraftNodeMarker) -or (Get-Content -LiteralPath $GraftNodeMarker -Raw).Trim() -ne $graftNodeId) { $reinstall = $true }
 if ($reinstall) { $installArgs += '--force' }
+# npm 12 (Node.js 26) skips install scripts not listed in allow-scripts; graft's postinstall points npm at the
+# fork's registry. Older npm runs them anyway and does not know the setting.
+$npmSettings = try { (& npm config ls -l 2>$null) -join "`n" } catch { '' }
+if ($npmSettings -match '(?m)^\s*allow-scripts\s*=') { $installArgs += '--allow-scripts=@nanonets/graft' }
 & npm @installArgs
 if ($LASTEXITCODE -ne 0) { throw 'graft install failed' }
 Set-Content -LiteralPath $GraftNodeMarker $graftNodeId
 
-# 5. Let `graft` run from PowerShell terminals
-if (-not (Enable-UserScripts)) {
+# 5. Let `graft` run from PowerShell terminals (problems here never fail the install)
+$scriptsOk = $null
+try {
+    $scriptsOk = Enable-UserScripts
+} catch {
+    Write-Warning "Could not check the PowerShell execution policy: $($_.Exception.Message)"
+    Write-Warning "If 'graft' does not run in PowerShell, run: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned (or use graft.cmd)."
+}
+if ($scriptsOk -eq $false) {
     # Without graft.ps1, PowerShell resolves `graft` to graft.cmd, which the execution policy does not affect
     # Same for npm/npx in the per-user Node: without npm.ps1, PowerShell runs npm.cmd
     $ps1Shims = @((Join-Path $NpmGlobal 'graft.ps1'), (Join-Path $NodeHome 'npm.ps1'), (Join-Path $NodeHome 'npx.ps1'))
