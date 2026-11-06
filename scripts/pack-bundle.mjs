@@ -42,9 +42,13 @@
  * standalone tarball is then deleted, together with kits and tarballs left by earlier
  * packs (any version): the new kit is the only artifact left.
  *
- * The fork changelog's "Not yet bundled" entries are dated with this build (today's date
- * and the package version) in the shipped copies, and in docs/changelog.html once
- * the build has succeeded.
+ * The fork changelog (docs/changelog.html, generated from the fork's commit messages by
+ * scripts/changelog.mjs) gets this build as a new record in changelog-builds.json (today's
+ * date and the build version): its "Not yet bundled" commits become this build's group in the
+ * shipped copies, and in docs/changelog.html and changelog-builds.json once the build has
+ * succeeded. Commit changelog-builds.json right after the pack: the commit that first carries
+ * the record closes the build, so later commits go to the next one. Work that is not committed
+ * when you pack ships in the build but is listed under the build its commit closes.
  *
  * Either way vendor/ is re-staged from the sibling repos' prebuilds (build:vendor) and
  * verified byte-for-byte against them before packing, so the tarball cannot carry
@@ -57,7 +61,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { localDate, stampChangelog } from "./stamp-changelog.mjs";
+import { addBuild, BUILDS_RELATIVE, formatBuilds, generateChangelog, localDate, readBuilds } from "./changelog.mjs";
 import { kitFileName, kitVersion, latestKitInChangelog, nextKitBuild, parseKitName, parseKitRecord } from "./kit-build.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -218,15 +222,35 @@ for (const entry of ["dist", "scripts", "README.md", "LICENSE"]) {
   if (existsSync(from)) cpSync(from, join(stagingDir, entry), { recursive: true });
 }
 // docs/changelog.html rides along so `graft about fork` can open it after install,
-// with its not-yet-bundled entries dated by this build.
+// regenerated from the commit messages with its not-yet-bundled commits under this build.
 const changelogPath = join(repoRoot, "docs", "changelog.html");
+const buildsPath = join(repoRoot, BUILDS_RELATIVE);
 const bundleDate = localDate();
 // On Windows the build is named by its kit version (a.b.c.d, d counting the packs of this
 // graft version), so each kit gets its own changelog group; elsewhere by the package version.
 const kitBuild = process.platform === "win32" ? nextKitBuild(pkg.version, previousKit()) : null;
 // kitBuild starts at 0, so test for null, not truthiness.
 const buildVersion = kitBuild !== null ? kitVersion(pkg.version, kitBuild) : pkg.version;
-const changelog = stampChangelog(readFileSync(changelogPath, "utf8"), { date: bundleDate, version: buildVersion });
+const changelog = (() => {
+  let builds;
+  try {
+    builds = addBuild(readBuilds(repoRoot), bundleDate, buildVersion);
+  } catch (err) {
+    die(`could not read ${buildsPath} (${err.message}) — restore it from git (git checkout -- ${BUILDS_RELATIVE})`);
+  }
+  try {
+    const { html, groups } = generateChangelog(repoRoot, builds);
+    const group = groups.find((g) => g.kind === "bundle" && g.date === bundleDate && g.version === buildVersion);
+    return { html, builds, count: group ? group.entries.length : 0, generated: true };
+  } catch (err) {
+    console.warn(`! docs/changelog.html not regenerated (${err.message}); shipping it as it is`);
+    return { html: readFileSync(changelogPath, "utf8"), builds, count: 0, generated: false };
+  }
+})();
+const dirty = spawnSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: repoRoot, encoding: "utf8", windowsHide: true });
+if (dirty.status === 0 && dirty.stdout.trim()) {
+  console.warn("! uncommitted changes: they ship in this build, but the changelog lists only committed work (from the commit messages) — commit before packing to have them listed under this build");
+}
 mkdirSync(join(stagingDir, "docs"), { recursive: true });
 writeFileSync(join(stagingDir, "docs", "changelog.html"), changelog.html);
 
@@ -633,12 +657,14 @@ if (kitName) {
   console.log(`\n✓ ${kitName} (${kitMb} MB, build ${kitBuild} of graft ${pkg.version}) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, changelog.html`);
 }
 
-if (changelog.count > 0) {
+if (changelog.generated) {
+  writeFileSync(buildsPath, formatBuilds(changelog.builds));
   writeFileSync(changelogPath, changelog.html);
-  console.log(`\n✓ docs/changelog.html: ${changelog.count} not-yet-bundled entr${changelog.count === 1 ? "y" : "ies"} dated ${bundleDate} (build ${buildVersion})`);
+  console.log(`\n✓ docs/changelog.html: build ${buildVersion} (${bundleDate}) recorded in ${BUILDS_RELATIVE}, ${changelog.count} entr${changelog.count === 1 ? "y" : "ies"} from commit messages`);
 }
 
-if (kitName) console.log(`\n  Commit kit-build.json${changelog.count > 0 ? " and docs/changelog.html" : ""}, so the next kit continues from build ${kitBuild}.`);
+const toCommit = [kitName ? "kit-build.json" : null, changelog.generated ? `${BUILDS_RELATIVE} and docs/changelog.html` : null].filter(Boolean).join(", ");
+if (toCommit) console.log(`\n  Commit ${toCommit} now${kitName ? `, so the next kit continues from build ${kitBuild}` : ""} and later commits are listed under the next build.`);
 if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);
 else console.log(`\n  Install on another ${PLATFORM} machine with:`);
 console.log(`    npm i -g ./${finalName} --ignore-scripts\n`);
