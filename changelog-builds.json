@@ -1,0 +1,17 @@
+{
+  "unrecordedThrough": "e823d726a2250e653ac3c65b8eb10b7a0b734cd7",
+  "builds": [
+    {
+      "id": "2026-11-04 0.28.0",
+      "date": "2026-11-04",
+      "version": "0.28.0",
+      "commit": "bce05fc1fbf02fd0ccc800b978254ff8b9728e9a"
+    },
+    {
+      "id": "2026-11-05 0.28.0.1",
+      "date": "2026-11-05",
+      "version": "0.28.0.1",
+      "commit": "20f7feaf069973dd87e61caf197fee70e122e6cb"
+    }
+  ]
+}

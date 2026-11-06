@@ -1,0 +1,770 @@
+{
+  "about": "Entries of the hand-written fork report that came before docs/changelog.html was generated from commit messages. scripts/changelog.mjs merges them into the page: each sits in the group it was listed in (\"version\" = package build, otherwise the commit date), and the generated entries named in its \"replaces\" list (exact entry text) are left out because it already covers them.",
+  "items": [
+    {
+      "version": "0.28.0",
+      "date": "2026-11-04",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft about</code></b> (also <code>graft info</code>) prints what graft is for, the upstream project homepage and the path of this fork changelog (<code>docs/changelog.html</code>), which ships inside the installed package. <code>graft about home</code> opens the homepage and <code>graft about fork</code> opens this changelog in the browser.<span class=\"first\">first added 2026-11-04</span>",
+      "replaces": [
+        "New \"graft about\" command (also available as \"graft info\"). It explains what graft is for and shows the project homepage and the location of the fork report. \"graft about home\" opens the homepage in your browser, and \"graft about fork\" opens the report of this fork's changes. Nothing is sent anywhere."
+      ]
+    },
+    {
+      "version": "0.28.0",
+      "date": "2026-11-04",
+      "type": "feature",
+      "area": "packaging",
+      "html": "<b>Windows installer and offline installer kit.</b> Double-click <code>START-HERE-install-graft.cmd</code>, which runs <code>install-graft-helper.ps1</code>. It starts by explaining what graft is for, links the upstream project and shows the path and <code>file:///</code> link of this fork changelog (shipped in the kit as <code>changelog.html</code>) without asking to open it. It does not stop at the execution-policy step when PowerShell 7 is installed or it is started from a PowerShell 7 terminal; a failed policy check only prints a warning. On npm 12 (Node.js 26) it lets graft's post-install setup run. The kit is a single zip built from the project, named <code>graft-a.b.c.d-win-x64.zip</code>: <code>a.b.c</code> is the graft version inside it and <code>d</code> the build number, which starts at 0 and goes up by 1 with each new kit of the same graft version (back to 0 for a new version). The last kit is recorded in the committed <code>kit-build.json</code>, so every clone continues the same numbering, and this changelog names each build by its kit version. Packing a kit removes kits and packages left by earlier packs. The installer installs or upgrades from offline package files (also named like <code>… - Copy.tgz</code> or <code>… (1).tgz</code>). For Node.js it uses an offline zip placed next to it, or downloads the latest LTS and verifies its checksum. It reinstalls graft when the Node.js version changes. It fixes the user PATH without damaging existing entries, runs the graft it just installed, and warns if new terminals won't find graft and npm or if another graft in PATH would be used instead. It checks the LLM setup the way graft reads it (including Databricks and Anthropic-style endpoints), lists models and test-calls the chosen one. Finally it offers to download the public price list, which you can skip. Your answers are remembered (in <code>%USERPROFILE%\\.graft\\installer-choices.json</code>, never any key or password), so an upgrade does not ask again what you already answered: it shows the list of what it will do and continues, asks only about items that are new since your last run (marked NEW), reuses your price list answer, and asks about the LLM endpoint, API key or model only when the check fails. It runs <code>npm login</code> only when you are not logged in to the registry yet. On a PC where an earlier installer already ran, that earlier agreement counts. <code>START-HERE-install-graft.cmd -Ask</code> asks every question again.<span class=\"first\">first added 2026-10-20</span>",
+      "replaces": [
+        "The Windows installer now remembers your answers. On an upgrade it shows what it will do and continues without asking again.",
+        "The Windows offline installer kit now has a build number in its name (graft-a.b.c.d-win-x64.zip).",
+        "The Windows installer now opens with a short explanation of what graft does and a notice that this is a fork. It shows where the fork report is and offers to open it in your browser (skipped with -Yes).",
+        "The Windows installer no longer stops at the \"execution policy\" step when PowerShell 7 is installed or the installer is started from a PowerShell 7 terminal. If the policy check still fails, it now prints a warning and the install continues.",
+        "On npm 12 (Node.js 26), the installer now lets graft's post-install setup run instead of skipping it with a warning.",
+        "The Windows offline installer kit's build number now starts at 0 instead of 1.",
+        "The Windows installer no longer asks whether to open the changelog in your browser. It only shows the changelog's path and link.",
+        "Packing the offline installer kit now deletes kits and packages left by earlier versions, so only the newest one remains.",
+        "The Windows installer is renamed. Double-click \"START-HERE-install-graft.cmd\", which uses the helper script \"install-graft-helper.ps1\". The messages and help text refer to the new names.",
+        "On Windows, the offline installer kit is now a single zip file that you can create from the project.",
+        "The Windows installer now downloads the latest Node.js LTS and verifies its checksum. It reinstalls graft when the Node.js version changes. It runs the graft it just installed and warns if another graft in PATH would be used instead.",
+        "The installer now checks Anthropic-style endpoints the right way, so a working key is no longer reported as \"unknown\".",
+        "The Windows installer can install Node.js from an offline zip placed next to it, and falls back to downloading from nodejs.org. The installer lists this in the steps it announces before asking for your agreement.",
+        "The Windows installer offers to download the public model price list after installing, so graft can show cost savings for newer models. You can skip it, and a failure there does not fail the install.",
+        "The Windows installer now checks your LLM setup the way graft itself reads it, including the Databricks AI Gateway. It picks the right endpoint for the model, lists the available models, and test-calls the chosen model.",
+        "The Windows installer now fixes the user PATH without damaging existing entries and confirms that new terminals will find graft and npm. It warns if they won't, and reminds you to restart apps that are already open.",
+        "The Windows installer (install-graft.cmd is new, install-graft.ps1 is changed) now accepts offline package files with extra name suffixes, such as ... - Copy.tgz or ... (1).tgz. The new .cmd launcher lets you double-click to install or upgrade."
+      ]
+    },
+    {
+      "version": "0.28.0",
+      "date": "2026-11-04",
+      "type": "change",
+      "area": "privacy",
+      "html": "<b>No-cloud policy</b> (<code>docs/no-cloud-policy.md</code> and agent instruction files). Users can't switch on anything that sends data to a cloud or other third party through settings, flags, commands or toggles. New upstream features that send data out stay disabled until the repository owner approves them, and each decision is recorded.<span class=\"first\">first added 2026-10-30</span>",
+      "replaces": [
+        "The fork's no-cloud policy is stricter. Nothing that sends data to a cloud or other third party can be switched on by users through settings, flags, commands or toggles. Any new upstream feature that sends data to an outside service stays disabled until the repository owner has approved it, and each decision is recorded."
+      ]
+    },
+    {
+      "version": "0.28.0",
+      "date": "2026-11-04",
+      "type": "fix",
+      "area": "cli",
+      "html": "On Windows, console windows flashed up while an agent such as Claude Code used graft: every git, gh or npm call that graft made from a background job (such as the branch refresh after <code>graft ask</code>) or from a process without a console opened a window of its own. Graft now starts all its helper programs with their window hidden; only opening a page or file in the browser shows a window.",
+      "replaces": [
+        "On Windows, background git, gh and npm calls no longer open flashing console windows (for example after running graft ask, or when an agent such as Claude Code starts graft). Only pages or files you open on purpose still show a window."
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "type": "improvement",
+      "area": "cli",
+      "html": "<code>graft build</code> no longer ends with a success tick when it finds no files. It shows a warning and, when it can tell, explains why (for example, the folder is ignored by the repo it sits in).",
+      "replaces": [
+        "\"graft build\" no longer ends on a success tick when it finds no files. It shows a warning and, when it can tell, explains why, for example that the folder is git-ignored by the repo it sits in."
+      ]
+    },
+    {
+      "date": "2026-11-04",
+      "type": "change",
+      "area": "llm",
+      "html": "The only endpoint URL graft suggests is the Databricks AI Gateway. Help, examples, \"How to fix it\" hints, URL prompts, the installer, the README and <code>.env.example</code> show it as the sample and never propose another provider's URL (OpenRouter, Groq, Ollama, Anthropic's API and so on). When a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft uses the custom URL without asking and without naming the provider's endpoint; a choice of the provider's endpoint saved earlier for the same URL is still honoured.",
+      "replaces": [
+        "Example URLs in the `api url` command help, the input prompts, the \"not a valid URL\" messages and the \"endpoint could not be reached\" hints now show the Databricks gateway address instead of a generic placeholder.",
+        "The AI endpoint used by `build --deep` now defaults to the Databricks AI Gateway. The setup help, the example settings file, the README and the installer all point to it, and the model choice picks the route automatically.",
+        "Graft no longer asks which endpoint to use when a provider name and a custom endpoint URL are both set. It uses the custom endpoint, and the provider's own endpoint is no longer offered or suggested. An endpoint choice you saved earlier is still honored. This applies to both the command line and the Windows installer helper."
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "type": "fix",
+      "area": "packaging",
+      "html": "On Windows, running npm for the update check and <code>graft upgrade</code>, checking whether graft is installed, and waiting on a file lock did not work reliably.",
+      "replaces": [
+        "Fixed Windows problems with checking whether graft is installed, running npm for the update check and \"graft upgrade\", and waiting on a file lock."
+      ]
+    },
+    {
+      "date": "2026-11-03",
+      "type": "change",
+      "area": "packaging",
+      "html": "The update check and <code>graft upgrade</code> use the company npm registry instead of the public npm registry. Installing graft adds that registry to the user <code>.npmrc</code>.",
+      "replaces": [
+        "The update check and \"graft upgrade\" now use the company registry instead of the public npm registry. Installing graft also adds that registry to your user .npmrc."
+      ]
+    },
+    {
+      "date": "2026-10-29",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b>Fix the endpoint on the spot.</b> When the endpoint rejects the API key or can't be reached, including during a deep build, graft offers to change the endpoint URL and/or the key so the re-run works.",
+      "replaces": [
+        "When the LLM endpoint rejects your API key or can't be reached, graft now offers to change the endpoint URL and/or the key right there."
+      ]
+    },
+    {
+      "date": "2026-10-29",
+      "type": "improvement",
+      "area": "llm",
+      "html": "When no endpoint URL is set and the provider has no default, graft says so clearly instead of silently contacting <code>api.openai.com</code>.",
+      "replaces": [
+        "When no endpoint URL is set and the provider has no default one, graft now says so clearly. Before, it could silently contact the wrong service (api.openai.com)."
+      ]
+    },
+    {
+      "date": "2026-10-28",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft issues</code></b> opens the issue tracker in the browser and also prints the address.",
+      "replaces": [
+        "New \"graft issues\" command opens the issue tracker in your browser, so you can report a bug or request a feature. The address is also printed in case no browser opens."
+      ]
+    },
+    {
+      "date": "2026-10-27",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b><code>graft effort</code></b> views or sets the thinking effort the model uses in <code>build --deep</code>.",
+      "replaces": [
+        "New \"effort\" command lets you view or set how much thinking effort the AI model uses when building the graph with \"build --deep\"."
+      ]
+    },
+    {
+      "date": "2026-10-26",
+      "type": "change",
+      "area": "llm",
+      "html": "The default model is <code>claude-haiku-5-5</code> instead of <code>claude-sonnet-5-5</code> on every provider: <code>build --deep</code>, <code>graft init</code> (look-back, skill naming, PR review), help and examples. Model recommendations prefer Claude Haiku, then Claude Sonnet, then Gemini Flash, then GPT terra.",
+      "replaces": [
+        "The default model is now claude-haiku-5-5 instead of claude-sonnet-5-5 on every provider. This covers \"graft build --deep\", \"graft init\" (look-back, skill naming and PR review), the help text and the examples. Model recommendations now prefer Claude Haiku, then Claude Sonnet, then Gemini Flash, then GPT terra."
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>Bash support</b> (<code>.sh</code>, <code>.bash</code>, <code>.bashrc</code>, <code>.bash_profile</code>): functions, calls between them, and <code>source</code> / <code>.</code> as imports resolved to in-repo scripts.",
+      "replaces": [
+        "Bash support (.sh, .bash, .bashrc, .bash_profile). Graft now indexes functions, calls between them, and source or . as imports resolved to in-repo scripts."
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>Perl support</b> (<code>.pl</code>, <code>.pm</code>, <code>.t</code>): packages and subs, <code>$self-&gt;m()</code> and <code>Pkg-&gt;m()</code> calls resolved through the package and through <code>use parent</code>, <code>use base</code> and <code>@ISA</code>, and <code>use</code>/<code>require</code> as imports resolved to in-repo <code>.pm</code> files.",
+      "replaces": [
+        "Perl support (.pl, .pm, .t). Graft indexes packages and subs. It resolves $self->m() and Pkg->m() calls through the package and through use parent, use base and @ISA. use and require become imports resolved to in-repo .pm files."
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>Make support</b>: <code>Makefile</code>, <code>makefile</code>, <code>GNUmakefile</code>, <code>*.mk</code>, <code>*.mak</code>.",
+      "replaces": [
+        "Make support (Makefile, makefile, GNUmakefile, *.mk, *.mak)."
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b><code>graft build --deep --force</code></b> re-summarizes every file and symbol and ignores earlier results. If a forced call fails, the previous summary is kept. <code>--force</code> without <code>--deep</code> stops with a clear message.",
+      "replaces": [
+        "\"graft build --deep --force\" re-summarizes every file and symbol, ignoring earlier results. Without --force, --deep only redoes code that changed since the last run. If a forced call fails, the previous summary is kept instead of being lost.",
+        "\"graft build --force\" without --deep now stops with a clear message that --force only works together with --deep."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>CMake support</b>: <code>CMakeLists.txt</code> and <code>*.cmake</code>.",
+      "replaces": [
+        "CMake support. CMakeLists.txt and *.cmake files are indexed."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b>Databricks AI Gateway provider.</b> Claude, OpenAI, Qwen/open models and <code>databricks-*</code> serving endpoints are routed automatically by model id. Databricks error messages are parsed correctly. <code>graft model</code> lists the GPT models the gateway serves, using checks that spend no tokens and skipping models that only support the Responses API. GPT models without a gateway service id work, and a model refused with \"rate limit set to 0\" is retried under its other name. Missing or rejected tokens point to where a personal access token is generated. A deep build asks for the key only once and reuses the model list it already fetched.",
+      "replaces": [
+        "Databricks AI Gateway is now the default LLM endpoint. When no base URL or provider is set, graft uses it. Claude, OpenAI, Qwen/open-model and databricks-* serving-endpoint models are routed automatically by model id.",
+        "Databricks GPT models that have no gateway service id (for example databricks-gpt-6-astra and databricks-gpt-5-mini) now work. They no longer fail with a \"rate limit set to 0\" error.",
+        "When the gateway refuses one name of a GPT model with \"rate limit set to 0\", graft now retries under the model's other name automatically.",
+        "\"graft model\" now lists the GPT models the Databricks gateway serves. It finds them with checks that spend no tokens, and it skips models that only support the Responses API.",
+        "Wherever a Databricks token is missing or rejected, graft now says where to generate a personal access token. This covers build, the key and model settings commands, and the error hints.",
+        "\"graft build --deep\" with the Databricks gateway no longer asks for the key a second time, and reuses the model list it already fetched. If a deep build fails because of a bad key or an unreachable endpoint, graft offers to fix it so the re-run works."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b>Stale agent-instructions warning</b> under the savings tally: <code>⚠️ Run the 'graft init' command — recommended (…)</code> appears when installed instruction files differ from what the running version would write.",
+      "replaces": [
+        "Savings tally warnings now cover stale agent instructions. A new ⚠️ Run the 'graft init' command — recommended (…) line appears when installed instruction files differ from what the running version would write. A related ⚠️ Run the 'graft prices update' command line appears when a saving can only be shown in tokens because the model has no known price."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft config</code></b> lists and changes <code>.graft/config.json</code> settings (exclude-dirs, include-dirs, follow-submodules, follow-nested-repos) without editing JSON. Takes <code>--repo &lt;dir&gt;</code> and has per-setting help.",
+      "replaces": [
+        "Graft config command to list and change .graft/config.json settings without editing JSON. It covers exclude-dirs, include-dirs, follow-submodules and follow-nested-repos, takes --repo <dir>, and has per-setting help."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft init</code> and <code>graft build</code> follow VS Code <code>.code-workspace</code> files.</b> <code>graft init</code> offers to wire and build each listed folder. <code>graft build</code> can build all listed folders, including folders outside the current directory, and remembers the choice. Both are controlled by <code>--workspace &lt;file&gt;</code> and <code>--no-workspace</code>. Without a terminal or with <code>--yes</code>, a workspace is never assumed.",
+      "replaces": [
+        "Graft init follows VS Code .code-workspace files. It offers to wire and build each folder listed in the workspace. --workspace <file> and --no-workspace control this, and without a terminal or with --yes it never assumes a workspace.",
+        "\"graft build\" can now build all the folders listed in a VS Code .code-workspace file, including folders outside the current directory. Your choice is remembered, and you can override it with --workspace or --no-workspace."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft languages</code></b> lists every indexed language and its support level on this install: full, broad, symbols, structural, file-only or skipped.",
+      "replaces": [
+        "New graft languages command. It lists every language graft indexes and how well each is supported on your install: full, broad, symbols, structural, file-only or skipped."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "improvement",
+      "area": "llm",
+      "html": "More reliable with models that are strict about tool calls. Models that refuse forced tool calls or can't turn reasoning off are handled on both the OpenAI and the Anthropic paths, and replies made of text and reasoning parts are accepted.",
+      "replaces": [
+        "LLM calls are more reliable on gateways and models that are picky about tool calls. Models that refuse forced tool calls, or can't turn reasoning off, are handled automatically on both the OpenAI and Anthropic paths. Gateway error messages in Databricks' format are now read correctly instead of showing \"400 (no body)\". Replies that arrive as a list of text and reasoning parts are handled. Failure hints, model listing and setting-source detection now understand the Databricks gateway."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "improvement",
+      "area": "agents",
+      "html": "Instructions for hosts that can't run commands (Copilot Ask mode, read-only modes): use graft's MCP tools or read the <code>graft/</code> files, never invent a savings line, and end with a fixed \"switch to Agent mode\" notice. Applied to all agents, the Claude/AdaL/Grok skill and <code>graft/INDEX.md</code>.",
+      "replaces": [
+        "Agent instructions now handle hosts that cannot run commands, such as Copilot Ask mode or read-only modes. The agent uses graft's MCP tools or reads the graft/ files, never invents a savings line, and ends with a fixed \"switch to Agent mode\" notice. This is applied to all supported agents, the Claude/AdaL/Grok skill and graft/INDEX.md."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "improvement",
+      "area": "cli",
+      "html": "In the <code>graft init</code> picker, Enter selects the highlighted agent, and an agent you unticked stays unticked.",
+      "replaces": [
+        "The graft init picker selects the highlighted agent when you press enter. An agent you unticked yourself stays unticked."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "fix",
+      "area": "cli",
+      "html": "Re-running <code>graft init</code> (picker or <code>--yes</code>) removed instructions of agents already wired in the repo, for example ones only a teammate's machine has. They are now kept and shown in the picker.",
+      "replaces": [
+        "Following the graft init nudge no longer removes agents' instructions. The picker and --yes now keep every agent already wired in the repo, including ones only a teammate's machine has, and the picker shows them."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "change",
+      "area": "llm",
+      "html": "When no provider or base URL is configured, the Databricks AI Gateway is the default endpoint.",
+      "replaces": [
+        "The Databricks AI Gateway is now the default endpoint when no provider or URL is configured. The built-in LLM Incubator address has been removed. The \"llm-incubator\" provider now needs a base URL (GRAFT_BASE_URL or --base-url) and gives a clear error if none is set."
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "type": "change",
+      "area": "privacy",
+      "html": "<b>Trail cloud (Trail workspace) is permanently disabled.</b> Nothing is uploaded. <code>TRAIL_CLOUD</code>, <code>TRAIL_URL</code> and <code>~/.trail/cloud.json</code> are ignored, <code>trail login</code> and <code>trail workspace add</code> refuse, and <code>trail status</code> has no workspace row.",
+      "replaces": [
+        "Trail cloud (the Trail workspace) is permanently disabled. Nothing is uploaded and it cannot be turned on. TRAIL_CLOUD, TRAIL_URL and ~/.trail/cloud.json are ignored. trail login and trail workspace add refuse, and trail status shows no workspace row. The README privacy text is updated to match."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b>Public model price catalog (LiteLLM).</b> A snapshot ships with graft and is refreshed on every build, keeping the old list when offline or when the download looks broken. <code>graft prices update</code> downloads a newer list, which is used when it is newer than the snapshot. <code>graft prices status</code> shows both lists and where each price comes from. Before downloading, <code>graft prices update</code> and the installer name the exact public price file and its GitHub address, confirm that nothing about you or your repo is sent, and show where the prices are stored. When a model can't be priced, the tally gets a <code>⚠️ Run the 'graft prices update' command — recommended (…)</code> line.",
+      "replaces": [
+        "\"graft prices update\" and the installer now say what they download before downloading. They name the exact public price file and its GitHub address, confirm that nothing about you or your repo is sent, and show where the prices are stored.",
+        "Savings are now priced in dollars for many more models without any setup, because graft ships with a built-in snapshot of the public model price list. A price list you download yourself is used when it is newer. \"graft prices status\" shows both lists and where each price comes from.",
+        "Graft prices update and graft prices status download a public model price catalog, so dollar savings work for models graft doesn't list.",
+        "Graft prices update and graft prices status download a public model price catalog (LiteLLM) so savings are shown in dollars for models graft doesn't know. A ⚠️ 'graft prices update' recommended hint appears under the savings tally when a model can't be priced.",
+        "Every build now refreshes the bundled model price list from the public LiteLLM catalog. It keeps the existing list if you are offline or the download looks broken or partial. Installing dependencies no longer touches the price list."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b><code>graft api url</code>, <code>graft api key</code> (hidden input), <code>graft api provider</code> and <code>graft model</code></b> save LLM settings as user-level environment variables, so every new terminal, IDE and MCP host sees them. They show the current value and its source, list the endpoint's models with a recommended pick, verify the endpoint after saving, and support <code>--unset</code>. <code>build --deep</code> uses the configured model when the gateway serves it and says which one it used and where that came from. When the latest model is picked automatically, a \"1\" in a name like \"1adp\" is not read as a version number. Interactive prompts show each typed key once.",
+      "replaces": [
+        "Save your LLM settings once with graft api url, graft api key (hidden input) and graft model. They store user-level environment variables, so every new terminal, IDE and MCP host sees them. They show the current value and where it comes from, list the models the endpoint serves with a recommended mid-tier pick, verify the endpoint after saving, and support --unset.",
+        "Graft build --deep no longer asks for a model on every run. It uses the model already set (--model, GRAFT_MODEL or the default) when the gateway serves it for your key, and says which one it used and where it came from.",
+        "Picking the latest model no longer misreads the \"1\" in \"1adp\" as part of the version number.",
+        "Fixed the interactive setup prompts in the terminal so that, after the first prompt, each key you type is no longer shown twice."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b><code>graft staleness [dir]</code></b> shows the share of out-of-date summaries, whether a deep build is due, and the worst files. Supports <code>--top</code>, <code>--no-refresh</code>, <code>--json</code> and a per-repo split in workspaces.",
+      "replaces": [
+        "New graft staleness [dir] command. It shows what share of the summaries is out of date, whether a --deep build is due, and the worst files. It supports --top, --no-refresh, --json and a per-repo split in workspaces."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "improvement",
+      "area": "llm",
+      "html": "Failed <code>build --deep</code> runs end with a \"How to fix it\" block naming the setting to change (<code>GRAFT_BASE_URL</code>, <code>GRAFT_API_KEY</code>, <code>GRAFT_MODEL</code>) and listing available models. Workspace builds print it once for all child repos.",
+      "replaces": [
+        "Graft build --deep failures now end with a \"How to fix it\" block. It names the setting to change (GRAFT_BASE_URL, GRAFT_API_KEY or GRAFT_MODEL) and lists the available models. Workspace builds print these hints once for all child repos."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "improvement",
+      "area": "llm",
+      "html": "LLM calls trust the operating system's certificate store, so corporate gateways and TLS-inspecting proxies work without <code>NODE_EXTRA_CA_CERTS</code> (Node 22.19+/24.5+; <code>GRAFT_SYSTEM_CA=0</code> turns it off).",
+      "replaces": [
+        "LLM calls now trust the operating system's certificate store, so corporate gateways and TLS-inspecting proxies work without NODE_EXTRA_CA_CERTS. This needs Node 22.19+/24.5+, and GRAFT_SYSTEM_CA=0 turns it off."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "improvement",
+      "area": "cli",
+      "html": "<code>graft --help</code> is an A→Z command list with a plain-language description, arguments, options and examples for each command. <code>graft &lt;command&gt; --help</code> and <code>graft help &lt;command&gt;</code> print the same entry. Unknown commands get a \"Did you mean…?\" suggestion, and <code>graft --model x</code> without a command gives a short error.",
+      "replaces": [
+        "Graft --help is now a clear A→Z command list. Each command has a plain-language description, its arguments, options and examples. graft <command> --help and graft help <command> print the same entry. Unknown commands get a \"Did you mean…?\" suggestion with the help, and graft --model x with no command gets a short error."
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "type": "change",
+      "area": "privacy",
+      "html": "<b>Telemetry is permanently disabled.</b> Nothing is recorded or sent, and it cannot be turned on. <code>graft telemetry enable</code> refuses, the init usage-stats row and first-run notice are gone, and npm postinstall no longer records an install event. <code>graft telemetry</code> is not listed in <code>graft --help</code>. README and TELEMETRY.md are updated.",
+      "replaces": [
+        "Telemetry is permanently disabled. Nothing is recorded or sent, and it cannot be enabled. graft telemetry enable refuses, the init usage-stats row and first-run notice are gone, and the npm postinstall no longer records an install event. README and TELEMETRY.md are updated to match.",
+        "Telemetry stays permanently disabled, and graft telemetry is no longer listed in graft --help. It still runs, and graft telemetry --help still explains it."
+      ]
+    },
+    {
+      "date": "2026-10-16",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b>Stale-summary notice.</b> When more than a threshold of the AI summaries (10% by default) is out of date or missing, every CLI query (on stderr) and every MCP tool result (at the end) carries a line recommending <code>graft build --deep</code>. Agents relay it under the savings tally as <code>⚠️ Run the 'graft build --deep' command — recommended (…)</code> and are told never to run the deep build unasked. <code>graft deep-threshold</code> shows, sets or resets the threshold (0–100).",
+      "replaces": [
+        "Queries now tell you when the AI-generated summaries have drifted. Once more than 10% of the code summaries are out of date, or were never generated, every CLI query (on stderr) and every MCP tool result (at the end) carries a one-line note recommending graft build --deep",
+        "New graft deep-threshold command. It shows, sets or resets the out-of-date percentage (0–100) above which that recommendation appears",
+        "Agents are now told to relay a due graft build --deep and an unpriced-model warning as extra lines under the savings tally. They are also told never to run the deep build unasked. This is in the CLI output, MCP results, and the agent instructions and skill templates."
+      ]
+    },
+    {
+      "date": "2026-10-16",
+      "type": "fix",
+      "area": "agents",
+      "html": "Claude hooks and the status line failed under some shells. They now run under any shell, including cmd.exe and PowerShell on Windows.",
+      "replaces": [
+        "Graft's Claude hooks and status line now run correctly under any shell, including cmd.exe and PowerShell on Windows."
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b>Pause and resume when the AI relay runs out of balance.</b> The build waits until the balance is refilled and then continues instead of failing. The error says \"relay balance exhausted\" rather than \"provider rejected the API key\".",
+      "replaces": [
+        "When the AI relay runs out of balance, the build pauses and resumes automatically once the balance is refilled, instead of failing",
+        "Relay balance errors now report \"relay balance exhausted\" instead of \"provider rejected the API key\"",
+        "'--deep' builds no longer fail when the API relay runs out of balance."
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "improvement",
+      "area": "lang",
+      "html": "Kotlin <code>.kts</code> files (Gradle scripts) are included in the concept map built by <code>--deep</code>.",
+      "replaces": [
+        "Kotlin .kts files (Gradle scripts) are now included in the concept map built by --deep"
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "improvement",
+      "area": "lang",
+      "html": "A locally built Kotlin grammar (v0.4) is used when available, which parses more accurately than the registry version.",
+      "replaces": [
+        "A locally-built Kotlin grammar (v0.4) is used when available, improving parsing accuracy over the bundled registry version"
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "fix",
+      "area": "llm",
+      "html": "One failing concept-synthesis batch aborted the whole <code>build --deep</code>. Finished batches are now checkpointed, so a re-run only calls the AI for the missing ones.",
+      "replaces": [
+        "A failing concept-synthesis batch no longer aborts the whole build; completed batches are checkpointed so a re-run only calls the AI for the missing ones"
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "fix",
+      "area": "lang",
+      "html": "Kotlin inheritance edges were missing for superclasses (<code>: Base(1)</code>), delegated interfaces (<code>: Runnable by impl</code>) and qualified types (<code>: com.acme.Base()</code>).",
+      "replaces": [
+        "Kotlin inheritance edges (extends) were missing for superclasses (: Base(1)), delegated interfaces (: Runnable by impl), and qualified types (: com.acme.Base())"
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "type": "fix",
+      "area": "lang",
+      "html": "One-line Kotlin objects (<code>object Keys { val A = \"a\" }</code>) were misread as infix calls, so their members appeared as top-level functions.",
+      "replaces": [
+        "One-line Kotlin objects (object Keys { val A = \"a\" }) were misidentified as infix calls, causing their members to appear as top-level functions"
+      ]
+    },
+    {
+      "date": "2026-09-25",
+      "type": "feature",
+      "area": "llm",
+      "html": "<b>LLM Incubator gateway provider</b>, with Bearer auth through <code>ANTHROPIC_AUTH_TOKEN</code> and <code>ANTHROPIC_BASE_URL</code>. It needs a base URL (<code>GRAFT_BASE_URL</code> or <code>--base-url</code>) and gives a clear error without one.",
+      "replaces": [
+        "Added support for the LLM Incubator gateway provider and authentication via ANTHROPIC_AUTH_TOKEN (Bearer token auth) and ANTHROPIC_BASE_URL."
+      ]
+    },
+    {
+      "date": "2026-09-25",
+      "type": "improvement",
+      "area": "llm",
+      "html": "Automatic connection and model fallbacks: the <code>/v1</code> path suffix is added or removed as needed, provider-prefixed model names are retried as bare IDs, and graft switches wire protocol when an endpoint rejects a request.",
+      "replaces": [
+        "Added automatic connection and model fallbacks that adaptively adjust endpoint URL paths (toggling /v1), retry unrecognized provider-prefixed model names using bare IDs, and fall back across wire protocols when endpoints reject requests."
+      ]
+    },
+    {
+      "date": "2026-09-25",
+      "type": "fix",
+      "area": "llm",
+      "html": "Summaries failed on large files and files with many symbols. Requests are now batched, batches split automatically at the output token limit, and the source window is focused on the target definitions.",
+      "replaces": [
+        "Resolved code summarization failures on large files and files with many symbols by batching requests, adaptively splitting batches when output token limits are reached, and focusing source code windows around target definitions."
+      ]
+    },
+    {
+      "date": "2026-09-24",
+      "type": "fix",
+      "area": "savings",
+      "html": "Claude Opus 5.5 matched the Claude Opus 5 price rule, which overstated costs and savings.",
+      "replaces": [
+        "Fixed Claude Opus 5.5 incorrectly matching Claude Opus 5 pricing rules, which prevented token costs and savings from being overstated."
+      ]
+    },
+    {
+      "date": "2026-09-22",
+      "type": "fix",
+      "area": "savings",
+      "html": "The savings line was cut off in large outputs. It is now placed at the end of outputs over 20,000 characters so hosts that keep only the terminal tail still show it.",
+      "replaces": [
+        "Prevented token savings summaries from being cut off in large responses by automatically placing the notice at the end of outputs exceeding 20,000 characters so it is preserved in environments that retain the terminal tail.1"
+      ]
+    },
+    {
+      "date": "2026-09-21",
+      "type": "improvement",
+      "area": "agents",
+      "html": "\"Verify before you assert\" rules for every host and skill: agents check repo facts with graft queries instead of guessing.",
+      "replaces": [
+        "Added \"Verify before you assert\" instructions across all supported hosts and skills, directing AI agents to verify codebase facts using graft queries rather than making unverified assumptions."
+      ]
+    },
+    {
+      "date": "2026-09-21",
+      "type": "fix",
+      "area": "agents",
+      "html": "Instruction files stayed outdated after switching branches or merging. They are now checked on disk and restored when they drift.",
+      "replaces": [
+        "Fixed an issue where agent instruction files remained outdated after git checkouts or merges by verifying on-disk rule files and automatically restoring them if they drift from the current version."
+      ]
+    },
+    {
+      "date": "2026-09-14",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b>Model detection from host session records</b> when the agent doesn't report a model: Kilo Code (including forks, VS Code Insiders installs, paired models and subagents, and shells started by Kilo's agent), VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. Repos and VS Code workspaces opened through a junction or symlink are recognised, as are Kilo sessions not yet saved to Kilo's main database file. Kilo turns are not priced at the model of a Copilot chat in the same VS Code window, and Kilo and Copilot calls are not filed under the last Claude Code model in repos where Claude Code once ran. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.",
+      "replaces": [
+        "Automatic detection of active models from host sessions (such as VS Code and GitHub Copilot) to track and price token savings when not explicitly specified.",
+        "Automatic detection of the active AI model from host session records (such as Kilo Code) as a backstop when not supplied by the agent, ensuring token savings can be priced and attributed accurately.",
+        "Added support for paired models and subagent workflows in Kilo Code, properly attributing active subagent turns and normalizing model IDs so token savings are accurately priced and displayed without duplicate entries.",
+        "The CLI now detects the running model from Kilo's session when it runs in a shell started by Kilo's agent, not only over MCP.",
+        "Forks of Kilo Code are now recognised, including installs under VS Code Insiders and under the automotive.kilo-code extension id.",
+        "When GitHub Copilot runs Graft from a JetBrains IDE terminal (IntelliJ IDEA, PyCharm, and others), Graft can now work out the active AI model from Copilot's own session data. This means savings can be shown in dollars, not just tokens.",
+        "Dollar savings now work for GitHub Copilot in IntelliJ IDEA and other JetBrains IDEs on Windows. The locked session store is read through a memory-mapped view and cached. The reader also handles a model recorded as both an id and a display name.",
+        "Savings are no longer attributed to the wrong model when several chats are open on the same project. Previously the most recently touched session won, so a long-idle chat's model could be billed for another chat's work (observed as a 6x price error); now graft only uses a host-recorded model when the live sessions agree or exactly one was written during the current turn, and otherwise reports tokens without a price. Applies to both Kilo and VS Code session detection.",
+        "Agents running behind a router/\"Auto\" picker report only their model family (e.g. gpt-5) rather than the model that actually ran (e.g. gpt-5.6-luna), which priced savings at up to 6x the real rate. When the host's record is the same model named more precisely, the precise name is now used; a genuinely different host model still loses to the agent's own report.",
+        "Kilo sessions are now found when a repository is opened through a junction or symlink. Kilo's turns are no longer priced at the model of the Copilot chat in the same VS Code window.",
+        "Kilo and Copilot sessions are now recognised more reliably. This covers Kilo sessions written recently but not yet saved to its main database file, and VS Code workspaces opened through a junction or symlink.",
+        "Savings are now priced with the model you actually used. Previously, in a repo where Claude Code had ever run, Kilo and Copilot calls could be filed under the last Claude model at its old price.",
+        "Savings totals are now shown per model, with a combined total, when one turn used several models, for example a planning phase on a different model.",
+        "Established model resolution precedence so agent-specified models take priority over host session records, and host session detection avoids falling back to the multi-model estimate table."
+      ]
+    },
+    {
+      "date": "2026-09-14",
+      "type": "fix",
+      "area": "savings",
+      "html": "Output templates and agent instructions put quotation marks around the tally, so agents quoted it in their replies.",
+      "replaces": [
+        "Elimination of wrapping quotation marks around token savings messages in output templates and agent instructions to prevent AI responses from enclosing the final tally in quotes."
+      ]
+    },
+    {
+      "date": "2026-09-11",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified (for example in Kilo Code or MCP sessions), savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.",
+      "replaces": [
+        "Multi-model token savings estimation table for Kilo Code and MCP sessions, automatically discovering and merging model configurations across Kilo Code 5.x and 7.x to present estimated savings under all available models when the active model cannot be identified.",
+        "Added the graft models CLI command to calculate and compare session token savings across all models supported by the host.",
+        "Upgraded savings table formatting to clean, fenced ASCII boxes with right-aligned currency amounts and tailored guidance prompts to the current user interface (MCP argument vs. CLI flag).",
+        "Savings reporting guidance is clearer and harder to misapply — when graft has priced a call, the agent is told to report a single plain-prose line and explicitly not to build a table; the per-model table is now documented as belonging only to the case where graft could not identify the model at all. This stops agents from emitting one-row tables or prices they computed themselves."
+      ]
+    },
+    {
+      "date": "2026-09-11",
+      "type": "improvement",
+      "area": "savings",
+      "html": "Savings reports show where the price came from and which model was used, or why tokens could not be priced. They use readable model names (\"Claude Opus 5\") instead of routing IDs (<code>vertex_ai/claude-opus-5</code>).",
+      "replaces": [
+        "Model labels in savings reports now display recognizable host names (such as \"Claude Opus 5\") rather than internal routing IDs (such as \"vertex_ai/claude-opus-5\").",
+        "Updated savings reports to display the pricing source and model used (or explain why tokens could not be priced), broadened model name and provider format matching, and enabled automatic top-up of missing default settings in existing .graft/config.json files during init."
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b>Agents report the model they run on</b> through a <code>--agent-model</code> CLI flag and an optional <code>model</code> parameter on every MCP tool. MCP calls keep their state separate, so concurrent requests don't mix. Agent instructions and MCP parameter descriptions ask for the model ID on every call, with specific guidance for GitHub Copilot in IntelliJ IDEA so it doesn't guess.",
+      "replaces": [
+        "Added an optional model parameter across all MCP tools, enabling AI assistants to report their active model so token savings can be accurately priced in dollars and recorded in the lifetime savings ledger.",
+        "Clarified MCP tool parameter descriptions and host instructions to guide AI agents to consistently provide their model ID on every call.",
+        "Added model reporting guidance for GitHub Copilot in IntelliJ IDEA to prevent guessing inaccurate model IDs and ensure token savings are reliably priced and reported.",
+        "Resolved MCP server state cross-contamination and client leakage by isolating call states and verifying client identity, preventing concurrent requests from corrupting metrics and ensuring host-specific pricing tables only appear for supported clients."
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "feature",
+      "area": "savings",
+      "html": "<b>Lifetime savings ledger and <code>graft savings</code></b>: cumulative tokens and dollars saved per model, for all time, a year, a month or a day. <code>graft savings --all</code> totals every repo graft was used in. Earlier repos are found by a one-time, read-only scan of the folders remembered by Claude Code, Kilo, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex (<code>--discover</code> / <code>--no-discover</code>). One model spelled differently (punctuation, casing, provider prefixes, Databricks service ids and endpoint names) is kept as one row. If the savings file can't be read (for example an online-only OneDrive file), the saving is skipped with a warning instead of the history being lost, and an unreadable or corrupted file is set aside as a backup.",
+      "replaces": [
+        "Added a persistent lifetime savings ledger and a new graft savings CLI command to track and report cumulative token and monetary savings per model across custom timeframes (all-time, yearly, monthly, or daily).",
+        "Graft savings --all adds up the tokens and dollars graft has saved across every repo you've used it in.",
+        "Repos you used graft in before this version are found automatically the first time you run graft savings --all. The scan reads the folders remembered by Claude Code, Kilo, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex. It is read-only and runs once. --discover scans again and --no-discover skips it.",
+        "The same model spelled two ways (gemini-3.7-flash vs gemini-3-7-flash, or with different provider prefixes/casing) no longer appears as separate rows with separate dollar totals in graft savings. Ids are folded to a canonical key both when writing new entries and when totalling existing ones, so already-split historical ledgers report correctly without a migration.",
+        "Databricks model ids (service ids, endpoint names and the vendor's own id) are now priced as the same vendor model and recorded as one row in the savings ledger. Before, some were unpriced and each name got its own row.",
+        "Consolidated savings ledger entries by stripping provider routing prefixes to track each model under a single unified name, and updated estimation phrasing.",
+        "Savings history is no longer lost when the savings file can't be read, for example when a OneDrive file is online-only. The saving is skipped with a clear warning, and an unreadable or corrupted file is set aside as a backup."
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "improvement",
+      "area": "agents",
+      "html": "Instruction templates explain how to run the CLI on every platform (plain <code>graft</code> on Windows too, with an <code>npx</code> fallback).",
+      "replaces": [
+        "Updated agent instruction templates across supported host integrations to clarify cross-platform CLI execution (including Windows and npx fallback) and prompt agents to supply their model ID for accurate cost savings tracking"
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "fix",
+      "area": "savings",
+      "html": "Model IDs with a provider prefix (<code>anthropic/</code>, <code>azure/</code>, …) were not priced.",
+      "replaces": []
+    },
+    {
+      "date": "2026-09-09",
+      "type": "fix",
+      "area": "savings",
+      "html": "Savings were not tracked when CLI retrieval commands ran directly in a terminal.",
+      "replaces": [
+        "Fixed missing savings tracking when running CLI retrieval commands directly from terminals, and fixed model pricing lookups for gateway-routed model IDs with provider prefixes (e.g., anthropic/ or azure/)."
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "fix",
+      "area": "agents",
+      "html": "Agent instruction files in existing repos were not refreshed after prompt edits unless the package version changed. Wiring now compares content fingerprints.",
+      "replaces": [
+        "Fixed an issue where agent instruction files were not updated in existing repositories after prompt edits by introducing content fingerprinting into wiring reconciliation to trigger automatic refreshes even without a package version bump"
+      ]
+    },
+    {
+      "date": "2026-09-09",
+      "type": "change",
+      "area": "savings",
+      "html": "Savings are priced at the coding agent's model, not at the enrichment model (<code>GRAFT_MODEL</code>). Dollars are only shown for a model confirmed for that turn; otherwise raw token counts are shown.",
+      "replaces": [
+        "Decoupled saved token pricing from the background enrichment model (GRAFT_MODEL) so savings are accurately priced based on the active coding agent's model via the new --agent-model CLI flag, GRAFT_AGENT_MODEL environment variable, or configuration.",
+        "Restricted dollar-denominated savings calculations strictly to verifiable turn-specific models (via host transcript stamps or the --agent-model flag), falling back to raw token counts when the running model is unconfirmed."
+      ]
+    },
+    {
+      "date": "2026-09-08",
+      "type": "improvement",
+      "area": "savings",
+      "html": "The built-in price table covers more models: GPT-5.6, GPT-6 Astra/Sol/Luna, GPT-6.1 Sol, Gemini 3.7/3.8 and 2.5/3.x, Claude Opus 5.5 ($4/Mtok input, 0.05× cache read) and Opus 4.8 fast mode, Grok 4.5–4.7, Kimi K3 and K2.7, MAI-Code-1.1-Flash, DeepSeek and more. Model names are matched case-insensitively.",
+      "replaces": [
+        "Expanded token price estimations to cover additional LLM model variants (including recent OpenAI GPT-5/o3/4o, Google Gemini 2.5/3.x, xAI Grok, DeepSeek, Moonshot Kimi, and Claude series) along with case-insensitive model identifier matching",
+        "Added prices for more AI models, so their savings show in dollars instead of tokens only: Claude Opus 4.8 fast mode, GPT-6 Sol, GPT-6 Luna, GPT-6.1 Sol, Grok 4.5–4.7, Kimi K3, Kimi K2.7 and MAI-Code-1.1-Flash.",
+        "Added pricing support for Claude Opus 5.5, including its $4/Mtok input list rate and 0.05x cache-read discount.",
+        "Added pricing support for the GPT-6 Astra model (gpt-6-astra) to accurately track and calculate dollar-denominated token savings.",
+        "Add the saved dollars info support for additional AI agents (e.g. Kilo Code, Github Copilot,etc) and for additional AI models (e.g. GPT 5.6 models, Gemini 3.7/3.8 models)"
+      ]
+    },
+    {
+      "date": "2026-09-01",
+      "type": "feature",
+      "area": "agents",
+      "html": "<b>Tool-call gate for Claude Code and the Codex family.</b> Wasteful tool calls are redirected to the matching graft command instead of only being advised against.",
+      "replaces": [
+        "Graft now redirects wasteful tool calls instead of just advising in case of Claude Code and the Codex family"
+      ]
+    },
+    {
+      "date": "2026-09-01",
+      "type": "improvement",
+      "area": "agents",
+      "html": "Every agent gets the tool rules stated as rules: literal search → <code>graft grep</code>, \"what's in this file\" → <code>graft skeleton</code>, \"who calls this\" → <code>graft callers</code>. This covers Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL.",
+      "replaces": [
+        "Every AI agent now gets the rules stated as rules => literal search → graft grep, \"what's in this file\" → graft skeleton, \"who calls this\" → graft callers. This reaches Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL"
+      ]
+    },
+    {
+      "date": "2026-09-01",
+      "type": "fix",
+      "area": "llm",
+      "html": "<code>build --deep</code> discarded good results when a model echoed the whole target description back instead of the plain ID.",
+      "replaces": [
+        "Graft build --deep threw away good work when a model got sloppy with IDs Some models echo the whole target description back instead of the plain ID"
+      ]
+    },
+    {
+      "date": "2026-09-01",
+      "type": "fix",
+      "area": "savings",
+      "html": "Token counts were unreadable on non-English locales (\"1970 tokens saved\" printed as \"1.970\").",
+      "replaces": [
+        "Token-saved numbers were unreadable on non-English machines On a Romanian/German/etc. machine, \"1970 tokens saved\" was printed as 1.970"
+      ]
+    },
+    {
+      "date": "2026-08-24",
+      "type": "change",
+      "area": "packaging",
+      "html": "The upstream GitHub CI workflows are disabled in the fork; they stay in the repository but do not run.",
+      "replaces": [
+        "CI workflows are now disabled, not deleted Previously the .github workflows were removed outright, which caused the same merge conflicts every time you pulled from upstream"
+      ]
+    },
+    {
+      "date": "2026-08-20",
+      "type": "feature",
+      "area": "agents",
+      "html": "<b>Kilo Code support.</b>",
+      "replaces": [
+        "Add support for Kilo Code extension"
+      ]
+    },
+    {
+      "date": "2026-08-19",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>XML support</b> for <code>.xml</code>, <code>.config</code>, <code>.csproj</code>, <code>.vbproj</code>, <code>.fsproj</code>, <code>.props</code>, <code>.targets</code>, <code>.nuspec</code>, <code>.resx</code> and <code>.xaml</code>. XML is indexed structurally but never sent to the AI: <code>--deep</code> skips it and <code>check</code> does not report it as pending. The Windows parser binary is bundled, so no compile step is needed.",
+      "replaces": [
+        "Add breadth tier support for XML formats, e.g. .xml/.config/csproj/.vbproj/.fsproj/.props/targets/.nuspec/.resx/.xaml",
+        "XML files are indexed structurally but never sent to the AI; --deep skips them and check does not report them as pending",
+        "XML files can now be read and indexed on Windows without any extra compilation step — the required binary is now bundled directly."
+      ]
+    },
+    {
+      "date": "2026-08-19",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b>Default <code>.graft/config.json</code></b> written by <code>graft init</code>. Missing default settings are added to an existing file. No empty connection details are written.",
+      "replaces": [
+        "Generate a default '.graft\\config.json' file by 'graft init'",
+        "Resolved build and type-checking failure by excluding runtime brain connection details from the default repository build configuration template, ensuring graft init does not scaffold empty credentials or treat repository configurations as incomplete."
+      ]
+    },
+    {
+      "date": "2026-08-19",
+      "type": "feature",
+      "area": "cli",
+      "html": "<b>Exclude folders</b> from graft commands with <code>--excludeDir</code> / the <code>exclude-dirs</code> setting.",
+      "replaces": [
+        "Add support for --excludeDir option so that specific folders can be excluded from graft commands"
+      ]
+    },
+    {
+      "date": "2026-08-19",
+      "type": "feature",
+      "area": "packaging",
+      "html": "<b>Self-contained npm package and offline bundle</b> (<code>npm run build:grammars</code>, <code>npm run pack:bundle</code>) with all optional native grammars and runtime dependencies. Prebuilt Windows bindings for all 19 local tree-sitter grammars ship under <code>vendor/</code>, so a machine with only graft checked out can build. Parsers too new for graft's runtime (ABI 15) are regenerated. Grammar files held open by a running graft don't block the build. Bundling works when <code>allow-scripts</code> is set in a user or global <code>.npmrc</code>. Grammars left out on purpose (such as the local Kotlin grammar) are reported as \"not vendored\". Installation shows fewer false warnings.",
+      "replaces": [
+        "Build the npm package which includes also all the optional grammars",
+        "Streamlined offline package bundling and automated native grammar vendoring so prebuilt binaries and runtime dependencies are fully packaged for self-contained, offline installations.",
+        "Npm run build and npm run pack:bundle now work on a machine that has only graft checked out. The prebuilt Windows grammar bindings for all 19 local tree-sitter grammars are now committed under vendor/, and the build uses them (one info line, no warning) when the sibling grammar repo is absent.",
+        "Npm run pack:bundle no longer fails with EALLOWSCRIPTS (--allow-scripts is not allowed in project-scoped installs) when allow-scripts is set in a user or global .npmrc; nested npm calls no longer inherit npm_config_allow_scripts.",
+        "Npm run build:grammars now regenerates parsers that are too new for graft's runtime (ABI 15) on the first build too, not only on later ones.",
+        "Staging the bundled language grammars no longer fails on Windows when a running Graft process still has a grammar file open.",
+        "Grammars left out of the optional dependencies on purpose (for example Kotlin) are now reported as \"not vendored\" rather than as a broken setup.",
+        "Skip some false warnings during npm package installation"
+      ]
+    },
+    {
+      "date": "2026-08-19",
+      "type": "fix",
+      "area": "agents",
+      "html": "Claude Code helpers could use an older graft install that appeared earlier in the lookup list. They now pick the highest installed version and only call <code>npm root -g</code> when cheaper lookups fail.",
+      "replaces": []
+    },
+    {
+      "date": "2026-08-18",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>Depth-tier support (symbols, calls, inheritance, imports) for C#, Groovy, PL/SQL, C and C++</b>, using optional native grammars. PL/SQL also covers SQL DDL tables and views, procedures called without arguments, and calls through a package or schema (<code>pkg.proc</code>, <code>schema.pkg.proc</code>). Groovy uses the <code>@bootswithdefer/tree-sitter-groovy</code> v0.2.0 grammar and records calls without parentheses that end in a closure (<code>items.collect { … }</code>, bare Jenkins steps). <code>.h</code> files containing C++ are parsed and labelled as C++, and fall back to the C grammar when the C++ grammar is not installed.",
+      "replaces": [
+        "Add depth tier support for C#, Groovy, PL/SQL (+ SQL DDL: tables/views)",
+        "Oracle PL/SQL call detection is more accurate. Graft now finds procedures called without arguments and calls through a package or schema (pkg.proc, schema.pkg.proc).",
+        "Groovy call edges were dropped for paren-less trailing-closure calls — src/graph/extract.ts:560-565 adds juxt_function_call to CALL_TYPES.groovy alongside function_call. Calls written without parentheses (items.collect { it.name }, items.each { … }, and every bare Jenkins step) parse as juxt_function_call; since that node carries the same function field shape, groovyCallee handles it unchanged. Without it, over half the call edges in closure-heavy Groovy and Jenkinsfiles were missing from the graph.",
+        "Switch the Groovy grammar to the @bootswithdefer fork — the locally linked ../tree-sitter-groovy package is now @bootswithdefer/tree-sitter-groovy v0.2.0 (was @murtaza64/tree-sitter-groovy v0.0.1), recorded in package-lock.json:164-165. The dependency key graft resolves against (tree-sitter-groovy → file:../tree-sitter-groovy) is unchanged, so only the lockfile's mirrored metadata moved."
+      ]
+    },
+    {
+      "date": "2026-08-18",
+      "type": "feature",
+      "area": "lang",
+      "html": "<b>Breadth-tier support for CSS, SCSS, HTML, C# Razor, JSON, YAML, Markdown and CSV.</b>",
+      "replaces": [
+        "Add breadth tier support for CSS, HTML, C# Razor"
+      ]
+    }
+  ]
+}
