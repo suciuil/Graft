@@ -67,11 +67,13 @@
 <main>
 
 <div class="stats">
-  <div class="stat feature"><b>33</b><span>New features</span></div>
-  <div class="stat fix"><b>18</b><span>Bug fixes to upstream functionality</span></div>
-  <div class="stat improvement"><b>16</b><span>Improvements to upstream functionality</span></div>
-  <div class="stat change"><b>9</b><span>Change requests to upstream functionality</span></div>
-  <div class="stat"><b>76</b><span>Items in total</span></div>
+<!-- stats:start -->
+  <div class="stat feature"><b>42</b><span>New features</span></div>
+  <div class="stat improvement"><b>29</b><span>Improvements</span></div>
+  <div class="stat fix"><b>26</b><span>Bug fixes</span></div>
+  <div class="stat change"><b>15</b><span>Change requests</span></div>
+  <div class="stat"><b>112</b><span>Items in total</span></div>
+<!-- stats:end -->
 </div>
 
 <div class="panel">
@@ -79,24 +81,27 @@
   <table class="counts">
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
-      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>7</td><td>2</td><td>2</td><td>0</td><td>11</td></tr>
-      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>8</td><td>3</td><td>5</td><td>3</td><td>19</td></tr>
-      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>6</td><td>6</td><td>2</td><td>1</td><td>15</td></tr>
+<!-- counts:start -->
+      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>7</td><td>5</td><td>5</td><td>2</td><td>19</td></tr>
+      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>4</td><td>6</td><td>5</td><td>25</td></tr>
+      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>9</td><td>10</td><td>8</td><td>2</td><td>29</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>0</td><td>10</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>8</td><td>2</td><td>3</td><td>0</td><td>13</td></tr>
-      <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>0</td><td>3</td><td>3</td></tr>
-      <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>2</td><td>1</td><td>0</td><td>2</td><td>5</td></tr>
-      <tr class="total"><td>Total</td><td>33</td><td>18</td><td>16</td><td>9</td><td>76</td></tr>
+      <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>1</td><td>3</td><td>4</td></tr>
+      <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>8</td><td>1</td><td>4</td><td>4</td><td>17</td></tr>
+      <tr class="total"><td>Total</td><td>42</td><td>26</td><td>29</td><td>15</td><td>112</td></tr>
+<!-- counts:end -->
     </tbody>
   </table>
 </div>
 
 <div class="panel">
-  <h3>Classification</h3>
+  <h3>How this list is made</h3>
   <ul class="rules">
-    <li><b>Feature</b>: functionality that upstream Graft does not have. The fork's own fixes, improvements and adjustments to it are part of the feature description, not separate items.</li>
-    <li><b>Bug fix</b>, <b>Improvement</b>, <b>Change request</b>: only for functionality that upstream Graft already has.</li>
-    <li>Every item describes the current state of the fork and sits under the date of the first package build (<code>npm run pack:bundle</code>) that included it, newest first. "Not yet bundled" items go into the next build. Items from before build dates were recorded sit under the date they were first committed. "First added" shows when an item that changed later first appeared. A build made on Windows is named by its offline kit version <code>a.b.c.d</code> (the kit <code>graft-a.b.c.d-win-x64.zip</code>): <code>a.b.c</code> is the graft version inside it and <code>d</code> counts the kits of that graft version, starting at 0.</li>
+    <li>Every item is a line of the fork's commit messages, as written there: lines that start with <b>Feature:</b>, <b>Bug-Fix:</b>, <b>Improvement:</b> or <b>Change request:</b>. Commits without such a line are not listed. Such lines added later to a commit as a git note (<code>refs/notes/changelog</code>) count as part of its message.</li>
+    <li>The items of the hand-written report that came before this page was generated are kept too (<code>changelog-legacy.json</code>), each in the group it was listed in. A commit-message line one of them already covers is left out, so nothing is listed twice.</li>
+    <li>Items sit under the package build (<code>npm run pack:bundle</code>) that first shipped their commit, newest first. "Not yet bundled" items go into the next build. Items from before build dates were recorded sit under the date of their commit. A build made on Windows is named by its offline kit version <code>a.b.c.d</code> (the kit <code>graft-a.b.c.d-win-x64.zip</code>): <code>a.b.c</code> is the graft version inside it and <code>d</code> counts the kits of that graft version, starting at 0.</li>
+    <li>The area of an item only serves the filter below and is derived from words in its text. Items about the installer are also listed under "Packaging, installer, updates &amp; CI", so the area counts can add up to more than the total.</li>
   </ul>
 </div>
 
@@ -108,7 +113,8 @@
   <button data-f="improvement">Improvements</button>
   <button data-f="change">Change requests</button>
   <select id="area" aria-label="Area">
-    <option value="all">All areas</option>
+<!-- areas:start -->
+    <option value="all" selected>All areas</option>
     <option value="lang">Languages &amp; parsing</option>
     <option value="llm">LLM providers &amp; deep build</option>
     <option value="savings">Savings, pricing &amp; model detection</option>
@@ -116,43 +122,59 @@
     <option value="cli">CLI &amp; configuration</option>
     <option value="privacy">Privacy / no-cloud</option>
     <option value="packaging">Packaging, installer, updates &amp; CI</option>
+<!-- areas:end -->
   </select>
   <span id="count" class="note"></span>
 </div>
 
 <section id="changes">
+<!-- changes:start -->
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <ul>
-<!-- pending:start -->
-    <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span><b><code>graft about</code></b> (also <code>graft info</code>) prints what graft is for, the upstream project homepage and the path of this fork changelog (<code>docs/changelog.html</code>), which ships inside the installed package. <code>graft about home</code> opens the homepage and <code>graft about fork</code> opens this changelog in the browser.<span class="first">first added 2026-11-04</span></span></li>
-    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span><b>Windows installer and offline installer kit.</b> Double-click <code>START-HERE-install-graft.cmd</code>, which runs <code>install-graft-helper.ps1</code>. It starts by explaining what graft is for, links the upstream project and shows the path and <code>file:///</code> link of this fork changelog (shipped in the kit as <code>changelog.html</code>) without asking to open it. The kit is a single zip built from the project, named <code>graft-a.b.c.d-win-x64.zip</code>: <code>a.b.c</code> is the graft version inside it and <code>d</code> the build number, which starts at 0 and goes up by 1 with each new kit of the same graft version (back to 0 for a new version). The last kit is recorded in the committed <code>kit-build.json</code>, so every clone continues the same numbering, and this changelog names each build by its kit version. Packing a kit removes kits and packages left by earlier packs. The installer installs or upgrades from offline package files (also named like <code>… - Copy.tgz</code> or <code>… (1).tgz</code>). For Node.js it uses an offline zip placed next to it, or downloads the latest LTS and verifies its checksum. It reinstalls graft when the Node.js version changes. It fixes the user PATH without damaging existing entries, runs the graft it just installed, and warns if new terminals won't find graft and npm or if another graft in PATH would be used instead. It checks the LLM setup the way graft reads it (including Databricks and Anthropic-style endpoints), lists models and test-calls the chosen one. Finally it offers to download the public price list, which you can skip. Your answers are remembered (in <code>%USERPROFILE%\.graft\installer-choices.json</code>, never any key or password), so an upgrade does not ask again what you already answered: it shows the list of what it will do and continues, asks only about items that are new since your last run (marked NEW), reuses your price list answer, and asks about the LLM endpoint, API key or model only when the check fails. It runs <code>npm login</code> only when you are not logged in to the registry yet. On a PC where an earlier installer already ran, that earlier agreement counts. <code>START-HERE-install-graft.cmd -Ask</code> asks every question again.<span class="first">first added 2026-10-20</span></span></li>
-    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>On Windows, console windows flashed up while an agent such as Claude Code used graft: every git, gh or npm call that graft made from a background job (such as the branch refresh after <code>graft ask</code>) or from a process without a console opened a window of its own. Graft now starts all its helper programs with their window hidden; only opening a page or file in the browser shows a window.</span></li>
-<!-- pending:end -->
   </ul>
 </div>
-<!-- groups:start -->
+
+<div class="group" data-group="bundle" data-date="2026-11-05" data-version="0.28.0.1">
+  <h2>2026-11-05 <small>kit 0.28.0.1, graft 0.28.0</small></h2>
+  <ul>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The opt-in savings report now also records which AI assistant and which editor or terminal ran graft, with their versions (for example Kilo Code 7.8.18 in Visual Studio Code 1.144.0).</span></li>
+    <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>When the reporting database has a problem with the whole table rather than with one entry (a missing column or table, missing permissions, or no space left), the savings report no longer throws away the queued entries.</span></li>
+  </ul>
+</div>
+
+<div class="group" data-group="bundle" data-date="2026-11-04" data-version="0.28.0">
+  <h2>2026-11-04 <small>package build 0.28.0</small></h2>
+  <ul>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Opt-in savings report to the company database (<code>graft savings-report</code>).</b> After <code>graft savings-report enable</code>, each saving and billing entry graft records is also queued and sent in the background, at most every 5 minutes, to the company's Oracle database: a random install id, the time and day, the model, the tokens saved or billed and their dollar value, and which graft surface (CLI, MCP or hook) and command filed it. No user name, repo, path, file or query text is sent. It is off until enabled; <code>disable</code> stops it and discards the queue, <code>flush</code> sends now and shows the result, <code>status</code> shows the install id, database, queue and last send. The database can switch it off on every machine. On Windows PCs without an Oracle Client the rows go through Oracle's managed .NET driver (ODP.NET), which ships in the npm package and the Windows kit, is checked against its SHA-256 when the kit is built and installed, and works when PowerShell 7 is installed. This is the one feature for which the owner lifted the no-cloud rule; see <code>docs/no-cloud-policy.md</code>.</span></li>
+    <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span><b><code>graft about</code></b> (also <code>graft info</code>) prints what graft is for, the upstream project homepage and the path of this fork changelog (<code>docs/changelog.html</code>), which ships inside the installed package. <code>graft about home</code> opens the homepage and <code>graft about fork</code> opens this changelog in the browser.<span class="first">first added 2026-11-04</span></span></li>
+    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span><b>Windows installer and offline installer kit.</b> Double-click <code>START-HERE-install-graft.cmd</code>, which runs <code>install-graft-helper.ps1</code>. It starts by explaining what graft is for, links the upstream project and shows the path and <code>file:///</code> link of this fork changelog (shipped in the kit as <code>changelog.html</code>) without asking to open it. It then asks whether to turn on the savings report (default yes; <code>-NoSavingsReport</code> keeps it off, also with <code>-Yes</code>) and, at the end, says whether the report is on and warns about a missing Oracle driver only when it is. It does not stop at the execution-policy step when PowerShell 7 is installed or it is started from a PowerShell 7 terminal; a failed policy check only prints a warning. On npm 12 (Node.js 26) it lets graft's post-install setup run. The kit is a single zip built from the project, named <code>graft-a.b.c.d-win-x64.zip</code>: <code>a.b.c</code> is the graft version inside it and <code>d</code> the build number, which starts at 0 and goes up by 1 with each new kit of the same graft version (back to 0 for a new version). The last kit is recorded in the committed <code>kit-build.json</code>, so every clone continues the same numbering, and this changelog names each build by its kit version. Packing a kit removes kits and packages left by earlier packs. The installer installs or upgrades from offline package files (also named like <code>… - Copy.tgz</code> or <code>… (1).tgz</code>). For Node.js it uses an offline zip placed next to it, or downloads the latest LTS and verifies its checksum. It reinstalls graft when the Node.js version changes. It fixes the user PATH without damaging existing entries, runs the graft it just installed, and warns if new terminals won't find graft and npm or if another graft in PATH would be used instead. It checks the LLM setup the way graft reads it (including Databricks and Anthropic-style endpoints), lists models and test-calls the chosen one. Finally it offers to download the public price list, which you can skip. Your answers are remembered (in <code>%USERPROFILE%\.graft\installer-choices.json</code>, never any key or password), so an upgrade does not ask again what you already answered: it shows the list of what it will do and continues, asks only about items that are new since your last run (marked NEW), reuses your price list answer, and asks about the LLM endpoint, API key or model only when the check fails. It runs <code>npm login</code> only when you are not logged in to the registry yet. On a PC where an earlier installer already ran, that earlier agreement counts. <code>START-HERE-install-graft.cmd -Ask</code> asks every question again.<span class="first">first added 2026-10-20</span></span></li>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>Refreshed the bundled Windows code parsers for Bash, C, C#, C++, CMake, CSS, CSV, Groovy, HTML, JSON, Kotlin, Make, Markdown, Perl, PL/SQL, Razor, SCSS, XML and YAML, so code in these languages is analysed with updated language support.</span></li>
+    <li data-type="improvement" data-area="savings packaging"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span><span class="area">Packaging &amp; installer</span>The fork report shown to users, including by the Windows installer, now describes the opt-in savings report (<code>graft savings-report</code>). It covers what is sent, that it is off until you enable it, and the enable, disable, flush and status commands.</span></li>
+    <li data-type="improvement" data-area="savings packaging"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span><span class="area">Packaging &amp; installer</span>The fork report now describes the installer's new steps. These are the question about turning on the savings report (<code>-NoSavingsReport</code> keeps it off), the end-of-install report status and Oracle driver warning, the softer execution-policy check with PowerShell 7, and support for npm 12.</span></li>
+    <li data-type="improvement" data-area="packaging"><span class="tag">Improvement</span><span><span class="area">Packaging &amp; installer</span>Building the offline installer package now dates the not-yet-released changelog entries with the build date and package version.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The help text for the provider setting is shorter and describes the wire format more clearly.</span></li>
+    <li data-type="improvement" data-area="packaging"><span class="tag">Improvement</span><span><span class="area">Packaging &amp; installer</span>The fork report is now included in the installed package and in the offline installer kit, so it is available after installation.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>On Windows, console windows flashed up while an agent such as Claude Code used graft: every git, gh or npm call that graft made from a background job (such as the branch refresh after <code>graft ask</code>) or from a process without a console opened a window of its own. Graft now starts all its helper programs with their window hidden; only opening a page or file in the browser shows a window.</span></li>
+    <li data-type="change" data-area="privacy"><span class="tag">Change</span><span><span class="area">Privacy</span><b>No-cloud policy</b> (<code>docs/no-cloud-policy.md</code> and agent instruction files). Users can't switch on anything that sends data to a cloud or other third party through settings, flags, commands or toggles; the only exception is the opt-in savings report, for which the owner lifted that rule. New upstream features that send data out stay disabled until the repository owner approves them, and each decision is recorded.<span class="first">first added 2026-10-30</span></span></li>
+    <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">Packaging &amp; installer</span>The fork's change report is now a dated changelog, listed newest first, instead of the old fork report. "graft about fork" and the Windows installer now point to it.</span></li>
+  </ul>
+</div>
 
 <div class="group" data-group="commit" data-date="2026-11-04">
   <h2>2026-11-04 <small>first committed; build date not recorded</small></h2>
   <ul>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span><code>graft build</code> no longer ends with a success tick when it finds no files. It shows a warning and, when it can tell, explains why (for example, the folder is ignored by the repo it sits in).</span></li>
-    <li data-type="change" data-area="llm"><span class="tag">Change</span><span><span class="area">LLM &amp; deep build</span>The only endpoint URL graft suggests is the Databricks AI Gateway. Help, examples, "How to fix it" hints, URL prompts, the installer, the README and <code>.env.example</code> show it as the sample and never propose another provider's URL (OpenRouter, Groq, Ollama, Anthropic's API and so on). When a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft uses the custom URL without asking and without naming the provider's endpoint; a choice of the provider's endpoint saved earlier for the same URL is still honoured.</span></li>
+    <li data-type="change" data-area="llm packaging"><span class="tag">Change</span><span><span class="area">LLM &amp; deep build</span><span class="area">Packaging &amp; installer</span>The only endpoint URL graft suggests is the Databricks AI Gateway. Help, examples, "How to fix it" hints, URL prompts, the installer, the README and <code>.env.example</code> show it as the sample and never propose another provider's URL (OpenRouter, Groq, Ollama, Anthropic's API and so on). When a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom URL, graft uses the custom URL without asking and without naming the provider's endpoint; a choice of the provider's endpoint saved earlier for the same URL is still honoured.</span></li>
   </ul>
 </div>
 
 <div class="group" data-group="commit" data-date="2026-11-03">
   <h2>2026-11-03 <small>first committed; build date not recorded</small></h2>
   <ul>
-    <li data-type="fix" data-area="packaging"><span class="tag">Bug fix</span><span><span class="area">Packaging &amp; updates</span>On Windows, running npm for the update check and <code>graft upgrade</code>, checking whether graft is installed, and waiting on a file lock did not work reliably.</span></li>
-    <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">Packaging &amp; updates</span>The update check and <code>graft upgrade</code> use the company npm registry instead of the public npm registry. Installing graft adds that registry to the user <code>.npmrc</code>.</span></li>
-  </ul>
-</div>
-
-<div class="group" data-group="commit" data-date="2026-10-30">
-  <h2>2026-10-30 <small>first committed; build date not recorded</small></h2>
-  <ul>
-    <li data-type="change" data-area="privacy"><span class="tag">Change</span><span><span class="area">Privacy</span><b>No-cloud policy</b> (<code>docs/no-cloud-policy.md</code> and agent instruction files). Users can't switch on anything that sends data to a cloud or other third party through settings, flags, commands or toggles. New upstream features that send data out stay disabled until the repository owner approves them, and each decision is recorded.</span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>Updated the model price list with new models, and updated the bundled language grammars (C#, CSS-in-JS, HTML, PL/SQL).</span></li>
+    <li data-type="fix" data-area="packaging"><span class="tag">Bug fix</span><span><span class="area">Packaging &amp; installer</span>On Windows, running npm for the update check and <code>graft upgrade</code>, checking whether graft is installed, and waiting on a file lock did not work reliably.</span></li>
+    <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">Packaging &amp; installer</span>The update check and <code>graft upgrade</code> use the company npm registry instead of the public npm registry. Installing graft adds that registry to the user <code>.npmrc</code>.</span></li>
   </ul>
 </div>
 
@@ -160,7 +182,9 @@
   <h2>2026-10-29 <small>first committed; build date not recorded</small></h2>
   <ul>
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><b>Fix the endpoint on the spot.</b> When the endpoint rejects the API key or can't be reached, including during a deep build, graft offers to change the endpoint URL and/or the key so the re-run works.</span></li>
+    <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span>If a provider with its own endpoint (Anthropic, OrcaRouter) is set together with a different custom endpoint URL, graft now asks which one to use. It remembers the answer until the provider or URL changes, and also asks right after "graft api provider".</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>When no endpoint URL is set and the provider has no default, graft says so clearly instead of silently contacting <code>api.openai.com</code>.</span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The bundled model price list has been refreshed with the latest models and prices.</span></li>
   </ul>
 </div>
 
@@ -168,6 +192,8 @@
   <h2>2026-10-28 <small>first committed; build date not recorded</small></h2>
   <ul>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span><b><code>graft issues</code></b> opens the issue tracker in the browser and also prints the address.</span></li>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled language parsers are refreshed (Kotlin, PL/SQL, Bash, Groovy, CSS, SCSS, HTML, JSON, YAML, XML, Markdown, CSV, C++, CMake, Perl).</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The grammar build found no grammars after the grammar table moved to src/graph/native.ts; it now reads native.ts (falling back to extract.ts).</span></li>
   </ul>
 </div>
 
@@ -192,6 +218,7 @@
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span><b>Perl support</b> (<code>.pl</code>, <code>.pm</code>, <code>.t</code>): packages and subs, <code>$self-&gt;m()</code> and <code>Pkg-&gt;m()</code> calls resolved through the package and through <code>use parent</code>, <code>use base</code> and <code>@ISA</code>, and <code>use</code>/<code>require</code> as imports resolved to in-repo <code>.pm</code> files.</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span><b>Make support</b>: <code>Makefile</code>, <code>makefile</code>, <code>GNUmakefile</code>, <code>*.mk</code>, <code>*.mak</code>.</span></li>
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><b><code>graft build --deep --force</code></b> re-summarizes every file and symbol and ignores earlier results. If a forced call fails, the previous summary is kept. <code>--force</code> without <code>--deep</code> stops with a clear message.</span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>Graft savings for a single repo now registers that repo for the cross-repo totals the first time you look at its savings.</span></li>
   </ul>
 </div>
 
@@ -216,13 +243,21 @@
 <div class="group" data-group="commit" data-date="2026-10-20">
   <h2>2026-10-20 <small>first committed; build date not recorded</small></h2>
   <ul>
-    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Public model price catalog (LiteLLM).</b> A snapshot ships with graft and is refreshed on every build, keeping the old list when offline or when the download looks broken. <code>graft prices update</code> downloads a newer list, which is used when it is newer than the snapshot. <code>graft prices status</code> shows both lists and where each price comes from. Before downloading, <code>graft prices update</code> and the installer name the exact public price file and its GitHub address, confirm that nothing about you or your repo is sent, and show where the prices are stored. When a model can't be priced, the tally gets a <code>⚠️ Run the 'graft prices update' command — recommended (…)</code> line.</span></li>
+    <li data-type="feature" data-area="savings packaging"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><span class="area">Packaging &amp; installer</span><b>Public model price catalog (LiteLLM).</b> A snapshot ships with graft and is refreshed on every build, keeping the old list when offline or when the download looks broken. <code>graft prices update</code> downloads a newer list, which is used when it is newer than the snapshot. <code>graft prices status</code> shows both lists and where each price comes from. Before downloading, <code>graft prices update</code> and the installer name the exact public price file and its GitHub address, confirm that nothing about you or your repo is sent, and show where the prices are stored. When a model can't be priced, the tally gets a <code>⚠️ Run the 'graft prices update' command — recommended (…)</code> line.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span><b><code>graft api url</code>, <code>graft api key</code> (hidden input), <code>graft api provider</code> and <code>graft model</code></b> save LLM settings as user-level environment variables, so every new terminal, IDE and MCP host sees them. They show the current value and its source, list the endpoint's models with a recommended pick, verify the endpoint after saving, and support <code>--unset</code>. <code>build --deep</code> uses the configured model when the gateway serves it and says which one it used and where that came from. When the latest model is picked automatically, a "1" in a name like "1adp" is not read as a version number. Interactive prompts show each typed key once.</span></li>
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><b><code>graft staleness [dir]</code></b> shows the share of out-of-date summaries, whether a deep build is due, and the worst files. Supports <code>--top</code>, <code>--no-refresh</code>, <code>--json</code> and a per-repo split in workspaces.</span></li>
+    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>New Windows installer for graft. Double-click install-graft.cmd (or run install-graft.ps1) to install or upgrade graft for the current user without admin rights. Before downloading or changing anything, it lists what it will do and asks for your agreement. -Yes skips the question for unattended runs.</span></li>
+    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The Windows installer sets up Node.js for graft. It uses a recent Node.js already on the PC, otherwise it downloads a portable Node.js 24 into your user profile. If the Node.js on PATH is too old, graft gets its own copy and the other one is left alone. When the Node.js running graft changes, graft is reinstalled so its native modules match.</span></li>
+    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The Windows installer adds Node.js and npm's global folder to your user PATH and sets the npm prefix. It then installs graft from the newest offline package placed next to it, or from the npm registry when there is none.</span></li>
+    <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The Windows installer sets the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell terminals. Where PowerShell scripts are blocked, graft runs through graft.cmd instead.</span></li>
+    <li data-type="feature" data-area="llm packaging"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><span class="area">Packaging &amp; installer</span>The Windows installer checks the LLM endpoint, API key and model used by "graft build --deep", offers to fix them and save them as user settings, and shows a summary. Problems there never fail the install. At the end it reminds you to run "graft init" in each repository.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>Failed <code>build --deep</code> runs end with a "How to fix it" block naming the setting to change (<code>GRAFT_BASE_URL</code>, <code>GRAFT_API_KEY</code>, <code>GRAFT_MODEL</code>) and listing available models. Workspace builds print it once for all child repos.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>LLM calls trust the operating system's certificate store, so corporate gateways and TLS-inspecting proxies work without <code>NODE_EXTRA_CA_CERTS</code> (Node 22.19+/24.5+; <code>GRAFT_SYSTEM_CA=0</code> turns it off).</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span><code>graft --help</code> is an A→Z command list with a plain-language description, arguments, options and examples for each command. <code>graft &lt;command&gt; --help</code> and <code>graft help &lt;command&gt;</code> print the same entry. Unknown commands get a "Did you mean…?" suggestion, and <code>graft --model x</code> without a command gives a short error.</span></li>
+    <li data-type="improvement" data-area="privacy"><span class="tag">Improvement</span><span><span class="area">Privacy</span>Tests were extended or updated for the new features (help, LLM hints and settings, price catalog, system CA, refresh, savings). The telemetry tests were reduced to match the disabled state, and the test runner now isolates the price catalog from the developer's machine.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>Grammar building on Windows is more reliable. A tree-sitter path shim is applied, and a parser that needs ABI regeneration is retried on the next build instead of being skipped. The vendored C# and SCSS grammar packages are rebuilt, and many language grammars are added under vendor/.</span></li>
     <li data-type="change" data-area="privacy"><span class="tag">Change</span><span><span class="area">Privacy</span><b>Telemetry is permanently disabled.</b> Nothing is recorded or sent, and it cannot be turned on. <code>graft telemetry enable</code> refuses, the init usage-stats row and first-run notice are gone, and npm postinstall no longer records an install event. <code>graft telemetry</code> is not listed in <code>graft --help</code>. README and TELEMETRY.md are updated.</span></li>
+    <li data-type="change" data-area="savings"><span class="tag">Change</span><span><span class="area">Savings &amp; pricing</span>The deep-build line under the savings tally now puts the command in single quotes: ⚠️ 'graft build --deep' recommended (…).</span></li>
   </ul>
 </div>
 
@@ -231,6 +266,15 @@
   <ul>
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><b>Stale-summary notice.</b> When more than a threshold of the AI summaries (10% by default) is out of date or missing, every CLI query (on stderr) and every MCP tool result (at the end) carries a line recommending <code>graft build --deep</code>. Agents relay it under the savings tally as <code>⚠️ Run the 'graft build --deep' command — recommended (…)</code> and are told never to run the deep build unasked. <code>graft deep-threshold</code> shows, sets or resets the threshold (0–100).</span></li>
     <li data-type="fix" data-area="agents"><span class="tag">Bug fix</span><span><span class="area">Agent integrations</span>Claude hooks and the status line failed under some shells. They now run under any shell, including cmd.exe and PowerShell on Windows.</span></li>
+  </ul>
+</div>
+
+<div class="group" data-group="commit" data-date="2026-10-01">
+  <h2>2026-10-01 <small>first committed; build date not recorded</small></h2>
+  <ul>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled native grammars were rebuilt and repacked: 13 grammar packages in vendor plus the Windows x64 XML prebuild</span></li>
+    <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span>New regression tests check that one failing batch in the concept-writing step of graft build --deep doesn't abort the whole build.</span></li>
+    <li data-type="change" data-area="lang"><span class="tag">Change</span><span><span class="area">Languages</span>The locally built Kotlin grammar (tree-sitter-kotlin-local) is no longer listed in the optional dependencies in package.json.</span></li>
   </ul>
 </div>
 
@@ -252,6 +296,7 @@
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span><b>LLM Incubator gateway provider</b>, with Bearer auth through <code>ANTHROPIC_AUTH_TOKEN</code> and <code>ANTHROPIC_BASE_URL</code>. It needs a base URL (<code>GRAFT_BASE_URL</code> or <code>--base-url</code>) and gives a clear error without one.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>Automatic connection and model fallbacks: the <code>/v1</code> path suffix is added or removed as needed, provider-prefixed model names are retried as bare IDs, and graft switches wire protocol when an endpoint rejects a request.</span></li>
     <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span>Summaries failed on large files and files with many symbols. Requests are now batched, batches split automatically at the output token limit, and the source window is focused on the target definitions.</span></li>
+    <li data-type="change" data-area="llm"><span class="tag">Change</span><span><span class="area">LLM &amp; deep build</span>Updated the default provider to LLM Incubator and set the default model to Gemini 3.8 Flash across supported providers.</span></li>
   </ul>
 </div>
 
@@ -277,11 +322,19 @@
   </ul>
 </div>
 
+<div class="group" data-group="commit" data-date="2026-09-17">
+  <h2>2026-09-17 <small>first committed; build date not recorded</small></h2>
+  <ul>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>Test coverage added for the new model-canonicalisation and refinement rules, ledger row merging, and the multi-session tie-breaking logic.</span></li>
+  </ul>
+</div>
+
 <div class="group" data-group="commit" data-date="2026-09-14">
   <h2>2026-09-14 <small>first committed; build date not recorded</small></h2>
   <ul>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Model detection from host session records</b> when the agent doesn't report a model: Kilo Code (including forks, VS Code Insiders installs, paired models and subagents, and shells started by Kilo's agent), VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. Repos and VS Code workspaces opened through a junction or symlink are recognised, as are Kilo sessions not yet saved to Kilo's main database file. Kilo turns are not priced at the model of a Copilot chat in the same VS Code window, and Kilo and Copilot calls are not filed under the last Claude Code model in repos where Claude Code once ran. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Output templates and agent instructions put quotation marks around the tally, so agents quoted it in their replies.</span></li>
+    <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Resolved unpriced token savings being filed under "unknown" when MCP agents omit their model identifier during tool calls.</span></li>
   </ul>
 </div>
 
@@ -290,6 +343,9 @@
   <ul>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified (for example in Kilo Code or MCP sessions), savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>Savings reports show where the price came from and which model was used, or why tokens could not be priced. They use readable model names ("Claude Opus 5") instead of routing IDs (<code>vertex_ai/claude-opus-5</code>).</span></li>
+    <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Prevented inaccurate and misleading dollar savings calculations caused by stale settings by removing deprecated static model and rate overrides (.graft/config.json model field, GRAFT_AGENT_MODEL, and GRAFT_INPUT_USD_PER_MTOK).</span></li>
+    <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Prevented the GRAFT_INPUT_USD_PER_MTOK environment variable from overriding known model list prices, keeping it strictly as a fallback for unpriced or unnamed models.</span></li>
+    <li data-type="change" data-area="llm"><span class="tag">Change</span><span><span class="area">LLM &amp; deep build</span>Retired the GRAFT_AGENT_MODEL environment variable in favor of setting model in .graft/config.json or passing --agent-model.</span></li>
   </ul>
 </div>
 
@@ -309,6 +365,7 @@
 <div class="group" data-group="commit" data-date="2026-09-08">
   <h2>2026-09-08 <small>first committed; build date not recorded</small></h2>
   <ul>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The environment variable GRAFT_INPUT_USD_PER_MTOK can be used to provide info about the cost per million tokens when graft tool has no default info about the cost mtok about the specified GRAFT_MODEL</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The built-in price table covers more models: GPT-5.6, GPT-6 Astra/Sol/Luna, GPT-6.1 Sol, Gemini 3.7/3.8 and 2.5/3.x, Claude Opus 5.5 ($4/Mtok input, 0.05× cache read) and Opus 4.8 fast mode, Grok 4.5–4.7, Kimi K3 and K2.7, MAI-Code-1.1-Flash, DeepSeek and more. Model names are matched case-insensitively.</span></li>
   </ul>
 </div>
@@ -326,7 +383,9 @@
 <div class="group" data-group="commit" data-date="2026-08-24">
   <h2>2026-08-24 <small>first committed; build date not recorded</small></h2>
   <ul>
-    <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">CI</span>The upstream GitHub CI workflows are disabled in the fork; they stay in the repository but do not run.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The second "build" key silently overrode the first — so npm run build was skipping the grammar step entirely (only the tsc + viewer half ran)</span></li>
+    <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">Packaging &amp; installer</span>The upstream GitHub CI workflows are disabled in the fork; they stay in the repository but do not run.</span></li>
+    <li data-type="change" data-area="lang"><span class="tag">Change</span><span><span class="area">Languages</span>Refresh the package-name-vs-grammar-key comments — the three places that cite the groovy package as the example of "package name ≠ grammar key" now name the new scope: scripts/build-grammars.mjs:302 (tarball naming), scripts/pack-bundle.mjs:22 (vendored-dir keying), and src/graph/extract.ts:85 (optionalGrammarPackages doc). Comment-only — no behavior change.</span></li>
   </ul>
 </div>
 
@@ -355,6 +414,7 @@
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span><b>Breadth-tier support for CSS, SCSS, HTML, C# Razor, JSON, YAML, Markdown and CSV.</b></span></li>
   </ul>
 </div>
+<!-- changes:end -->
 </section>
 
 </main>
@@ -371,7 +431,7 @@
     let shown = 0;
     items.forEach(li => {
       const ok = (filter === 'all' || li.dataset.type === filter)
-        && (area.value === 'all' || li.dataset.area === area.value)
+        && (area.value === 'all' || li.dataset.area.split(' ').includes(area.value))
         && (!term || li.textContent.toLowerCase().includes(term));
       li.classList.toggle('hidden', !ok);
       if (ok) shown++;
@@ -383,6 +443,8 @@
     document.querySelectorAll('.toolbar button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
     filter = b.dataset.f;
+    // "All" shows every item again, whatever area was picked
+    if (filter === 'all') area.value = 'all';
     apply();
   }));
   document.querySelectorAll('table.counts a[data-area]').forEach(a => a.addEventListener('click', () => {

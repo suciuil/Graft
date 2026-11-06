@@ -9,7 +9,9 @@ import {
   parseKitRecord,
   parseKitVersion,
 } from "../scripts/kit-build.mjs";
-import { stampChangelog } from "../scripts/stamp-changelog.mjs";
+import { groupCommits, renderChangelog } from "../scripts/changelog.mjs";
+
+const shell = "<!-- stats:start --><!-- stats:end --><!-- counts:start --><!-- counts:end --><!-- areas:start --><!-- areas:end --><!-- changes:start --><!-- changes:end -->";
 
 test("parseKitVersion splits a kit version into package version and build", () => {
   assert.deepEqual(parseKitVersion("0.28.0.3"), { version: "0.28.0", build: 3 });
@@ -28,17 +30,18 @@ test("parseKitRecord accepts only a semver version and a build of 0 or more", ()
 });
 
 test("latestKitInChangelog finds the newest build group named by a kit version", () => {
-  const page =
-    '<section id="changes">\n<div class="group" data-group="pending">\n  <ul>\n<!-- pending:start -->\n<li data-type="fix" data-area="cli">x</li>\n<!-- pending:end -->\n  </ul>\n</div>\n<!-- groups:start -->\n' +
-    '\n<div class="group" data-group="bundle" data-date="2026-10-01" data-version="0.27.0">\n</div>\n</section>';
-  assert.equal(latestKitInChangelog(page), null);
-  const once = stampChangelog(page, { date: "2026-11-04", version: kitVersion("0.28.0", 0) }).html;
-  const twice = stampChangelog(once.replace("<!-- pending:end -->", '<li data-type="fix" data-area="cli">y</li>\n<!-- pending:end -->'), {
-    date: "2026-11-05",
-    version: kitVersion("0.28.0", 1),
-  }).html;
-  assert.deepEqual(latestKitInChangelog(once), { version: "0.28.0", build: 0 });
-  assert.deepEqual(latestKitInChangelog(twice), { version: "0.28.0", build: 1 });
+  const commits = [
+    { hash: "b", date: "2026-11-05", entries: [{ type: "fix", text: "y" }] },
+    { hash: "a", date: "2026-11-04", entries: [{ type: "fix", text: "x" }] },
+  ];
+  const page = (builds: { id: string; date: string; version: string; ships: Set<string> | null }[]) =>
+    renderChangelog(shell, groupCommits(commits, { unrecorded: new Set(), builds }));
+  const old = { id: "2026-10-01 0.27.0", date: "2026-10-01", version: "0.27.0", ships: new Set<string>() };
+  const k0 = { id: "k0", date: "2026-11-04", version: kitVersion("0.28.0", 0), ships: new Set(["a"]) };
+  const k1 = { id: "k1", date: "2026-11-05", version: kitVersion("0.28.0", 1), ships: null };
+  assert.equal(latestKitInChangelog(page([old])), null);
+  assert.deepEqual(latestKitInChangelog(page([old, k0])), { version: "0.28.0", build: 0 });
+  assert.deepEqual(latestKitInChangelog(page([old, k0, k1])), { version: "0.28.0", build: 1 });
 });
 
 test("kitVersion puts the build number after a.b.c, before a prerelease suffix", () => {
