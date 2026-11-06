@@ -1,0 +1,18 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "instructions": [
+    ".kilo/rules/graft.md",
+    ".kilo/rules/no-cloud.md",
+    ".kilo/rules/changelog.md"
+  ],
+  "mcp": {
+    "graft": {
+      "type": "local",
+      "command": [
+        "graft",
+        "mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
