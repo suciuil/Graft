@@ -132,6 +132,40 @@ test("an unknown command prints the error, the suggestion, then the full help â€
   assert.equal(missing.stderr.trim(), "error: missing required argument 'query'", "other errors stay one line");
 });
 
+test("graft find-command lists the commands whose name or description holds the keyword, then each one's full help", () => {
+  const r = runCli(["find-command", "DEEP"]);
+  assert.equal(r.status, 0, r.describe());
+  assert.match(r.stdout, /^Found \d+ commands matching "deep" \(in the name or description\):\n/);
+  const [list, ...entries] = r.stdout.split("\n\n");
+  const found = list!.split("\n").slice(1).map((l) => l.trim().split(/\s{2,}/));
+  const names = found.map(([path]) => path);
+  assert.equal(names[0], "deep-threshold", "a name match comes first");
+  assert.deepEqual(found[0], ["deep-threshold", "name, description"]);
+  for (const c of ["build", "staleness"]) assert.ok(names.includes(c), c);
+  assert.deepEqual(found.find(([p]) => p === "build"), ["build", "description"]);
+  assert.ok(!names.includes("upgrade"), "a command without the keyword is left out");
+
+  // Each entry is exactly what `graft <command> --help` prints.
+  assert.equal(entries.length, names.length);
+  assert.equal(entries[0]!.trimEnd(), runCli(["deep-threshold", "--help"]).stdout.trimEnd());
+  const build = entries.find((e) => e.startsWith("  graft build "));
+  assert.equal(build?.trimEnd(), runCli(["help", "build"]).stdout.trimEnd());
+
+  // Several words are one phrase; a group's command matches by its full path.
+  const phrase = runCli(["find-command", "api", "key"]);
+  assert.equal(phrase.status, 0, phrase.describe());
+  assert.match(phrase.stdout, /^ {2}api key {2,}name, description$/m);
+  assert.match(phrase.stdout, /^ {2}graft api key \[key\] \[options\]$/m);
+  assert.doesNotMatch(phrase.stdout, /^ {2}graft api url /m, "\"api url\" holds the words but not the phrase");
+
+  const none = runCli(["find-command", "no-such-keyword-xyz"]);
+  assert.equal(none.status, 1, none.describe());
+  assert.equal(none.stdout, "");
+  assert.match(none.stderr, /No command matches "no-such-keyword-xyz"/);
+
+  assert.match(runCli(["--help"]).stdout, /^ {2}find-command <keyword\.\.\.>$/m, "listed in graft help");
+});
+
 test("trail keeps its grouped help", () => {
   const help = runCli(["--help"], { env: { TRAIL_INVOKED_AS: "trail" } });
   assert.equal(help.status, 0, help.describe());

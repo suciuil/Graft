@@ -68,11 +68,11 @@
 
 <div class="stats">
 <!-- stats:start -->
-  <div class="stat feature"><b>45</b><span>New features</span></div>
+  <div class="stat feature"><b>46</b><span>New features</span></div>
   <div class="stat improvement"><b>33</b><span>Improvements</span></div>
   <div class="stat fix"><b>29</b><span>Bug fixes</span></div>
-  <div class="stat change"><b>15</b><span>Change requests</span></div>
-  <div class="stat"><b>122</b><span>Items in total</span></div>
+  <div class="stat change"><b>16</b><span>Change requests</span></div>
+  <div class="stat"><b>124</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -84,12 +84,12 @@
 <!-- counts:start -->
       <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>8</td><td>5</td><td>6</td><td>2</td><td>21</td></tr>
       <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>5</td><td>6</td><td>5</td><td>26</td></tr>
-      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>7</td><td>11</td><td>8</td><td>2</td><td>28</td></tr>
-      <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>0</td><td>10</td></tr>
+      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>8</td><td>11</td><td>8</td><td>2</td><td>29</td></tr>
+      <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>1</td><td>11</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>11</td><td>3</td><td>5</td><td>0</td><td>19</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>1</td><td>3</td><td>4</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>9</td><td>1</td><td>3</td><td>4</td><td>17</td></tr>
-      <tr class="total"><td>Total</td><td>45</td><td>29</td><td>33</td><td>15</td><td>122</td></tr>
+      <tr class="total"><td>Total</td><td>46</td><td>29</td><td>33</td><td>16</td><td>124</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
@@ -132,6 +132,7 @@
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <ul>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>When setup finishes, it now suggests running the deep build that adds code summaries if none has run yet or the existing summaries are too out of date. It explains why, notes that this needs an API key and costs tokens, says how to turn the suggestion off, and when an AI agent runs setup it asks the agent to pass the suggestion on to you.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>New "graft files location" command moves the generated files of every repo to a folder you choose (default ~/.graft/repos) and keeps new repos there too. It checks that the destination has enough free space first, offers a dry run, can also collect repo folders from older locations, and moves everything or nothing. With no folder it shows the current location, and --default moves everything back.</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>MATLAB and Simulink support. MATLAB scripts, functions, classes, packages and live scripts (.mlx) are indexed with their calls, imports and inheritance. Simulink models (.slx, .mdl) and data dictionaries (.sldd) are unpacked locally and indexed as models, subsystems, charts, ports and dictionary entries, with model references, library links and data usage linked up. Packages and models up to 50 MB are indexed.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A repository too big for one map no longer fails. The build lists the parts it can be split into and, in a terminal, lets you pick which ones to build. The new "--all-parts" option builds each part into its own map, and queries, callers, grep, map and file overviews run from the top folder search all parts together.</span></li>
@@ -146,6 +147,7 @@
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>When several AI agents work in the same repository, each one's savings tally and "graft savings --last" now count only its own calls. One model reported under two spellings is no longer listed as two models.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Savings for GitHub Copilot in VS Code are now priced from the very first call of a chat and in Auto mode. They follow a model switch in the middle of a chat and ignore the model picked for queued messages.</span></li>
     <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span>"build --deep" summaries no longer go missing for files whose symbols have extremely long names, such as CSS rules with very long selector lists.</span></li>
+    <li data-type="change" data-area="agents"><span class="tag">Change</span><span><span class="area">Agent integrations</span>Setup now selects GitHub Copilot by default along with Claude Code, even when the repository has no .github folder. Copilot is also set up by the non-interactive "yes" option and when no agents are named.</span></li>
   </ul>
 </div>
 

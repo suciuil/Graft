@@ -318,6 +318,13 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "graft files location --default",
     ],
   },
+  "find-command": {
+    description:
+      "Search the commands for a keyword: every command whose name or description contains it (case-insensitive; " +
+      "several words are searched as one phrase). Lists the commands found — the ones matched by name first — then " +
+      "prints each one's full help, the same entry `graft help` shows. Exits 1 when no command matches.",
+    examples: ["graft find-command deep", "graft find-command api key", 'graft find-command "environment variable"'],
+  },
   grep: {
     description:
       "Search the indexed files for a regular expression (or plain text with --fixed). Unlike plain grep, every " +
@@ -326,7 +333,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     globals: QUERY,
   },
   help: {
-    description: "Show the help of one command — the same as `graft <command> --help`.",
+    description:
+      "Show the help of one command — the same as `graft <command> --help`. To find a command by a word in its " +
+      "name or description, use `graft find-command <keyword>`.",
     examples: ["graft help ask", "graft help config exclude-dirs"],
   },
   init: {
@@ -567,6 +576,58 @@ export function listedCommands(root: Command, helper: Help): { cmd: Command; pat
   };
   walk(root, pathOf(root));
   return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** A command found by `graft find-command`, and where the keyword was found. */
+export interface CommandMatch {
+  cmd: Command;
+  path: string;
+  inName: boolean;
+  inDescription: boolean;
+}
+
+/** Lower-cased, every run of whitespace one space, so a phrase matches across a wrapped line. */
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Every listed command (as `graft help` lists them) whose name — its full path or
+ * an alias — or whose description (the one its help shows) contains `keyword`,
+ * case-insensitive. Name matches come first, then description-only ones; A→Z within each.
+ */
+export function searchCommands(program: Command, helper: Help, keyword: string): CommandMatch[] {
+  const needle = normalize(keyword);
+  if (!needle) return [];
+  const found: CommandMatch[] = [];
+  for (const { cmd, path } of listedCommands(program, helper)) {
+    const parent = path.includes(" ") ? path.slice(0, path.lastIndexOf(" ") + 1) : "";
+    const names = [path, ...cmd.aliases().map((a) => parent + a)];
+    const inName = names.some((n) => normalize(n).includes(needle));
+    const inDescription = normalize(GRAFT_HELP[path]?.description ?? cmd.description()).includes(needle);
+    if (inName || inDescription) found.push({ cmd, path, inName, inDescription });
+  }
+  return [...found.filter((m) => m.inName), ...found.filter((m) => !m.inName)];
+}
+
+/**
+ * The `graft find-command` report: the commands found, each with where the keyword
+ * was found, then each one's full help entry, exactly as `graft <command> --help`
+ * prints it. Null when nothing matched.
+ */
+export function formatCommandSearch(program: Command, helper: Help, keyword: string): string | null {
+  const matches = searchCommands(program, helper, keyword);
+  if (!matches.length) return null;
+  const width = helpWidth(helper);
+  const shown = normalize(keyword);
+  const count = `${matches.length} command${matches.length === 1 ? "" : "s"}`;
+  const list = rows(
+    matches.map((m) => [m.path, [m.inName && "name", m.inDescription && "description"].filter(Boolean).join(", ")]),
+    width,
+    2,
+  );
+  const entries = matches.map((m) => formatCommandEntry(m.cmd, helper, width, program.name(), m.path).join("\n"));
+  return `Found ${count} matching "${shown}" (in the name or description):\n${list.join("\n")}\n\n${entries.join("\n\n")}\n`;
 }
 
 function examplesOf(h: CommandHelp): string[] {

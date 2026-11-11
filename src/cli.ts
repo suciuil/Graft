@@ -207,7 +207,7 @@ import {
 } from "./telemetry/index.js";
 import { installSystemCaFetch } from "./util/system-ca.js";
 import { helpExamples, missingCommandHint } from "./cli-help.js";
-import { installGraftHelp } from "./cli-help-graft.js";
+import { formatCommandSearch, installGraftHelp } from "./cli-help-graft.js";
 
 // Before any command builds an LLM client: they capture globalThis.fetch when created.
 installSystemCaFetch();
@@ -2412,6 +2412,25 @@ grouped(program.command("languages"), GROUP.setup)
       return;
     }
     process.stdout.write(formatLanguageSupport(rows, brand()));
+  });
+
+// `graft find-command <keyword>`: the commands whose name or description holds a
+// word, each with its full help entry. Hidden under trail, which keeps its own help.
+program
+  .command("find-command", { hidden: TRAIL })
+  .description("Search the commands for a keyword in their name or description, and show the full help of each one found")
+  .argument("<keyword...>", "the word or phrase to look for (case-insensitive; several words are one phrase)")
+  .action((words: string[]) => {
+    const keyword = words.join(" ");
+    const helper = program.createHelp();
+    // The same width `graft help` wraps to, so each entry reads exactly as it does there.
+    helper.prepareContext({ helpWidth: process.stdout.isTTY ? process.stdout.columns : undefined });
+    const report = formatCommandSearch(program, helper, keyword);
+    if (!report) {
+      console.error(`No command matches "${keyword.trim()}" in its name or description. Run \`${program.name()} help\` for every command.`);
+      process.exit(1);
+    }
+    process.stdout.write(report);
   });
 
 // `graft where`: where the map and settings of the current folder(s) are kept,
