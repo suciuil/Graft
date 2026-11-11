@@ -67,7 +67,8 @@ test("graft --help is only the commands, A→Z, each with its own and its global
   assert.doesNotMatch(help.stdout, /-h, --help|-v, --version/, "-h and -v work but are not listed");
   assert.doesNotMatch(help.stdout, /GRAFT_AGENT_MODEL/, "the retired env var is not advertised");
 
-  const heads = help.stdout.split("\n").filter((l) => /^ {2}\S/.test(l)).map((l) => l.trim().split(" ")[0]!);
+  const commands = help.stdout.slice(0, help.stdout.indexOf("\nCommon commands:\n"));
+  const heads = commands.split("\n").filter((l) => /^ {2}\S/.test(l)).map((l) => l.trim().split(" ")[0]!);
   assert.deepEqual(heads, [...heads].sort((a, b) => a.localeCompare(b)), "alphabetical");
   for (const c of ["api", "ask", "build", "help", "model", "viz"]) assert.ok(heads.includes(c), c);
   assert.match(help.stdout, /^ {2}api key \[key\] \[options\]$/m, "a group's commands are listed by their full path");
@@ -98,6 +99,24 @@ test("graft --help is only the commands, A→Z, each with its own and its global
   assert.match(alone.stderr, /no command given/);
   assert.match(alone.stderr, /--model claude-sonnet-5-5 build --deep/);
   assert.doesNotMatch(alone.stderr, /Commands:/, "not the whole help again");
+});
+
+test("graft --help ends with the common commands, then how to get more help on one", () => {
+  const help = runCli(["--help"]);
+  assert.equal(help.status, 0, help.describe());
+  const tail = help.stdout.slice(help.stdout.indexOf("\n\nCommon commands:\n") + 2);
+  assert.ok(tail.startsWith("Common commands:\n"), "after the command list");
+  const listed = tail
+    .split("\n")
+    .filter((l) => /^ {2}graft /.test(l))
+    .map((l) => l.trim().split(/\s{2,}/));
+  assert.deepEqual(
+    listed.map(([term]) => term),
+    ["find-command", "model", "build", "deep-threshold", "staleness", "config", "savings", "files location"].map((c) => `graft ${c}`),
+  );
+  for (const [term, desc] of listed) assert.ok(desc && desc.length <= 60, `${term} has a very short description`);
+  assert.match(tail, /\n\nMore about any command: `graft <command> --help` \(or `graft help <command>`\)\.\n$/, "the last line");
+  assert.doesNotMatch(runCli(["build", "--help"]).stdout, /Common commands:/, "only on the full list");
 });
 
 test("graft /h and graft /help print the same as graft help, and no help lists them", () => {

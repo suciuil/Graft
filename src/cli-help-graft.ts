@@ -1,7 +1,8 @@
 /**
  * graft's help screens (the `graft` name only; `trail` keeps commander's grouped help).
  *
- * `graft --help` is just the command list, A→Z, and every entry is complete on its
+ * `graft --help` is the command list, A→Z, closed by a short list of the common
+ * commands and a pointer to `graft <command> --help`. Every entry is complete on its
  * own: what the command does in plain words, its arguments, ALL of its options —
  * including the global ones (`--dir`, `--agent-model`, the LLM options) on exactly
  * the commands they affect — and examples. `graft <command> --help` prints that
@@ -635,6 +636,39 @@ function examplesOf(h: CommandHelp): string[] {
   return [h.examples.length === 1 ? "      Example:" : "      Examples:", ...h.examples.map((e) => `        ${e}`)];
 }
 
+/**
+ * The most used / suggested commands, listed after the full command list of
+ * `graft help` with a one-line description each. Keyed by command path.
+ */
+export const COMMON_COMMANDS: [string, string][] = [
+  ["find-command", "find a command by a word in its name or description"],
+  ["model", "show or pick the model `build --deep` uses"],
+  ["build", "build or update the graph; --deep adds LLM summaries"],
+  ["deep-threshold", "show or set when `build --deep` is recommended"],
+  ["staleness", "show how out of date the summaries are"],
+  ["config", "show or change this repo's settings"],
+  ["savings", "show the tokens (and dollars) graft saved"],
+  ["files location", "show or move the folder generated files are kept in"],
+];
+
+/**
+ * The closing paragraph of `graft help`: the common commands (only the ones
+ * registered on `program`), then where to read more about any one of them.
+ */
+export function commonCommandsSection(program: Command, width: number): string {
+  const exists = (path: string): boolean => {
+    let cmd: Command | undefined = program;
+    for (const name of path.split(" ")) {
+      cmd = (cmd?.commands as Command[] | undefined)?.find((c) => c.name() === name || c.aliases().includes(name));
+    }
+    return Boolean(cmd);
+  };
+  const name = program.name();
+  const items = COMMON_COMMANDS.filter(([path]) => exists(path)).map(([path, desc]): [string, string] => [`${name} ${path}`, desc]);
+  const more = wrap(`More about any command: \`${name} <command> --help\` (or \`${name} help <command>\`).`, width, 0);
+  return [...(items.length ? ["Common commands:", ...rows(items, width, 2), ""] : []), ...more].join("\n") + "\n";
+}
+
 function helpWidth(helper: Help): number {
   const w = (helper as unknown as { helpWidth?: number }).helpWidth ?? process.stdout.columns ?? 100;
   return Math.max(60, Math.min(w, 120));
@@ -653,7 +687,7 @@ export function installGraftHelp(program: Command): void {
           const entries = listedCommands(program, helper).map(({ cmd: c, path }) =>
             formatCommandEntry(c, helper, width, "", path).join("\n"),
           );
-          return `Commands:\n${entries.join("\n\n")}\n`;
+          return `Commands:\n${entries.join("\n\n")}\n\n${commonCommandsSection(program, width)}`;
         },
       });
     } else if (cmd.commands.length > 0) {
