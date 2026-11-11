@@ -284,7 +284,9 @@ export function collectBindings(root: SyntaxNode, lang: Language): FileBindings 
     lang === "cmake" ||
     lang === "bash" ||
     lang === "perl" ||
-    lang === "make"
+    lang === "make" ||
+    lang === "matlab" ||
+    lang === "simulink"
   ) {
     return bindings;
   }

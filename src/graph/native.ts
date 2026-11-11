@@ -95,6 +95,8 @@ const OPTIONAL_GRAMMAR_PKG: Record<string, { pkg: string; prop?: string }> = {
   perl: { pkg: "@ganezdragon/tree-sitter-perl" },
   // Makefiles: rules (targets), variables, defines, include edges.
   make: { pkg: "tree-sitter-make" },
+  // MATLAB (`*.m`): functions, classdef classes and methods, calls, inheritance.
+  matlab: { pkg: "@acristoffers/tree-sitter-matlab" },
   // Data/markup: symbol-only custom extractors. markdown's binding default export
   // is the block grammar (its `inline` grammar is a separate property we don't use).
   json: { pkg: "tree-sitter-json" },

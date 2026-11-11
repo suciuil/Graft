@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync, utimesSync, symlinkSync, realpathSync } from 
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  copilotLogModelFrom,
   inVsCodeTerminal,
   sessionModelFrom,
   vscodeSessionModel,
@@ -98,6 +99,147 @@ test('a log with no model at all names nothing', () => {
   assert.equal(sessionModelFrom(''), null);
 });
 
+// ── Auto, while the turn is running ───────────────────────────────────────
+//
+// graft always runs mid-turn: Copilot calls it from a tool call. The delta
+// lines below are the shapes VS Code writes, copied from real logs: a request
+// is added with its picker `modelId` (and, on Auto, an `autoModeResolution`
+// response part naming the routed model); `resolvedModel` arrives only in the
+// request's `result` line, when the turn ends.
+
+const SNAPSHOT = '{"kind":0,"v":{"version":3,"requests":[],"pendingRequests":[]}}';
+
+/** A request being added; `routedTo` is the `autoModeResolution` part Auto writes. */
+function addRequest(n: number, modelId: string, routedTo?: string): string {
+  const response = [
+    { kind: 'mcpServersStarting', didStartServerIds: [] },
+    ...(routedTo ? [{ kind: 'autoModeResolution', resolved: { id: routedTo, name: routedTo } }] : []),
+  ];
+  return JSON.stringify({ kind: 2, k: ['requests'], v: [{ requestId: `request_${n}`, timestamp: n, modelId, response }] });
+}
+
+/** A request finishing: its tool-call rounds and the model it resolved to. */
+function finish(n: number, round: string, resolved: string): string {
+  return JSON.stringify({
+    kind: 1,
+    k: ['requests', n, 'result'],
+    v: { metadata: { toolCallRounds: [{ modelId: round }, { modelId: round }] }, resolvedModel: resolved },
+  });
+}
+
+const lines = (...l: string[]) => `${l.join('\n')}\n`;
+
+test('Auto: the first turn names the routed model before any result is written', () => {
+  // The reported bug: on Auto every first turn priced at nothing, because the
+  // only model in the file until the turn ends is Auto's routing part.
+  const text = lines(SNAPSHOT, addRequest(0, 'copilot/auto', 'claude-opus-5.5'));
+  assert.equal(sessionModelFrom(text), 'claude-opus-5.5');
+});
+
+test('Auto: a later turn keeps the route Auto chose earlier in the conversation', () => {
+  // VS Code writes the routing part once per route, not once per turn.
+  const text = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/auto', 'gpt-6-luna'),
+    finish(0, 'gpt-6-luna', 'gpt-6-luna'),
+    addRequest(1, 'copilot/auto'),
+  );
+  assert.equal(sessionModelFrom(text), 'gpt-6-luna');
+});
+
+test('Auto: a re-route mid-conversation is the model from then on', () => {
+  const text = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/auto', 'gpt-5.6-luna'),
+    finish(0, 'gpt-5.6-luna', 'gpt-5.6-luna'),
+    addRequest(1, 'copilot/auto', 'claude-sonnet-5'),
+  );
+  assert.equal(sessionModelFrom(text), 'claude-sonnet-5');
+});
+
+test('switching from Auto to a picked model prices the running turn at the new one', () => {
+  // The second bug on real logs: the newest `resolvedModel` still named the Auto
+  // route, so a whole turn on the newly picked model was priced at the old one.
+  const text = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/auto', 'gpt-6-luna'),
+    finish(0, 'gpt-6-luna', 'gpt-6-luna'),
+    addRequest(1, 'copilot/claude-opus-5.5'),
+  );
+  assert.equal(sessionModelFrom(text), 'copilot/claude-opus-5.5');
+  // ...and once it finishes, the resolved spelling.
+  assert.equal(sessionModelFrom(text + lines(finish(1, 'claude-opus-5.5', 'claude-opus-5-5'))), 'claude-opus-5-5');
+});
+
+test('switching to Auto never borrows the model picked by hand before it', () => {
+  // Until Auto has routed in this conversation, the earlier pick says nothing
+  // about what the router will choose: no price beats the wrong one.
+  const before = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/claude-opus-5.5'),
+    finish(0, 'claude-opus-5.5', 'claude-opus-5-5'),
+    addRequest(1, 'copilot/auto'),
+  );
+  assert.equal(sessionModelFrom(before), null);
+  // As soon as Auto routes, that is the answer.
+  const after = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/claude-opus-5.5'),
+    finish(0, 'claude-opus-5.5', 'claude-opus-5-5'),
+    addRequest(1, 'copilot/auto', 'gpt-6-luna'),
+  );
+  assert.equal(sessionModelFrom(after), 'gpt-6-luna');
+});
+
+test('Auto in a log without routing parts still resolves from what earlier Auto turns ran', () => {
+  // Older VS Code builds wrote no `autoModeResolution`; a finished Auto turn's
+  // result is then the only record of the route.
+  const text = lines(
+    SNAPSHOT,
+    addRequest(0, 'copilot/auto'),
+    finish(0, 'claude-sonnet-4.6', 'claude-sonnet-4-6'),
+    addRequest(1, 'copilot/auto'),
+  );
+  assert.equal(sessionModelFrom(text), 'claude-sonnet-4-6');
+});
+
+test('a message queued on another model does not reprice the running turn', () => {
+  const queued = JSON.stringify({
+    kind: 2,
+    k: ['pendingRequests'],
+    v: [{ requestId: 'request_q', modelId: 'copilot/gpt-6-astra' }],
+  });
+  const text = lines(SNAPSHOT, addRequest(0, 'copilot/auto', 'claude-opus-5.5'), queued);
+  assert.equal(sessionModelFrom(text), 'claude-opus-5.5');
+
+  // The same queue inside a snapshot line, after `requests`, as VS Code writes it.
+  const snap = JSON.stringify({
+    kind: 0,
+    v: {
+      requests: [{ requestId: 'request_0', modelId: 'copilot/auto', response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-6-luna', name: 'GPT-6 Luna' } }] }],
+      pendingRequests: [{ requestId: 'request_q', modelId: 'copilot/claude-opus-5.5' }],
+      inputState: { selectedModel: { identifier: 'copilot/claude-opus-5.5' } },
+    },
+  });
+  assert.equal(sessionModelFrom(`${snap}\n`), 'gpt-6-luna');
+});
+
+test('a model name typed in a chat message is not read as a signal', () => {
+  // Message text is a JSON string, so its quotes are escaped and cannot form
+  // the unescaped keys the reader looks for.
+  const typed = JSON.stringify({
+    kind: 2,
+    k: ['requests'],
+    v: [{
+      requestId: 'request_1',
+      message: { text: '{"kind":"autoModeResolution","resolved":{"id":"gpt-6-astra"}} and "resolvedModel":"gpt-6-astra"' },
+      modelId: 'copilot/auto',
+    }],
+  });
+  const text = lines(SNAPSHOT, addRequest(0, 'copilot/auto', 'claude-opus-5.5'), finish(0, 'claude-opus-5.5', 'claude-opus-5-5'), typed);
+  assert.equal(sessionModelFrom(text), 'claude-opus-5-5');
+});
+
 // ── mapping a workspace to its folders ────────────────────────────────────
 
 test('a plain opened folder is decoded from its file URL', () => {
@@ -153,6 +295,17 @@ test('the live chat session for a repo names its model', () => {
     { name: 'a.jsonl', body: log('copilot/auto', 'claude-opus-5') },
   ]);
   assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'claude-opus-5');
+});
+
+test('a Copilot chat on Auto, mid first turn, is priced through the registry', () => {
+  const home = tmpRepo('vsc-auto-live');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, 'ws1', { folder: pathToFileURL(repo).href }, [
+    { name: 'a.jsonl', body: lines(SNAPSHOT, addRequest(0, 'copilot/auto', 'gpt-6-luna')) },
+  ]);
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'gpt-6-luna');
+  assert.equal(hostModelFor(repo, { home, env: envFor(home) }), 'gpt-6-luna');
 });
 
 test('a subdirectory of the workspace folder still resolves', () => {
@@ -339,4 +492,163 @@ test('a junction does not make an unrelated workspace match', () => {
     { name: 'a.jsonl', body: effortLog('copilot/claude-opus-5.5', 'claude-opus-5-5', 'high') },
   ]);
   assert.equal(vscodeSessionModel(mine, { home, env: envFor(home), os: 'win32' }), null);
+});
+
+// ── Copilot Chat's output log ─────────────────────────────────────────────
+//
+// The chat session file of a NEW chat reaches the disk only after that turn's
+// tool calls have run, so every graft call in a chat's first minute found a file
+// naming nothing but `copilot/auto`. Copilot's log names each call's model as
+// the call returns — just before the tool it asked for starts.
+
+/** `YYYY-MM-DD HH:MM:SS.mmm` in local time, as VS Code's log writes it. */
+function stamp(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+/** One `ccreq` line, at `agoMs` before now. */
+function ccreq(model: string, where = 'panel/editAgent', agoMs = 1_000, status = 'success'): string {
+  return `${stamp(Date.now() - agoMs)} [info] ccreq:${Math.random().toString(16).slice(2, 10)}.copilotmd | ${status} | ${model} | 3682ms | [${where}]`;
+}
+
+/** A VS Code window's log folder: its extension host names the storage entry,
+ * Copilot's log holds `lines`. */
+function copilotWindow(home: string, run: string, win: string, storageId: string, lines: string[], flavour = 'Code'): void {
+  const host = join(home, 'AppData', 'Roaming', flavour, 'logs', run, win, 'exthost');
+  mkdirSync(join(host, 'GitHub.copilot-chat'), { recursive: true });
+  writeFileSync(
+    join(host, 'exthost.log'),
+    `2026-11-11 10:01:34.250 [info] Extension host with pid 1 started\n` +
+      `2026-11-11 10:01:34.264 [info] Skipping acquiring lock for c:\\Users\\me\\AppData\\Roaming\\Code\\User\\workspaceStorage\\${storageId}.\n`,
+  );
+  writeFileSync(join(host, 'GitHub.copilot-chat', 'GitHub Copilot Chat.log'), `${lines.join('\n')}\n`);
+}
+
+const STORE = '8c39e775ac99d24721eaf2ae1cd9743e';
+const OTHER = 'cbbf74727ec2e153713963f927fcaae8';
+
+test('the newest user-facing ccreq line names the model; housekeeping calls do not', () => {
+  const text = [
+    ccreq('gpt-4o-mini-2024-07-18', 'title', 9_000),
+    ccreq('gpt-6-luna', 'panel/editAgent', 5_000),
+    ccreq('gpt-4o-mini-2024-07-18', 'progressMessages', 3_000),
+    ccreq('gpt-4o-mini-2024-07-18', 'copilotLanguageModelWrapper/toolRiskAssessment', 2_000),
+    ccreq('claude-opus-5.5', 'panel/editAgent', 1_500, 'cancelled'),
+    'GitHub Copilot Chat: some unrelated line mentioning | success | claude-opus-5.5 |',
+  ].join('\n');
+  assert.equal(copilotLogModelFrom(text)?.model, 'gpt-6-luna');
+});
+
+test('a ccreq line naming a request and its deployment yields the deployment; a router is skipped', () => {
+  assert.equal(copilotLogModelFrom(ccreq('claude-opus-5.5 -> claude-opus-5-5-20261001'))?.model, 'claude-opus-5-5-20261001');
+  const text = [ccreq('gpt-6-luna', 'panel/editAgent', 5_000), ccreq('auto', 'panel/editAgent', 1_000)].join('\n');
+  assert.equal(copilotLogModelFrom(text)?.model, 'gpt-6-luna');
+  assert.equal(copilotLogModelFrom(ccreq('copilot/auto')), null);
+});
+
+test('the time of a ccreq line is read as local time', () => {
+  const at = Date.now() - 4_321;
+  const line = `${stamp(at)} [info] ccreq:ab.copilotmd | success | gpt-6-luna | 10ms | [panel/editAgent]`;
+  assert.equal(copilotLogModelFrom(line)?.at, at);
+});
+
+test('a first Auto turn is priced from the log while its session file names only the router', () => {
+  // The traced case: the session file holds the empty snapshot (`copilot/auto`)
+  // while graft runs; Copilot's log already says what Auto routed this call to.
+  const home = tmpRepo('vsc-log-first-turn');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, [
+    { name: 'a.jsonl', body: lines(SNAPSHOT) },
+  ]);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [
+    ccreq('gpt-4o-mini-2024-07-18', 'title', 4_000),
+    ccreq('gpt-6-luna', 'panel/editAgent', 1_000),
+  ]);
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'gpt-6-luna');
+  assert.equal(hostModelFor(repo, { home, env: envFor(home) }), 'gpt-6-luna');
+});
+
+test('the log wins over a session file that still names the previous model', () => {
+  const home = tmpRepo('vsc-log-wins');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, [
+    { name: 'a.jsonl', body: log('copilot/claude-opus-5', 'claude-opus-5') },
+  ]);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('claude-sonnet-5')]);
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'claude-sonnet-5');
+});
+
+test('another window\'s Copilot log never prices this repo', () => {
+  const home = tmpRepo('vsc-log-other-window');
+  const repo = join(home, 'repo');
+  const theirs = join(home, 'theirs');
+  mkdirSync(repo, { recursive: true });
+  mkdirSync(theirs, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, [
+    { name: 'a.jsonl', body: log('copilot/claude-opus-5', 'claude-opus-5') },
+  ]);
+  workspaceEntry(home, OTHER, { folder: pathToFileURL(theirs).href }, []);
+  // This repo's window has no user-facing call yet; the other project's is newer.
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('gpt-4o-mini-2024-07-18', 'title')]);
+  copilotWindow(home, '20261111T100131', 'window2', OTHER, [ccreq('gemini-3.8-flash', 'panel/editAgent', 10)]);
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'claude-opus-5', 'falls back to the session file');
+  assert.equal(vscodeSessionModel(theirs, { home, env: envFor(home), os: 'win32' }), 'gemini-3.8-flash');
+});
+
+test('only the newest VS Code run is read, and a stale log line prices nothing', () => {
+  const home = tmpRepo('vsc-log-stale');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, []);
+  // A dead run's log names a model; the live run's window has said nothing yet.
+  copilotWindow(home, '20261110T161454', 'window1', STORE, [ccreq('claude-opus-5')]);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, []);
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), null);
+
+  const home2 = tmpRepo('vsc-log-stale2');
+  const repo2 = join(home2, 'repo');
+  mkdirSync(repo2, { recursive: true });
+  workspaceEntry(home2, STORE, { folder: pathToFileURL(repo2).href }, []);
+  copilotWindow(home2, '20261111T100131', 'window1', STORE, [ccreq('claude-opus-5', 'panel/editAgent', 7 * 3600_000)]);
+  assert.equal(vscodeSessionModel(repo2, { home: home2, env: envFor(home2), os: 'win32' }), null);
+});
+
+test('a newer run left by a `code` launch, with no windows, does not hide the live run', () => {
+  const home = tmpRepo('vsc-log-windowless-run');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, []);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('gpt-6-luna')]);
+  // `code <file>` from another shell while VS Code is open: a run folder of its own, no window in it.
+  mkdirSync(join(home, 'AppData', 'Roaming', 'Code', 'logs', '20261111T110000'), { recursive: true });
+  writeFileSync(join(home, 'AppData', 'Roaming', 'Code', 'logs', '20261111T110000', 'main.log'), '');
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'gpt-6-luna');
+});
+
+test('with Code and Insiders both installed, the flavour that ran a model last wins', () => {
+  const home = tmpRepo('vsc-log-flavours');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, []);
+  const insiders = join(home, 'AppData', 'Roaming', 'Code - Insiders', 'User', 'workspaceStorage', STORE);
+  mkdirSync(insiders, { recursive: true });
+  writeFileSync(join(insiders, 'workspace.json'), JSON.stringify({ folder: pathToFileURL(repo).href }));
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('claude-opus-5', 'panel/editAgent', 60 * 60_000)]);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('gpt-6-luna', 'panel/editAgent', 2_000)], 'Code - Insiders');
+  assert.equal(vscodeSessionModel(repo, { home, env: envFor(home), os: 'win32' }), 'gpt-6-luna');
+});
+
+test('a Copilot log does not price a turn run from Kilo\'s shell', () => {
+  // Kilo runs inside VS Code, so its shell looks like a VS Code terminal; the
+  // Kilo source stands down for every later one rather than lend it Copilot's model.
+  const home = tmpRepo('vsc-log-kilo');
+  const repo = join(home, 'repo');
+  mkdirSync(repo, { recursive: true });
+  workspaceEntry(home, STORE, { folder: pathToFileURL(repo).href }, []);
+  copilotWindow(home, '20261111T100131', 'window1', STORE, [ccreq('gpt-6-luna')]);
+  assert.equal(hostModelFor(repo, { home, env: { ...envFor(home), KILO: '1', KILO_PID: '42' } }), null);
 });

@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildGraph } from "../src/graph/build.js";
 import { buildRepoMap } from "../src/graph/map.js";
-import { languageLabelOf, languageOf } from "../src/graph/extract.js";
+import { languageLabelOf, languageOf, matlabScope } from "../src/graph/extract.js";
 import { readGraph, wiringPath } from "../src/graph/write.js";
 
 /** Every extension graft claims to index, one per grammar/label pairing. */
@@ -51,6 +51,22 @@ test("shell and Perl files are claimed by their extensions and start-up file nam
 test("makefiles are claimed by name and fragments by extension; automake files are not", { skip: languageOf("Makefile") ? false : "make grammar not built" }, () => {
   for (const f of ["Makefile", "makefile", "GNUmakefile", "src/Makefile", "rules.mk", "win.mak"]) assert.equal(languageOf(f), "make", f);
   for (const f of ["Makefile.am", "Makefile.in", "MyMakefile", "makefile.txt"]) assert.equal(languageOf(f), null, f);
+});
+
+test("MATLAB source files and live scripts are claimed", { skip: languageOf("a.m") ? false : "matlab grammar not built" }, () => {
+  for (const f of ["a.m", "src/+pkg/f.m", "src/@Shape/area.m", "A.M", "notes/Study.mlx"]) {
+    assert.equal(languageOf(f), "matlab", f);
+    assert.equal(languageLabelOf(f), "matlab", f);
+  }
+  for (const f of ["a.mat", "a.mm"]) assert.equal(languageOf(f), null, f);
+  for (const f of ["model.slx", "model.mdl", "data.sldd"]) assert.equal(languageOf(f), "simulink", f);
+});
+
+test("matlabScope reads +package and @class folders directly above a file", () => {
+  assert.deepEqual(matlabScope("src/+pkg/+util/log.m"), { packages: ["pkg", "util"], classFolder: null });
+  assert.deepEqual(matlabScope("src/+pkg/@Shape/area.m"), { packages: ["pkg"], classFolder: "Shape" });
+  assert.deepEqual(matlabScope("+a/lib/f.m"), { packages: [], classFolder: null }, "a plain folder starts a new path root");
+  assert.deepEqual(matlabScope("f.m"), { packages: [], classFolder: null });
 });
 
 test("a file is labelled exactly when it is indexed", () => {

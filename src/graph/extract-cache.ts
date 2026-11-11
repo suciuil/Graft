@@ -53,6 +53,12 @@ export interface ExtractEntry {
    * one, whose grammar didn't load. Absent for every other file. The entry is
    * replayed only while the same stand-in would parse it again. */
   via?: string;
+  /** For a MATLAB/Simulink package only: the hash of its raw bytes and render code
+   * (`packageHash`), so an unchanged package is replayed without being unpacked. */
+  rawHash?: string;
+  /** The size the guard counted for this file's nodes and edges (`estimateFileChars`),
+   * reused when the entry is replayed instead of serializing them again. */
+  chars?: number;
 }
 
 export interface ExtractCache {

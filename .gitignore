@@ -33,6 +33,11 @@ tree-sitter.exe
 # consumers don't need to compile tree-sitter grammars from source.
 build-bundle/
 *.tgz
+# scripts/build-grammars.mjs's record of what this machine last built and packed.
+vendor/.grammar-stamps.json
+
+# PowerShell's module cache, written here when a run points LOCALAPPDATA at the repo.
+/Microsoft/
 
 # Offline Node.js zip(s) next to install-graft-helper.ps1 (node-vX.Y.Z-win-x64.zip, ~37MB):
 # a downloaded nodejs.org artifact for the installer, not a build input.

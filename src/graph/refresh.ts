@@ -56,7 +56,7 @@ import {
 import { CACHE_DIR } from "../context/node-file.js";
 import { buildGraph } from "./build.js";
 import { driftCount, isClean, probeDrift, readFingerprint, type Drift } from "./fingerprint.js";
-import { invalidateGraphCaches, loadGraphCached } from "./load.js";
+import { invalidateGraphCaches, loadGraphCached, tooBigToKeep } from "./load.js";
 import type { RefreshRunArgs } from "./refresh-run.js";
 import { seedGraph, type SeedResult } from "./seed.js";
 import type { GraphV1 } from "./types.js";
@@ -504,6 +504,10 @@ export function deepDueFor(
     const dirs = opts.children
       ? opts.children.map((c) => contextDirFor(resolve(root, c)))
       : [contextDirFor(resolve(root), opts.contextDir)];
+    // Maps too big to hold together (a repository built as one map per part):
+    // reading every one again just for this note would double the time of each
+    // query, so it is left to `graft staleness`, which reads them one at a time.
+    if (dirs.length > 1 && tooBigToKeep(dirs)) return null;
     const sum: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
     for (const d of dirs) addStaleness(sum, summaryStaleness(loadGraphCached(d)));
     const note = deepRebuildNote(sum, readDeepStaleThreshold(resolve(root), opts.home));
@@ -562,8 +566,10 @@ export function stalenessReport(
   const repos: StalenessReport["repos"] = [];
   const byFile = new Map<string, FileStaleness>();
   let indexed = false;
+  const release = sources.length > 1 && tooBigToKeep(sources.map((s) => s.dir));
   for (const { name, dir } of sources) {
     const graph = loadGraphCached(dir);
+    if (release) invalidateGraphCaches(dir);
     if (graph) indexed = true;
     const s = summaryStaleness(graph);
     addStaleness(totals, s);

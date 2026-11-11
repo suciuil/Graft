@@ -23,7 +23,7 @@ import { contextDirFor } from "../context/node-file.js";
 import { extractFile } from "./extract.js";
 import { extractGeneric } from "./generic.js";
 import { extractContainer } from "./container.js";
-import { listSourceFiles, tierOf, warmGrammarsFor } from "./build.js";
+import { listSourceFiles, PARSE_YIELD_EVERY, tierOf, warmGrammarsFor, yieldToEventLoop } from "./build.js";
 import { readGraph, wiringPath } from "./write.js";
 import { readFingerprint } from "./fingerprint.js";
 import { readSourceFile } from "../util/source.js";
@@ -96,7 +96,10 @@ export async function checkGraph(
   // grammar didn't load, exactly as the build does.
   await warmGrammarsFor(sourceFiles);
   const current = new Map<string, string>(); // id → body_hash
+  let seen = 0;
   for (const file of sourceFiles) {
+    // An event-loop turn now and then frees the native parse trees, as in buildGraph.
+    if (++seen % PARSE_YIELD_EVERY === 0) await yieldToEventLoop();
     // The same dispatch `buildGraph` uses (`tierOf`). The two must stay in step: a
     // tier the build extracts and the check cannot see reports as `removed`
     // forever, and the `graft build` the check tells you to run can never repair it.

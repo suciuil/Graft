@@ -22,10 +22,10 @@
  * `workspace-cli.ts`; `mcp/tools.ts` calls the federate* functions directly.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { contextDirFor } from "../context/node-file.js";
 import { checkGraph } from "./check.js";
-import { loadGraphCached } from "./load.js";
+import { invalidateGraphCaches, loadGraphCached, tooBigToKeep } from "./load.js";
 import { buildRepoMap, formatRepoMap } from "./map.js";
 import { discoverWorkspaceChildren } from "./scopes.js";
 import {
@@ -39,9 +39,11 @@ import { wiringPath } from "./write.js";
 import type { GraphV1 } from "./types.js";
 import {
   ask,
+  skeleton,
   type AskHit,
   type AskRankingMetadata,
   type AskResult,
+  type SkeletonResult,
 } from "../ask/ask.js";
 import {
   fileFirstRoundRobin,
@@ -57,11 +59,54 @@ import { cmd } from "../brand.js";
  * never live at the parent — they live in each child's own `graft/`. */
 export interface WorkspaceV1 {
   version: 1;
-  /** Immediate child dir names that are git repos, sorted. */
+  /** Immediate child dir names that are git repos, sorted. For `kind: "parts"`,
+   * the root-relative folders (`Src/EBS/ActP`) that each have their own map. */
   children: string[];
+  /** `"parts"`: one repository too big for one map, built as one map per folder
+   * (`graft build --all-parts`). Absent: a folder of separate git repos. */
+  kind?: "parts";
+}
+
+/** True for the index of a repository built as one map per part. */
+export function isPartsWorkspace(ws: WorkspaceV1 | null): boolean {
+  return ws?.kind === "parts";
+}
+
+/**
+ * The child a root-relative path belongs to, and the path inside it: the longest
+ * child that is the path or a folder above it (`Src/EBS/StateP/CoDeg/a.c` →
+ * `Src/EBS/StateP/CoDeg` + `a.c`). Null when no child holds it.
+ */
+export function childFor(children: readonly string[], path: string): { child: string; rest: string } | null {
+  const p = path.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
+  let best: string | undefined;
+  for (const c of children) {
+    if ((p === c || p.startsWith(`${c}/`)) && (best === undefined || c.length > best.length)) best = c;
+  }
+  return best === undefined ? null : { child: best, rest: p.slice(best.length + 1) };
 }
 
 const WORKSPACE_FILE = "workspace.json";
+
+/**
+ * The version a parts index is written with (`kind: "parts"`). Above 1 so that
+ * a graft from before parts indexes reads none, instead of taking the index for
+ * a folder of repos and rewriting it with no children on its next build. Read
+ * back as a {@link WorkspaceV1}; version 1 parts indexes are still read.
+ */
+export const PARTS_INDEX_VERSION = 2;
+
+/**
+ * True for a child or part that names a folder inside the root: relative, with
+ * no `.`/`..`/empty segment. The index is committed, so a cloned repository can
+ * hold any text there; a build writes into each part, so nothing may point out.
+ */
+export function isSafePart(part: string): boolean {
+  if (part === "" || isAbsolute(part)) return false;
+  const p = part.replace(/\\/g, "/");
+  if (p.startsWith("/") || /^[A-Za-z]:/.test(p)) return false;
+  return p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
+}
 
 /** Absolute path to the workspace index for a parent root (`<dir>/graft/workspace.json`). */
 export function workspacePath(root: string, override?: string): string {
@@ -69,34 +114,50 @@ export function workspacePath(root: string, override?: string): string {
 }
 
 /** Read the workspace index, or null when the parent has none (not a workspace,
- * or unparseable/foreign json — treated the same as absent). */
+ * or unparseable/foreign json — treated the same as absent). Children that do
+ * not name a folder inside the root ({@link isSafePart}) are left out. */
 export function readWorkspace(root: string, override?: string): WorkspaceV1 | null {
   const path = workspacePath(root, override);
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<WorkspaceV1>;
-    if (parsed.version !== 1 || !Array.isArray(parsed.children)) return null;
-    return { version: 1, children: parsed.children.map(String) };
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown; children?: unknown; kind?: unknown };
+    const parts = parsed.kind === "parts";
+    if (!Array.isArray(parsed.children)) return null;
+    if (parsed.version !== 1 && !(parts && parsed.version === PARTS_INDEX_VERSION)) return null;
+    const ws: WorkspaceV1 = { version: 1, children: parsed.children.map(String).filter(isSafePart) };
+    if (parts) ws.kind = "parts";
+    return ws;
   } catch {
     return null;
   }
 }
 
-/** Write the workspace index, sorting children for a stable, minimal git diff. */
+/** Write the workspace index, sorting children for a stable, minimal git diff.
+ * A parts index is written as {@link PARTS_INDEX_VERSION}. */
 export function writeWorkspace(root: string, ws: WorkspaceV1, override?: string): string {
   const dir = contextDirFor(root, override);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, WORKSPACE_FILE);
-  const sorted: WorkspaceV1 = { version: 1, children: [...ws.children].sort() };
-  writeFileSync(path, JSON.stringify(sorted, null, 2) + "\n");
+  const children = [...ws.children].sort();
+  const out = ws.kind === "parts"
+    ? { version: PARTS_INDEX_VERSION, children, kind: ws.kind }
+    : { version: 1, children };
+  writeFileSync(path, JSON.stringify(out, null, 2) + "\n");
   return path;
+}
+
+/** Remove the workspace index alone, leaving the rest of the map folder. */
+export function removeWorkspace(root: string, override?: string): void {
+  rmSync(workspacePath(root, override), { force: true });
 }
 
 /** A parent is a workspace BUILD target when it has no own `.git` and ≥2 git
  * children — or it was already split (a `workspace.json` is present). The
  * no-own-`.git` guard keeps a normal repo with git submodules from being
- * mistaken for a workspace. */
+ * mistaken for a workspace. A repository built as one map per part is not one:
+ * its parts are folders, not repos (see `graph/parts-build.ts`). */
 export function isWorkspaceBuildRoot(root: string, override?: string): boolean {
-  if (readWorkspace(root, override)) return true;
+  const ws = readWorkspace(root, override);
+  if (ws) return !isPartsWorkspace(ws);
   if (existsSync(join(root, ".git"))) return false;
   return discoverWorkspaceChildren(root).length >= 2;
 }
@@ -128,7 +189,9 @@ export function clearParentGraft(root: string, override?: string): void {
 
 export interface LoadedChild {
   child: string;
-  graph: GraphV1;
+  /** The child's map folder; its graph is loaded when a command needs it
+   * (`withChildGraph`). */
+  dir: string;
 }
 
 export interface WorkspaceGraphs {
@@ -137,23 +200,51 @@ export interface WorkspaceGraphs {
   loaded: LoadedChild[];
   /** Listed children with no built graph yet — surfaced, never silently skipped. */
   missing: string[];
+  /** What a child is called in messages: "repo", or "part" for one map per part. */
+  unit: "repo" | "part";
+  /** The children's maps together are too big to keep in memory: each is
+   * dropped from the graph cache once used, so a command holds one at a time. */
+  release: boolean;
 }
 
-/** Load each child's graph via `loadGraphCached`. Children come from
+/** List each child and whether it has a built graph. Children come from
  * workspace.json when present, otherwise from live git-child discovery (a
  * not-yet-built workspace). A child without a built graph is counted into
- * `missing`, not dropped. */
+ * `missing`, not dropped. Nothing is parsed here: commands load each child's
+ * graph as they reach it. */
 export function loadWorkspaceGraphs(root: string, override?: string): WorkspaceGraphs {
   const ws = readWorkspace(root, override);
   const children = (ws ? ws.children : discoverWorkspaceChildren(root)).slice().sort();
   const loaded: LoadedChild[] = [];
   const missing: string[] = [];
   for (const child of children) {
-    const graph = loadGraphCached(contextDirFor(join(root, child)));
-    if (graph) loaded.push({ child, graph });
+    const dir = contextDirFor(join(root, child));
+    if (existsSync(wiringPath(dir))) loaded.push({ child, dir });
     else missing.push(child);
   }
-  return { loaded, missing };
+  const release = tooBigToKeep(loaded.map((l) => l.dir));
+  return { loaded, missing, unit: isPartsWorkspace(ws) ? "part" : "repo", release };
+}
+
+/** Run `fn` on one child's graph (skipped, `undefined`, when it cannot be read),
+ * then drop it from the cache when the workspace's maps are too big to keep. */
+function withChildGraph<T>(wg: WorkspaceGraphs, c: LoadedChild, fn: (graph: GraphV1) => T): T | undefined {
+  try {
+    const graph = loadGraphCached(c.dir);
+    return graph ? fn(graph) : undefined;
+  } finally {
+    if (wg.release) invalidateGraphCaches(c.dir);
+  }
+}
+
+/** `fn` for a child whose graph a callee loads itself (`ask`, `skeleton`,
+ * `checkGraph`), released afterwards like `withChildGraph`. */
+function withChild<T>(wg: WorkspaceGraphs, c: LoadedChild, fn: () => T): T {
+  try {
+    return fn();
+  } finally {
+    if (wg.release) invalidateGraphCaches(c.dir);
+  }
 }
 
 /** "2 of 3 workspace repos have graphs; run graft build to cover repoC" — the
@@ -162,7 +253,7 @@ export function loadWorkspaceGraphs(root: string, override?: string): WorkspaceG
 export function coverageNote(g: WorkspaceGraphs): string {
   if (g.missing.length === 0) return "";
   const total = g.loaded.length + g.missing.length;
-  return `${g.loaded.length} of ${total} workspace repos have graphs; run ${cmd("graft build")} to cover ${g.missing.join(", ")}`;
+  return `${g.loaded.length} of ${total} workspace ${g.unit}s have graphs; run ${cmd("graft build")} to cover ${g.missing.join(", ")}`;
 }
 
 /** Prefix a hit pointer with its child dir so a `path:span` (or concept path
@@ -248,30 +339,40 @@ export function federateAsk(
   const limit = opts.limit ?? 8;
   const fileTopLock = opts.fileTopLock ?? true;
 
-  // `--in` scopes to a single child (and, past the first segment, a sub-scope
-  // within it). A prefix naming no known child at all is a caller mistake.
+  // `--in` scopes to a single child (and, past it, a sub-scope within it). A
+  // child may span several segments (`Src/EBS/ActP` in a repository built as one
+  // map per part), so the longest child holding the prefix wins. A prefix naming
+  // no known child at all is a caller mistake. A prefix above several children
+  // (`Src/EBS`) searches just those.
   let onlyChild: string | undefined;
+  let below: string[] | undefined;
   let childIn: string | undefined;
   if (opts.in) {
-    const prefix = opts.in.replace(/\/+$/, "");
-    const [name, ...rest] = prefix.split("/");
     const allChildren = [...wg.loaded.map((l) => l.child), ...wg.missing].sort();
-    if (!allChildren.includes(name)) {
-      throw new Error(`no workspace repo "${name}" - repos: ${allChildren.join(", ")}`);
+    const hit = childFor(allChildren, opts.in);
+    const prefix = opts.in.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
+    if (hit) {
+      onlyChild = hit.child;
+      childIn = hit.rest || undefined;
+    } else {
+      below = allChildren.filter((c) => c.startsWith(`${prefix}/`));
+      if (below.length === 0) {
+        throw new Error(`no workspace ${wg.unit} "${prefix.split("/")[0]}" - ${wg.unit}s: ${allChildren.join(", ")}`);
+      }
     }
-    onlyChild = name;
-    childIn = rest.length ? rest.join("/") : undefined;
   }
 
   // Pass 1: run each child's ask; keep its hits + RAW top-hit coverage.
   const runs: ChildRun[] = [];
-  for (const { child } of wg.loaded) {
+  for (const c of wg.loaded) {
+    const { child } = c;
     if (onlyChild && child !== onlyChild) continue;
+    if (below && !below.includes(child)) continue;
     let r: AskResult;
     try {
       // Over-fetch per child so cross-child fusion has enough candidates to
       // rank before the final `limit` slice.
-      r = ask(join(root, child), query, {
+      r = withChild(wg, c, () => ask(join(root, child), query, {
         limit: Math.max(limit * 4, 20),
         source: opts.source,
         full: opts.full,
@@ -282,7 +383,7 @@ export function federateAsk(
         fileFirst: false,
         fileComplement: fileTopLock,
         includeRankingMetadata: fileTopLock,
-      });
+      }));
     } catch {
       continue; // corrupt child, or a sub-scope --in matching nothing here
     }
@@ -505,7 +606,7 @@ export function federateAsk(
         alsoMatched: unmatched.filter((match) => !federatedSet.has(match.scope)),
       };
     } else {
-      result.note = `no matching nodes across ${wg.loaded.length} workspace repo(s) — try different words, or \`${cmd("graft build")}\` at a child`;
+      result.note = `no matching nodes across ${wg.loaded.length} workspace ${wg.unit}(s) — try different words, or \`${cmd("graft build")}\` at a child`;
     }
     if (note) result.note = result.note ? `${result.note}\n${note}` : note;
     return result;
@@ -552,7 +653,7 @@ export function federateAsk(
     const federated = fused.federated.length ? fused.federated : [...new Set(hits.map((h) => h.scope!))];
     result.scopes = { federated, alsoMatched };
   } else {
-    result.note = `no matching nodes across ${wg.loaded.length} workspace repo(s) — try different words, or \`${cmd("graft build")}\` at a child`;
+    result.note = `no matching nodes across ${wg.loaded.length} workspace ${wg.unit}(s) — try different words, or \`${cmd("graft build")}\` at a child`;
   }
   if (note) result.note = result.note ? `${result.note}\n${note}` : note;
   return result;
@@ -575,11 +676,13 @@ export function federateGrep(
   let savedFiles = 0;
   let savedChars = 0;
 
-  for (const { child, graph } of wg.loaded) {
-    const r = grepGraph(graph, join(root, child), pattern, {
+  for (const c of wg.loaded) {
+    const { child } = c;
+    const r = withChildGraph(wg, c, (graph) => grepGraph(graph, join(root, child), pattern, {
       ignoreCase: opts.ignoreCase,
       fixed: opts.fixed,
-    });
+    }));
+    if (!r) continue;
     filesSearched += r.filesSearched;
     totalHits += r.totalHits;
     truncated.files += r.truncated.files;
@@ -615,11 +718,11 @@ export function federateMap(
     ? Math.max(1, Math.floor(opts.maxDirs / wg.loaded.length))
     : undefined;
 
-  const sections = wg.loaded.map(({ child, graph }) => {
-    const map = buildRepoMap(graph, perChild !== undefined ? { maxDirs: perChild } : {});
-    return `## ${child}/\n${formatRepoMap(map).trimEnd()}`;
+  const sections = wg.loaded.flatMap((c) => {
+    const text = withChildGraph(wg, c, (graph) => formatRepoMap(buildRepoMap(graph, perChild !== undefined ? { maxDirs: perChild } : {})));
+    return text === undefined ? [] : [`## ${c.child}/\n${text.trimEnd()}`];
   });
-  const head = `workspace map — ${wg.loaded.length} repo(s)`;
+  const head = `workspace map — ${wg.loaded.length} ${wg.unit}(s)`;
   const parts = [head, "", sections.join("\n\n")];
   const cov = coverageNote(wg);
   if (cov) parts.push("", cov);
@@ -633,10 +736,15 @@ export async function federateCheck(
   override?: string,
 ): Promise<{ text: string; ok: boolean }> {
   const wg = loadWorkspaceGraphs(root, override);
-  const lines = [`workspace check — ${wg.loaded.length + wg.missing.length} repo(s)`, ""];
+  const lines = [`workspace check — ${wg.loaded.length + wg.missing.length} ${wg.unit}(s)`, ""];
   let ok = true;
-  for (const { child } of wg.loaded) {
-    const g = await checkGraph(join(root, child));
+  for (const { child, dir } of wg.loaded) {
+    let g: Awaited<ReturnType<typeof checkGraph>>;
+    try {
+      g = await checkGraph(join(root, child));
+    } finally {
+      if (wg.release) invalidateGraphCaches(dir);
+    }
     if (g.ok) {
       lines.push(`${child}/: OK`);
     } else {
@@ -655,6 +763,28 @@ export async function federateCheck(
   return { text: lines.join("\n") + "\n", ok };
 }
 
+/** `skeleton` from the workspace root: a path under a child is looked up in that
+ * child's map; a bare name in every child, and must be unique across them. The
+ * returned `file` is root-relative. */
+export function federateSkeleton(root: string, override: string | undefined, file: string): SkeletonResult {
+  const wg = loadWorkspaceGraphs(root, override);
+  const children = wg.loaded.map((l) => l.child);
+  const qualify = (child: string, r: SkeletonResult): SkeletonResult =>
+    r.entries.length ? { ...r, file: `${child}/${r.file}` } : r;
+  const look = (c: LoadedChild, path: string): SkeletonResult => withChild(wg, c, () => skeleton(join(root, c.child), path));
+  const hit = childFor(children, file);
+  if (hit && hit.rest) return qualify(hit.child, look(wg.loaded.find((l) => l.child === hit.child)!, hit.rest));
+  const found = wg.loaded
+    .map((c) => ({ child: c.child, r: look(c, file) }))
+    .filter(({ r }) => r.entries.length > 0);
+  if (found.length === 1) return qualify(found[0]!.child, found[0]!.r);
+  if (found.length > 1) {
+    return { file, entries: [], note: `ambiguous — matches: ${found.map(({ child, r }) => `${child}/${r.file}`).sort().join(", ")}` };
+  }
+  const cov = coverageNote(wg);
+  return { file, entries: [], note: `no definitions indexed for this file in any of the ${wg.loaded.length} workspace ${wg.unit}(s)${cov ? `\n${cov}` : ""}` };
+}
+
 /** Resolve a symbol across every child, grouped per child. Reuses the shared
  * traverse-cli formatters so each block reads exactly like `graft callers`. */
 export function federateCallers(
@@ -668,26 +798,46 @@ export function federateCallers(
   const depth = opts.depth && opts.depth >= 1 ? Math.floor(opts.depth) : 1;
   const showDepth = depth > 1;
 
+  // `--in` is a path from the workspace root: one under a child narrows to that
+  // child (and to the rest of the path inside it); one above children searches
+  // just those; anything else is passed to every child unchanged, as before.
+  const children = wg.loaded.map((l) => l.child);
+  const inPrefix = opts.in?.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
+  const inHit = inPrefix ? childFor(children, inPrefix) : null;
+  const inBelow = inPrefix && !inHit ? children.filter((c) => c.startsWith(`${inPrefix}/`)) : [];
+  const scopeFor = (child: string): { skip: boolean; in?: string } => {
+    if (!inPrefix) return { skip: false };
+    if (inHit) return inHit.child === child ? { skip: false, in: inHit.rest || undefined } : { skip: true };
+    if (inBelow.length > 0) return { skip: !inBelow.includes(child) };
+    return { skip: false, in: opts.in };
+  };
+
   const blocks: string[] = [];
   let found = false;
-  for (const { child, graph } of wg.loaded) {
-    const matches = resolveSymbol(graph, symbol, opts.in ? { in: opts.in } : {});
-    if (matches.length === 0) continue;
+  for (const c of wg.loaded) {
+    const { child } = c;
+    const scope = scopeFor(child);
+    if (scope.skip) continue;
+    const block = withChildGraph(wg, c, (graph) => {
+      const matches = resolveSymbol(graph, symbol, scope.in ? { in: scope.in } : {});
+      if (matches.length === 0) return undefined;
+      const results = matches.map((m) => ({ symbol: m, hits: edgeWalk(graph, m, direction, depth) }));
+      const lines = [`## ${child}/`];
+      for (const { symbol: sym, hits } of results) {
+        lines.push(headerOf(sym));
+        if (hits.length === 0) lines.push(looseNoteFor(direction, sym.name, matches.length));
+        else for (const h of hits) lines.push(hitLine(direction, h, showDepth));
+      }
+      return withSavings(lines.join("\n"), callersSavings(graph, results));
+    });
+    if (block === undefined) continue;
     found = true;
-    const results = matches.map((m) => ({ symbol: m, hits: edgeWalk(graph, m, direction, depth) }));
-    const lines = [`## ${child}/`];
-    for (const { symbol: sym, hits } of results) {
-      lines.push(headerOf(sym));
-      if (hits.length === 0) lines.push(looseNoteFor(direction, sym.name, matches.length));
-      else for (const h of hits) lines.push(hitLine(direction, h, showDepth));
-    }
-    const body = lines.join("\n");
-    blocks.push(withSavings(body, callersSavings(graph, results)));
+    blocks.push(block);
   }
 
   const cov = coverageNote(wg);
   if (!found) {
-    const base = `no symbol "${symbol}" in any of the ${wg.loaded.length} workspace repo(s) — check spelling or run ${cmd("graft build")}`;
+    const base = `no symbol "${symbol}" in any of the ${wg.loaded.length} workspace ${wg.unit}(s) — check spelling or run ${cmd("graft build")}`;
     return { text: cov ? `${base}\n${cov}` : base, found: false };
   }
   let text = blocks.join("\n\n");

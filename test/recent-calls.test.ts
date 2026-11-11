@@ -10,8 +10,10 @@ import { join, dirname } from 'node:path';
 import {
   TURN_GAP_MS,
   calledRecently,
+  callsBy,
   formatLastCalls,
   lastTurnCalls,
+  lastTurnCallsBy,
   readRecentCalls,
   recentCallsPath,
   recordRecentCall,
@@ -155,6 +157,84 @@ test('nudge: a call on a second model in the turn asks for one figure per model'
   }
   assert.doesNotMatch(single, /priced for/);
   assert.match(single, /\(~\$X for Gemini 3\.8 Flash\) this turn/);
+  resetClaimedSavings();
+  setPricing(null);
+});
+
+// One model, two spellings in one turn: Kilo's session row says
+// `claude-opus-5-5`, the agent's `model` argument says
+// `aumovio-databricks/claude-opus-5-5`. Compared as strings, that was a
+// "planning phase on another model" and a per-model tally naming it twice.
+
+test('two spellings of one model are one model in the turn', () => {
+  const dir = repo();
+  const t0 = new Date('2026-10-23T10:00:00Z');
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.01, model: 'claude-opus-5-5' }, t0);
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.01, model: 'aumovio-databricks/claude-opus-5-5' }, new Date(t0.getTime() + 1000));
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.01, model: 'Claude-Opus-5.5' }, new Date(t0.getTime() + 2000));
+  assert.deepEqual(turnModels(dir, new Date(t0.getTime() + 60_000)), ['claude-opus-5-5']);
+
+  const t = summedTally([
+    call('2026-10-23T10:00:00Z', 1000, { usd: 0.25, model: 'claude-opus-5-5' }),
+    call('2026-10-23T10:01:00Z', 2000, { usd: 0.5, model: 'aumovio-databricks/claude-opus-5-5' }),
+  ]);
+  assert.equal(t, '\u{1F331} graft saved ~3,000 tokens (~$0.75 for claude-opus-5-5) this turn');
+
+  const mixed = summedTally([
+    call('2026-10-23T10:00:00Z', 1000, { usd: 0.25, model: 'claude-opus-5-5' }),
+    call('2026-10-23T10:01:00Z', 2000, { usd: 0.1, model: 'Gemini 3.8 Flash' }),
+    call('2026-10-23T10:02:00Z', 500, { usd: 0.15, model: 'vertex_ai/claude-opus-5.5' }),
+  ]);
+  assert.equal(
+    mixed,
+    '\u{1F331} graft saved ~3,500 tokens (~$0.50: ~$0.40 for claude-opus-5-5 + ~$0.10 for Gemini 3.8 Flash) this turn',
+  );
+});
+
+// Seen live: a Kilo session (Claude Opus 5.5) and, five minutes later, GitHub
+// Copilot on Auto (gpt-6-luna) in the same repo. Copilot's footers said "the
+// calls just before this one were priced for Claude Opus 5.5" and Copilot wrote
+// its tally "for Claude Opus 5.5". Another agent's calls are its own turn.
+
+test("another agent's calls in the same repo are not this turn", () => {
+  const dir = repo();
+  const t0 = new Date('2026-11-11T09:39:00Z');
+  recordRecentCall(dir, { command: 'graft_find_code', tokens: 5000, usd: 0.02, model: 'Claude Opus 5.5', caller: 'Kilo' }, t0);
+  recordRecentCall(dir, { command: 'map', tokens: 2_819_034, usd: 0.2819, model: 'gpt-6-luna', caller: 'GitHub Copilot' }, new Date(t0.getTime() + 5 * 60_000));
+  const now = new Date(t0.getTime() + 6 * 60_000);
+
+  assert.deepEqual(turnModels(dir, now, 'GitHub Copilot'), ['gpt-6-luna'], 'Copilot sees only its own model');
+  assert.deepEqual(turnModels(dir, now, 'Kilo'), ['Claude Opus 5.5'], 'and Kilo only its own');
+  assert.deepEqual(turnModels(dir, now), ['Claude Opus 5.5', 'gpt-6-luna'], 'no caller: everyone, as before');
+  assert.equal(calledRecently(dir, now, 'Claude Code'), false, 'a third agent has not called yet: the long nudge');
+  assert.equal(calledRecently(dir, now, 'Kilo'), true);
+
+  const all = readRecentCalls(dir);
+  assert.deepEqual(callsBy(all, 'Kilo').map((c) => c.command), ['graft_find_code']);
+  assert.deepEqual(callsBy(all, null), [], 'an unidentified caller matches only calls that name none');
+  const out = formatLastCalls(all, now, 'GitHub Copilot');
+  assert.ok(out.trimEnd().endsWith('\u{1F331} graft saved ~2,819,034 tokens (~$0.28 for gpt-6-luna) this turn'), out);
+  assert.doesNotMatch(out, /Claude Opus 5\.5/);
+  // A person running `savings --last` by hand from a plain terminal made no calls: everyone's turn
+  assert.equal(lastTurnCallsBy(all, 'Windows Terminal').length, 2);
+});
+
+test('a same-agent turn on two models still splits per model', () => {
+  const dir = repo();
+  const t0 = new Date('2026-11-11T09:00:00Z');
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.01, model: 'Claude Opus 5.5', caller: 'Kilo' }, t0);
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.001, model: 'gpt-6-luna', caller: 'GitHub Copilot' }, new Date(t0.getTime() + 1000));
+  recordRecentCall(dir, { command: 'ask', tokens: 100, usd: 0.002, model: 'Gemini 3.8 Flash', caller: 'Kilo' }, new Date(t0.getTime() + 2000));
+  assert.deepEqual(turnModels(dir, new Date(t0.getTime() + 60_000), 'Kilo'), ['Claude Opus 5.5', 'Gemini 3.8 Flash']);
+});
+
+test('nudge: the same model under a routed spelling is not a second model', () => {
+  setPricing(pricingFor(certain('aumovio-databricks/claude-opus-5-5')));
+  setTurnModels(['claude-opus-5-5']);
+  const f = footer();
+  setTurnModels([]);
+  assert.doesNotMatch(f, /priced for/);
+  assert.match(f, /\(~\$X for aumovio-databricks\/claude-opus-5-5\) this turn/);
   resetClaimedSavings();
   setPricing(null);
 });

@@ -58,11 +58,14 @@ import { committedAtBase, learningsAtBase, teammateEdits, withBaseLearnings } fr
 import { CACHE_DIR, contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
 import { deepDueFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
-import { isWorkspaceBuildRoot, readWorkspace } from "./graph/workspace.js";
+import { federateSkeleton, isPartsWorkspace, isWorkspaceBuildRoot, readWorkspace, removeWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
-import { unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
+import { listSourceFiles, unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
 import { diagnoseEmptyBuild, formatEmptyBuild } from "./graph/empty-build.js";
+import { allPartsPlan, formatTooLarge, GRAPH_TOO_LARGE_EXIT, GraphTooLargeError, mb, type TooLargeReport } from "./graph/size-guard.js";
+import { buildAllParts, type PartsBuildResult } from "./graph/parts-build.js";
+import { BIG_REPO_FILES, HEAP_RAISED_ENV, heapArgs, relaunchWithBigHeap } from "./util/heap.js";
 import { normalizeExcludeEntry } from "./ingest/fs.js";
 import {
   CONFIG_APPLY_NOTE,
@@ -177,7 +180,8 @@ import { formatOverlap, maybeRefreshBranches, overlapsWith, pushedWhen, readBran
 import { ensureRepoTrail, LEARNINGS_DIR } from "./notes/repo-trail.js";
 import type { AskResult } from "./ask/ask.js";
 import { claimedSummary, setClaimListener, setCompactNudge, setDeepDue, setInitDue, setModelTable, setPricing, setRepoRoot, setTurnModels, stderrSavingsCopy, tallyWarnings } from "./context/savings.js";
-import { calledRecently, formatLastCalls, lastTurnCalls, readRecentCalls, recordRecentCall, summedTally, turnModels } from "./context/recent-calls.js";
+import { calledRecently, formatLastCalls, lastTurnCallsBy, readRecentCalls, recordRecentCall, summedTally, turnModels } from "./context/recent-calls.js";
+import { callerKey } from "./context/caller.js";
 import { initDueReason } from "./hosts/drift.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readStamp, readUpdateCache, refreshUpdateCache, wiredHostIds, wiringOpts, writeStamp } from "./upkeep.js";
 import { shouldMoveToTrail } from "./upkeep-run.js";
@@ -280,9 +284,12 @@ function noteQuery(dir: string): string {
   // get one exact figure instead, which is the better answer anyway.
   setModelTable(null);
   // A call a few minutes after another one in this repo gets the short savings
-  // nudge: the agent has just read the long one (see `savingsTurnNudge`).
-  setCompactNudge(calledRecently(dir));
-  setTurnModels(turnModels(dir));
+  // nudge: the agent has just read the long one (see `savingsTurnNudge`). Only
+  // this agent's own calls count: another agent in the same repo (Kilo, a
+  // minute before Copilot) is on a turn of its own.
+  const caller = callerKey("cli");
+  setCompactNudge(calledRecently(dir, new Date(), caller));
+  setTurnModels(turnModels(dir, new Date(), caller));
   setClaimListener((tokens) => fileClaim(dir, tokens));
   return dir;
 }
@@ -309,7 +316,7 @@ function fileClaim(repo: string, tokens: number): void {
   if (runningCommand === "mcp") return;
   recordSavedTokens(repo, currentModel(repo, liveClaudeSession(repo)?.model), tokens);
   const s = claimedSummary(tokens);
-  recordRecentCall(repo, { command: queryNote.command ?? runningCommand, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
+  recordRecentCall(repo, { command: queryNote.command ?? runningCommand, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined, caller: callerKey("cli") ?? undefined });
   if (!process.stdout.isTTY && process.env.CLAUDECODE === undefined && process.env.GRAFT_STDERR_SAVINGS !== "0") {
     const copy = stderrSavingsCopy(tokens);
     if (copy) console.error(copy);
@@ -798,6 +805,11 @@ grouped(program.command("build"), GROUP.setup)
     (val: string, prev: string[]) => [...prev, val],
     [] as string[],
   )
+  .option(
+    "--all-parts",
+    "for a repository too big for one map: build each of its parts into its own map, one after another, " +
+      "with an index here so queries from here search them all (later builds here rebuild every part)",
+  )
   .option("--no-gitignore", "skip writing graft/ into .gitignore (same as GRAFT_NO_GITIGNORE=1)")
   .option("--no-ignore", "skip writing .ignore for ripgrep re-admit (same as GRAFT_NO_IGNORE=1)")
   .option(
@@ -821,6 +833,7 @@ grouped(program.command("build"), GROUP.setup)
       includeDir?: string[];
       excludeDir?: string[];
       onlyDir?: string[];
+      allParts?: boolean;
       followSubmodules?: boolean;
       followNestedRepos?: boolean;
       gitignore?: boolean;
@@ -906,6 +919,21 @@ grouped(program.command("build"), GROUP.setup)
         process.exit(1);
       }
       onlyDirs = normalized;
+    }
+    // A large repo is built in a Node with a bigger heap (util/heap.ts): this same
+    // command, run again as a child, before anything is asked or written.
+    if (!process.env[HEAP_RAISED_ENV] && heapArgs().length > 0) {
+      const target = resolve(dir);
+      let count = 0;
+      try {
+        count = listSourceFiles(target, contextDirFor(target, program.opts<GlobalOpts>().dir), undefined, onlyDirs ? new Set(onlyDirs) : undefined).length;
+      } catch {
+        /* unreadable folder: the build itself reports it */
+      }
+      if (count > BIG_REPO_FILES) {
+        const code = relaunchWithBigHeap();
+        if (code !== null) process.exit(code);
+      }
     }
     const followSubmodulesWasExplicit = command.getOptionValueSource("followSubmodules") === "cli";
     if (followSubmodulesWasExplicit && typeof opts.followSubmodules === "boolean") {
@@ -1029,9 +1057,18 @@ grouped(program.command("build"), GROUP.setup)
       console.error(`· VS Code workspace ${basename(codeWs.file)}: building ${roots.length} folder(s): ${roots.map(label).join(", ")}`);
     }
 
-    const buildOne = async (target: string, override: string | undefined): Promise<void> => {
+    // `part`: one part of a repository built as one map per part (graph/parts-build.ts).
+    // Such a build throws GraphTooLargeError on, for the parts build to split it further.
+    const buildOne = async (target: string, override: string | undefined, part = false): Promise<void> => {
+      // A repository built as one map per part: a build here rebuilds every part, unless
+      // it asks for something else (one map of some folders, or the parts planned afresh).
+      const partsWs = part ? null : readWorkspace(target, override);
+      if (partsWs && isPartsWorkspace(partsWs) && !onlyDirs && !opts.allParts) {
+        await buildParts(target, override, partsWs.children, partsWs.children);
+        return;
+      }
       // Workspace parent: build each child into its OWN graft/ + a workspace index.
-      if (isWorkspaceBuildRoot(target, override)) {
+      if (!part && isWorkspaceBuildRoot(target, override)) {
         await runWorkspaceBuild(target, {
           deep: !!deep,
           force: !!deep && !!opts.force,
@@ -1055,6 +1092,31 @@ grouped(program.command("build"), GROUP.setup)
       // --deep: concept nodes first, then the wiring graph links cards up to them.
       let conceptErrors: string[] = [];
       let conceptFatal: string | undefined;
+      // A large repo is parsed before the LLM is asked anything: one too big for one map
+      // stops here, not after a concept pass it paid for. The parse is cached, so the
+      // wiring pass below replays it.
+      if (deep && listSourceFiles(target, contextDirFor(target, override), undefined, onlyDirs ? new Set(onlyDirs) : undefined).length > BIG_REPO_FILES) {
+        const checkProgress = startProgressLine();
+        const checked = await engine
+          .graph(target, {
+            reuse: opts.reuse,
+            onlyDirs,
+            onProgress: ({ index, total, file }) =>
+              checkProgress.update(`checking the size: parsing ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`),
+          })
+          .then(
+            () => null,
+            (err: unknown) => {
+              if (err instanceof GraphTooLargeError) return err;
+              throw err;
+            },
+          )
+          .finally(() => checkProgress.end());
+        if (checked) {
+          await tooBig(checked, target, override, part);
+          return;
+        }
+      }
       if (deep) {
         const conceptProgress = startProgressLine();
         const c = await engine.init(target, {
@@ -1094,6 +1156,7 @@ grouped(program.command("build"), GROUP.setup)
 
       // Wiring graph — always; LLM meaning only with --deep.
       const graphProgress = startProgressLine();
+      let tooLarge: GraphTooLargeError | undefined;
       const g = await engine.graph(target, {
         llm: deep,
         force: deep ? opts.force : undefined,
@@ -1107,6 +1170,11 @@ grouped(program.command("build"), GROUP.setup)
           ),
       }).catch(async (err: unknown) => {
         graphProgress.end();
+        // Too big for one map: not a failure to report, a list of parts to build instead.
+        if (err instanceof GraphTooLargeError) {
+          tooLarge = err;
+          return null;
+        }
         track("build_failed", { stage: "graph", code: errorCode(err) }, { repo: target });
         if (deep) {
           await printLlmFailureHints([err instanceof Error ? err.message : String(err)], cliConfig());
@@ -1115,6 +1183,10 @@ grouped(program.command("build"), GROUP.setup)
         throw err;
       });
       graphProgress.end();
+      if (!g) {
+        await tooBig(tooLarge!, target, override, part);
+        return;
+      }
       const wiringLine = `wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`;
       // No files at all is not a success: no ✓, and the reason follows the footer.
       if (g.files === 0) console.error(`⚠ ${wiringLine}`);
@@ -1127,6 +1199,12 @@ grouped(program.command("build"), GROUP.setup)
         console.log(`  meaning: ${m.computed} computed, ${m.cached} cached, ${m.stale} stale, ${m.pending} pending`);
       }
       console.log(`  → ${g.contextDir}`);
+      if (!part && isPartsWorkspace(readWorkspace(target, override))) {
+        // The index would still win over this map in every query.
+        removeWorkspace(target, override);
+        console.log("  this map replaces the map per part built here before (each part's own map stays in its folder)");
+      }
+      if (!part && opts.allParts) console.log("  --all-parts: the repository fits one map, so it got one");
       // The activation event. Everything here is a bucket or a fixed label: repo
       // scale rather than a file count, a language set rather than file names.
       track(
@@ -1148,7 +1226,10 @@ grouped(program.command("build"), GROUP.setup)
       if (fallbackNotice) console.error(fallbackNotice);
 
       const rel = relative(process.cwd(), g.contextDir) || "graft";
-      if (isOutside(target, g.contextDir)) {
+      // A part's map: where maps are kept is said once, after all the parts.
+      if (part) {
+        if (!isOutside(target, g.contextDir)) console.log(`  ${rel}/ is a local cache.`);
+      } else if (isOutside(target, g.contextDir)) {
         // The profile store (or a --dir/GRAFT_DIR elsewhere): nothing in the repo to ignore.
         console.log(`  the map is kept outside the repo, so nothing in the repo changed; teammates run \`${cmd("graft build")}\` to get their own.`);
       } else if (process.env.GRAFT_NO_GITIGNORE) {
@@ -1200,6 +1281,124 @@ grouped(program.command("build"), GROUP.setup)
           if (!opts.allowPartial) process.exitCode = 1;
         }
       }
+    };
+
+    /** Ask which of the listed parts to build (numbers), until the picks fit one map;
+     * "all" (or 0, when offered) for one map per part. */
+    const pickParts = async (report: TooLargeReport, choices: string[], all: boolean): Promise<string[] | "all" | null> => {
+      const prompter = terminalPrompter();
+      const question = all
+        ? "  Build which part(s) now? 0 or all for every part (one map each), or numbers from the list, separated by spaces or commas (Enter: none): "
+        : "  Build which part(s) now? Numbers from the list, separated by spaces or commas (Enter: none): ";
+      for (;;) {
+        let answer: string;
+        try {
+          answer = (await prompter.ask(question)).trim();
+        } catch {
+          return null;
+        }
+        if (answer === "") return null;
+        const words = answer.split(/[\s,]+/).filter(Boolean);
+        if (all && words.some((w) => w.toLowerCase() === "all" || w === "0")) {
+          if (words.length === 1) return "all";
+          console.error("  ⚠ all builds every part: answer 0 or all alone, or numbers without it");
+          continue;
+        }
+        const nums = words.map(Number);
+        const bad = nums.filter((k) => !Number.isInteger(k) || k < 1 || k > choices.length);
+        if (bad.length > 0) {
+          console.error(`  ⚠ not a number from the list: ${answer}`);
+          continue;
+        }
+        const paths = [...new Set(nums.map((k) => choices[k - 1]!))];
+        // A folder inside another one picked adds nothing to it.
+        const kept = paths.filter((p) => !paths.some((q) => q !== p && p.startsWith(`${q}/`)));
+        const chars = kept.reduce((s, p) => s + (report.parts.find((x) => x.path === p)?.chars ?? 0), 0);
+        if (chars > report.budget) {
+          console.error(`  ⚠ together their map would be about ${mb(chars)}, more than the ${mb(report.budget)} one map holds: pick fewer or smaller parts`);
+          continue;
+        }
+        return kept;
+      }
+    };
+
+    /** A build stopped as too big: list the parts, and in a terminal offer to build some. */
+    const buildPartInstead = async (err: GraphTooLargeError, target: string, override: string | undefined): Promise<void> => {
+      const { lines, choices, all } = formatTooLarge(err.report, cmd(deep ? "graft build --deep" : "graft build"));
+      console.error("");
+      for (const l of lines) console.error(l);
+      process.exitCode = GRAPH_TOO_LARGE_EXIT;
+      if (!isInteractive() || choices.length === 0) return;
+      const picks = await pickParts(err.report, choices, all.length > 0);
+      if (!picks) return;
+      if (picks === "all") {
+        await buildParts(target, override, all);
+        return;
+      }
+      process.exitCode = 0;
+      const before = onlyDirs;
+      onlyDirs = picks;
+      console.error(`\n· building ${picks.map((p) => `--only-dir ${p}`).join(" ")}`);
+      try {
+        await buildOne(target, override);
+      } finally {
+        // The next root of a VS Code workspace is built as asked, not with these picks.
+        onlyDirs = before;
+      }
+    };
+
+    /** A build too big for one map: a part throws on to the parts build splitting it,
+     * `--all-parts` builds every part, anything else lists the parts to pick from. */
+    const tooBig = async (err: GraphTooLargeError, target: string, override: string | undefined, part: boolean): Promise<void> => {
+      if (part) throw err;
+      if (opts.allParts) {
+        const { parts } = allPartsPlan(err.report);
+        if (parts.length > 0) {
+          console.error(`\n· too big for one map (about ${mb(err.report.estimatedChars)}, one map holds at most ${mb(err.report.budget)}): building it as one map per part`);
+          await buildParts(target, override, parts);
+          return;
+        }
+      }
+      await buildPartInstead(err, target, override);
+    };
+
+    /** Build `parts` of `target` one after another, each into its own map, and index
+     * them at `target`'s map (graph/parts-build.ts). `keep`: parts already indexed. */
+    const buildParts = async (target: string, override: string | undefined, parts: string[], keep: string[] = []): Promise<void> => {
+      const what = target === buildRoot ? basename(target) : label(target);
+      console.error(`\n· building ${parts.length} part(s) of ${what}, each into its own map, one after another`);
+      // Each part is built whole: the --only-dir of this command named folders of `target`.
+      const before = onlyDirs;
+      onlyDirs = undefined;
+      let r: PartsBuildResult;
+      try {
+        r = await buildAllParts(
+          target,
+          parts,
+          {
+            buildPart: async (dir, name) => {
+              console.error(`\n— ${name}/`);
+              await buildOne(dir, undefined, true);
+            },
+            log: (l) => console.error(l),
+          },
+          { override, keep },
+        );
+      } finally {
+        onlyDirs = before;
+      }
+      console.error("");
+      if (r.index) {
+        console.log(`✓ one map per part: ${r.listed.length} part(s) indexed → ${r.index}`);
+        console.log(`  queries from ${what} search them all; \`${cmd("graft build")}\` here rebuilds every part`);
+        if (isOutside(target, r.index)) console.log("  the maps are kept outside the repo, so nothing in the repo changed");
+      } else {
+        console.error("✗ no part was built, so the map here was left as it was");
+      }
+      if (r.failed.length > 0) console.error(`  ✗ failed: ${r.failed.map((f) => f.part).join(", ")} (see above): the next \`${cmd("graft build")}\` here tries them again`);
+      if (r.tooBig.length > 0) console.error(`  ✗ too big for one map even alone, so left out: ${r.tooBig.join(", ")}; leave folders out with ${cmd("graft config exclude-dirs add <path>")}`);
+      const code = r.failed.length > 0 || !r.index ? 1 : r.tooBig.length > 0 ? GRAPH_TOO_LARGE_EXIT : 0;
+      if (code !== 0 || process.exitCode === GRAPH_TOO_LARGE_EXIT) process.exitCode = code;
     };
 
     for (const target of roots) {
@@ -1288,7 +1487,9 @@ grouped(program.command("skeleton"), GROUP.find)
     await refreshBefore(dir, opts);
     const { skeleton, formatSkeleton } = await import("./ask/ask.js");
     const globalOpts = program.opts<{ dir?: string }>();
-    const r = skeleton(dir, file, { contextDir: globalOpts.dir });
+    const r = readWorkspace(dir, globalOpts.dir)
+      ? federateSkeleton(dir, globalOpts.dir, file)
+      : skeleton(dir, file, { contextDir: globalOpts.dir });
     if (opts.json) console.log(JSON.stringify(r, null, 2));
     else process.stdout.write(formatSkeleton(r));
   });
@@ -1881,12 +2082,14 @@ program
         process.exit(1);
       }
       const calls = readRecentCalls(queryRoot(period ?? dirName));
+      // This agent's own turn: another agent's calls in the same repo are not it.
+      const caller = callerKey("cli");
       if (opts.json) {
-        const turn = lastTurnCalls(calls);
+        const turn = lastTurnCallsBy(calls, caller);
         console.log(JSON.stringify({ calls: turn, tally: turn.length ? summedTally(turn) : null }, null, 2));
         return;
       }
-      console.log(formatLastCalls(calls));
+      console.log(formatLastCalls(calls, new Date(), caller));
       return;
     }
     if (period !== undefined && !isPeriod(period)) {
@@ -2914,7 +3117,11 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
         } else if (res.built) {
           graphLine = `✓ graph built${where}`;
         } else if (res.failed) {
-          graphLine = `⚠ the graph build failed${where}: run ${cmd("graft build")} to see why`;
+          graphLine = res.tooLarge
+            ? `⚠ no graph built${where}: the repository is too big for one map; build one of the parts listed above with ${cmd("graft build --only-dir <part>")}, or each into its own map with ${cmd("graft build --all-parts")}`
+            : res.timedOut
+            ? `⚠ the graph build ${res.reason}${where}: run ${cmd("graft build")} to finish it`
+            : `⚠ the graph build failed${where}${res.reason ? ` (${res.reason})` : ""}: run ${cmd("graft build")} to see why`;
         } else if (existing) {
           graphLine = `✓ graph ready · ${fmt(existing.meta.nodeCount)} nodes, ${fmt(existing.meta.edgeCount)} edges${where}`;
         } else if (hasGraftIndex(root)) {

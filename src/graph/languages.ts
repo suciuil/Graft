@@ -113,6 +113,14 @@ const DEPTH: Record<Language, DepthSpec> = {
   // Targets, variables and defines; $(call) edges, prerequisite and $(VAR) references,
   // include / $(MAKE) -C imports.
   make: code(true, true, false, false),
+  // Functions, classdef classes, methods and properties; calls (also command syntax and
+  // handles), `import` edges, `classdef < Base` inheritance; `obj.m()` typed through the
+  // method's object argument, `pkg.f()` through the +package folder.
+  matlab: code(true, true, true, true),
+  // Models, subsystems, charts and root ports; dictionary entries, bus elements and
+  // enumeration members; model references as calls, dictionary links as imports, and
+  // what block parameters, signals and chart code use as references.
+  simulink: code(true, true, false, false),
   razor: { level: "file-only", symbols: false, calls: false, imports: false, inherits: false, types: false },
 };
 
@@ -149,6 +157,8 @@ const DISPLAY: Record<string, string> = {
   bash: "Bash",
   perl: "Perl",
   make: "Make",
+  matlab: "MATLAB",
+  simulink: "Simulink",
   rust: "Rust",
   ruby: "Ruby",
   scala: "Scala",

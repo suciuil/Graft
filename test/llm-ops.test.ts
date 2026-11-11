@@ -239,6 +239,45 @@ test("crux: splitting stops at a small batch and reports the cap", async () => {
   assert.ok(err.some((l) => /token budget exhausted/.test(l)));
 });
 
+test("crux: a very long id is shown as a short alias and mapped back to the node id", async () => {
+  // A CSS rule named by a selector list of 250 classes: echoing five of these
+  // verbatim used to spend the whole output budget (truncated, finish_reason=max_tokens).
+  const selector = Array.from({ length: 250 }, (_, i) => `.bfh-flag-${i}`).join(", ");
+  const longId = `Content/bootstrap-formhelpers.css#${selector}`;
+  const m = new OutputCappedModel(10);
+  const s = new ChatCruxSummarizer(m);
+  const out = await s.describeFile({
+    path: "Content/bootstrap-formhelpers.css",
+    source: "a\nb\nc\n",
+    nodes: [
+      { id: longId, kind: "rule", signature: selector, startLine: 1, endLine: 2 },
+      { id: "Content/bootstrap-formhelpers.css#.x", kind: "rule", signature: ".x", startLine: 3, endLine: 3 },
+    ],
+  });
+  const prompt = m.prompts[0]!;
+  assert.ok(!prompt.includes(longId), "the long id is never sent for the model to echo");
+  assert.ok(prompt.length < 2000, "the target row's signature is clipped too");
+  assert.match(prompt, / \| id=t1$/m);
+  assert.match(prompt, / \| id=Content\/bootstrap-formhelpers\.css#\.x$/m);
+  assert.deepEqual(out.map((r) => r.id), [longId, "Content/bootstrap-formhelpers.css#.x"]);
+  assert.equal(s.lastMiss, null);
+});
+
+test("crux: an alias never collides with a short node id", async () => {
+  const longId = `a.css#${"x".repeat(400)}`;
+  const m = new OutputCappedModel(10);
+  const out = await new ChatCruxSummarizer(m).describeFile({
+    path: "a.css",
+    source: "a\nb\n",
+    nodes: [
+      { id: "t1", kind: "rule", signature: null, startLine: 1, endLine: 1 },
+      { id: longId, kind: "rule", signature: null, startLine: 2, endLine: 2 },
+    ],
+  });
+  assert.match(m.prompts[0]!, / \| id=t2$/m);
+  assert.deepEqual(out.map((r) => r.id), ["t1", longId]);
+});
+
 test("crux: a large file shows the lines around each target, not just the file's start", async () => {
   const lines = Array.from({ length: 5000 }, (_, i) => `line ${i + 1} ${"x".repeat(20)}`);
   const m = new OutputCappedModel(10);

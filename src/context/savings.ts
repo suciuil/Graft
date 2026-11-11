@@ -15,7 +15,7 @@
 import type { GraphV1 } from '../graph/types.js';
 import { pathToFileURL } from 'node:url';
 import { buildConfigPath } from '../util/state.js';
-import { NO_MODEL, formatDollars, type InputRate, type Pricing } from './price.js';
+import { NO_MODEL, canonicalModelKey, formatDollars, type InputRate, type Pricing } from './price.js';
 import { callScope, type ModelTable } from './call-scope.js';
 import { brand, cmd, tag } from '../brand.js';
 
@@ -244,12 +244,29 @@ export function setTurnModels(models: string[]): void {
   callScope().turnModels = models.filter((m) => typeof m === 'string' && m.trim() !== '');
 }
 
-/** Models other than this call's that priced earlier calls of the turn, when this call is priced at a list rate. */
+/**
+ * Models other than this call's that priced earlier calls of the turn, when this
+ * call is priced at a list rate.
+ *
+ * Compared by {@link canonicalModelKey}, not by spelling: one model reaches graft
+ * under several names in one turn — Kilo's session row says `claude-opus-5-5`,
+ * the agent's `model` argument says `aumovio-databricks/claude-opus-5-5` — and
+ * comparing the strings split that single model into a "planning phase on
+ * another model", with a per-model tally naming it twice.
+ */
 function otherTurnModels(rate: InputRate | null): string[] {
   if (!rate || rate.measured) return [];
   const name = modelLabel(rate);
   if (!name) return [];
-  return [...new Set(callScope().turnModels)].filter((m) => m !== name);
+  const seen = new Set([canonicalModelKey(name)]);
+  const out: string[] = [];
+  for (const m of callScope().turnModels) {
+    const key = canonicalModelKey(m);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out;
 }
 
 /**

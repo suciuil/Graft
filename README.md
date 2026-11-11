@@ -495,10 +495,32 @@ compiler-grade layer, all `$0` and deterministic (no model, no key):
   resolved through the package, `use`/`require` as imports, `use parent`/`@ISA`
   as inheritance), **Make** (`Makefile`, `makefile`, `GNUmakefile`, `*.mk`,
   `*.mak`: rule targets, variables and `define`s, prerequisites and `$(VAR)` as
-  references, `$(call …)` as calls, `include` and `$(MAKE) -C dir` as imports)
-  — Bash, Perl and Make need the optional `tree-sitter-bash` / `tree-sitter-perl`
-  / `tree-sitter-make` grammars built — and **Vue** single-file components (their
-  `<script>` blocks go through the TypeScript extractor).
+  references, `$(call …)` as calls, `include` and `$(MAKE) -C dir` as imports),
+  **MATLAB** (`.m`: scripts, function files with local and nested functions,
+  `classdef` classes with their methods, properties and enumeration members,
+  `+package` and `@class` folders, `classdef < Base` as inheritance, calls
+  including command syntax and `@f` handles, `obj.m()` / `Cls.m()` / `pkg.f()`
+  resolved through the class or package, `import` as imports; live scripts and
+  functions saved as `.mlx` are unpacked locally and read as MATLAB, their code as
+  written and their text, headings and equations as comments; Objective-C `.m`
+  files are recognised and left as file nodes)
+  — Bash, Perl, Make and MATLAB need the optional `tree-sitter-bash` / `tree-sitter-perl`
+  / `tree-sitter-make` / `tree-sitter-matlab` grammars built —, **Simulink**
+  (models `.slx` and `.mdl`, data dictionaries `.sldd`, no grammar needed: a ZIP
+  package is unpacked locally and its XML parts read; a `.mdl` is read in the
+  classic `Model { … }` format or as a MathWorks text package; a dictionary saved
+  as JSON text is read as is; the model and each subsystem, Stateflow chart and
+  MATLAB Function block as nested modules, root Inports/Outports, dictionary
+  entries as constants, signals, types and enumerations with their bus elements
+  and members; the linked dictionary and referenced models as imports, Model
+  blocks as calls, library links, and the dictionary entries that block
+  parameters, signal names, data types and chart code use as references; the code
+  in a MATLAB Function block is parsed with the MATLAB grammar when it is built,
+  its functions nodes under the block and its calls resolved like any MATLAB
+  call; `graft grep` and `ask --source` show the unpacked XML; models, packages
+  and dictionaries up to 50 MB are indexed, binary `.mdl` files of other tools are
+  skipped) and **Vue** single-file components (their `<script>` blocks go through
+  the TypeScript extractor).
 
 - **Broad**: symbols (functions, classes, methods, types, …) plus name-resolved
   call edges via a generic tree-sitter extractor, one grammar per language:

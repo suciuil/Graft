@@ -2,8 +2,8 @@
  * Builds and packs the optional native tree-sitter grammars that live in sibling
  * repositories, so `npm run build` keeps them in step with graft's own code.
  *
- * Graft's depth tier covers 18 languages (C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl,
- * Make, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
+ * Graft's depth tier covers 19 languages (C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl,
+ * Make, MATLAB, CSS, HTML, Razor, XML, JSON, YAML, Markdown, SCSS, CSV) through native grammars declared as
  * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}`, plus a
  * newer Kotlin grammar (`tree-sitter-kotlin-local`, from `../tree-sitter-kotlin-grammar`)
  * that takes over from the registry one when built. Those
@@ -1126,7 +1126,7 @@ const GRAFT_GRAMMARS_FALLBACK = {
   "@tree-sitter-grammars/tree-sitter-markdown": [undefined], "tree-sitter-scss": [undefined], "tree-sitter-csv": ["csv"],
   "tree-sitter-cmake": [undefined], "tree-sitter-kotlin-local": [undefined],
   "tree-sitter-bash": [undefined], "@ganezdragon/tree-sitter-perl": [undefined],
-  "tree-sitter-make": [undefined],
+  "tree-sitter-make": [undefined], "@acristoffers/tree-sitter-matlab": [undefined],
 };
 /** The OPTIONAL_GRAMMAR_PKG table's body, from whichever source file defines it today
  * (src/graph/native.ts; src/graph/extract.ts in older trees), or null. */

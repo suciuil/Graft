@@ -17,7 +17,7 @@
  */
 import { join } from 'node:path';
 import { cacheDir, readJson, writeJsonAtomic } from '../util/state.js';
-import { formatDollars } from './price.js';
+import { canonicalModelKey, formatDollars } from './price.js';
 import { formatCount } from './savings.js';
 import { brand } from '../brand.js';
 
@@ -37,6 +37,23 @@ export interface RecentCall {
   measured?: boolean;
   /** The warning lines the example tally carried (build --deep, init, prices update). */
   warnings?: string;
+  /**
+   * The agent that made the call (`Kilo`, `GitHub Copilot`, `Claude Code`, ...;
+   * see `callerKey` in context/caller.ts), or absent when graft could not
+   * tell. Two agents working in one repo a few minutes apart are not one turn:
+   * without this, Copilot's footers named the model of a Kilo session's earlier
+   * calls as part of Copilot's own turn, and Copilot priced its tally for it.
+   */
+  caller?: string;
+}
+
+/**
+ * The calls `caller` made. `undefined` means "anyone" (no filter); `null`, a
+ * caller graft could not identify, matches the calls that name none.
+ */
+export function callsBy(calls: RecentCall[], caller?: string | null): RecentCall[] {
+  if (caller === undefined) return calls;
+  return calls.filter((c) => (c.caller ?? null) === caller);
 }
 
 /**
@@ -85,9 +102,12 @@ export function recordRecentCall(dir: string, call: Omit<RecentCall, 'at'>, when
   }
 }
 
-/** Whether another graft call in this repo claimed a saving within {@link TURN_GAP_MS}. */
-export function calledRecently(dir: string, now: Date = new Date()): boolean {
-  const last = readRecentCalls(dir).at(-1);
+/**
+ * Whether another graft call in this repo claimed a saving within
+ * {@link TURN_GAP_MS}, by `caller` when one is given (see {@link callsBy}).
+ */
+export function calledRecently(dir: string, now: Date = new Date(), caller?: string | null): boolean {
+  const last = callsBy(readRecentCalls(dir), caller).at(-1);
   if (!last) return false;
   const age = now.getTime() - Date.parse(last.at);
   return age >= 0 && age < TURN_GAP_MS;
@@ -96,14 +116,35 @@ export function calledRecently(dir: string, now: Date = new Date()): boolean {
 /**
  * The models that priced the calls of the turn now running, oldest first, or []
  * when the last call is older than {@link TURN_GAP_MS}. Measured rates carry no
- * model in the tally, so they are left out.
+ * model in the tally, so they are left out. Two spellings of one model
+ * (`claude-opus-5-5`, `aumovio-databricks/claude-opus-5-5`) are one entry, under
+ * the first spelling seen. With `caller`, only that agent's calls make up the
+ * turn: another agent's calls in the same repo belong to its own turn.
  */
-export function turnModels(dir: string, now: Date = new Date()): string[] {
-  if (!calledRecently(dir, now)) return [];
-  const models = lastTurnCalls(readRecentCalls(dir))
+export function turnModels(dir: string, now: Date = new Date(), caller?: string | null): string[] {
+  if (!calledRecently(dir, now, caller)) return [];
+  const models = lastTurnCalls(callsBy(readRecentCalls(dir), caller))
     .filter((c) => c.usd !== null && !c.measured && typeof c.model === 'string' && c.model !== '')
     .map((c) => c.model as string);
-  return [...new Set(models)];
+  return [...byModel(models, (m) => m).keys()];
+}
+
+/**
+ * Group `items` by the model each names, two spellings of one model together
+ * ({@link canonicalModelKey}), keyed by the first spelling seen, in first-seen
+ * order.
+ */
+function byModel<T>(items: T[], modelOf: (item: T) => string): Map<string, T[]> {
+  const spelling = new Map<string, string>(); // canonical key → first spelling
+  const out = new Map<string, T[]>();
+  for (const item of items) {
+    const m = modelOf(item);
+    const key = canonicalModelKey(m);
+    const name = spelling.get(key) ?? m;
+    spelling.set(key, name);
+    out.set(name, [...(out.get(name) ?? []), item]);
+  }
+  return out;
 }
 
 /**
@@ -130,18 +171,18 @@ export function summedTally(calls: RecentCall[]): string {
   const b = brand();
   const tokens = calls.reduce((n, c) => n + c.tokens, 0);
   const priced = calls.length > 0 && calls.every((c) => c.usd !== null);
-  const models = new Set(calls.map((c) => c.model ?? ''));
+  const models = byModel(calls, (c) => c.model ?? '');
   const measured = calls.every((c) => c.measured === true);
   let line = `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens by this turn`;
   if (priced && models.size === 1) {
     const usd = formatDollars(calls.reduce((n, c) => n + (c.usd ?? 0), 0));
-    const model = [...models][0];
+    const model = [...models.keys()][0];
     line = model && !measured
       ? `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${usd} for ${model}) this turn`
       : `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${usd}) this turn`;
   } else if (priced && calls.every((c) => !c.measured && c.model)) {
     const per = new Map<string, number>();
-    for (const c of calls) per.set(c.model!, (per.get(c.model!) ?? 0) + (c.usd ?? 0));
+    for (const [m, group] of models) per.set(m, group.reduce((n, c) => n + (c.usd ?? 0), 0));
     const total = formatDollars([...per.values()].reduce((n, v) => n + v, 0));
     const parts = [...per].map(([m, v]) => `~${formatDollars(v)} for ${m}`).join(' + ');
     line = `\u{1F331} ${b} saved ~${formatCount(tokens)} tokens (~${total}: ${parts}) this turn`;
@@ -149,10 +190,20 @@ export function summedTally(calls: RecentCall[]): string {
   return line + (calls.at(-1)?.warnings ?? '');
 }
 
+/**
+ * The calls `graft savings --last` reports: the latest turn of `caller`'s calls,
+ * or of everyone's when `caller` made none (a person running it by hand from a
+ * plain terminal still gets an answer).
+ */
+export function lastTurnCallsBy(all: RecentCall[], caller?: string | null): RecentCall[] {
+  const own = callsBy(all, caller);
+  return lastTurnCalls(own.length > 0 ? own : all);
+}
+
 /** What `graft savings --last` prints: this turn's calls, then the tally. */
-export function formatLastCalls(all: RecentCall[], now: Date = new Date()): string {
+export function formatLastCalls(all: RecentCall[], now: Date = new Date(), caller?: string | null): string {
   const b = brand();
-  const calls = lastTurnCalls(all);
+  const calls = lastTurnCallsBy(all, caller);
   if (calls.length === 0) {
     return (
       `${b} has no recent calls on record in this repo that claimed a saving, so there is no tally to report. ` +

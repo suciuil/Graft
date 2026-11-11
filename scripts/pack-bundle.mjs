@@ -1,12 +1,12 @@
 /**
  * Packs graft plus every optional native grammar into ONE installable tarball.
  *
- * Normally the 19 depth-tier grammars reach graft through
+ * Normally the 20 depth-tier grammars reach graft through
  * `optionalDependencies: {"tree-sitter-cpp": "file:../tree-sitter-cpp", …}` — sibling
  * working copies that exist only on the machine they were cloned onto. Anywhere else
- * npm skips all 19 (they are *optional*, so it does not even error) and graft quietly
- * loses C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl, Make, CSS, HTML, Razor, XML, JSON,
- * YAML, Markdown, SCSS and CSV, and falls back to the older registry Kotlin grammar. The output of
+ * npm skips all 20 (they are *optional*, so it does not even error) and graft quietly
+ * loses C#, Groovy, PL/SQL, C, C++, CMake, Bash, Perl, Make, MATLAB, CSS, HTML, Razor, XML,
+ * JSON, YAML, Markdown, SCSS and CSV, and falls back to the older registry Kotlin grammar. The output of
  * this script has them baked in:
  *
  *     npm i -g ./nanonets-graft-<version>-win32-x64.tgz --ignore-scripts

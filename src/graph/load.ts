@@ -99,6 +99,20 @@ export function loadAskIndexCached(outDir: string): AskIndex | null {
   });
 }
 
+/** wiring.json bytes, summed over several maps, above which a command that walks
+ * them all (a workspace's children, a repository built as one map per part) loads
+ * them one at a time instead of keeping each cached. A parsed graph takes several
+ * times its file size, so a few parts of ~480 MB each overflow the default heap. */
+export const KEEP_GRAPHS_BYTES = 300e6;
+
+/** Whether the maps in `outDirs` are together too big to keep cached while a
+ * command walks them (see {@link KEEP_GRAPHS_BYTES}). Missing maps count 0. */
+export function tooBigToKeep(outDirs: readonly string[], limit = KEEP_GRAPHS_BYTES): boolean {
+  let bytes = 0;
+  for (const d of outDirs) bytes += statOf(wiringPath(d))?.size ?? 0;
+  return bytes > limit;
+}
+
 /**
  * Drop the cached graph + sidecar for `outDir`, forcing the next load to re-read.
  *

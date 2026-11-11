@@ -25,7 +25,7 @@ import { depthReady, missingDepthPackages, warmDepthGrammars } from "./depth-par
 import type { NativeFallback } from "./native.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
-import { readSourceFile } from "../util/source.js";
+import { decodeSource, packageHash, readSourceFile } from "../util/source.js";
 import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
 import {
   emptyExtractCache,
@@ -37,15 +37,22 @@ import { writeFingerprint } from "./fingerprint.js";
 import { seedGraph, type SeedResult } from "./seed.js";
 import { filterByOnlyDirs, listSourceStats } from "./source-files.js";
 import { resolveEdges, type GoModule } from "./resolve.js";
-import { enrichGraph, type EnrichStats } from "./enrich.js";
+import { enrichGraph, type EnrichStats, type SourceLookup } from "./enrich.js";
 import { readGraph, writeGraph, wiringPath } from "./write.js";
 import { writeCards, writeIndex, writeCovers, type CardStats } from "./cards.js";
 import { writeAskIndex } from "../ask/index-file.js";
+import { estimateFileChars, MAX_STRING_CHARS, SizeGuard } from "./size-guard.js";
 import { discoverScopes, scopeOf } from "./scopes.js";
 import type { GraphV1, Kind, NodeV1, Relation, ScopeV1 } from "./types.js";
 import type { CruxSummarizer } from "../ai/crux.js";
 
 export { listSourceFiles } from "./source-files.js";
+
+/** Files parsed between two event-loop turns in {@link buildGraph}'s parse loop. */
+export const PARSE_YIELD_EVERY = 32;
+
+/** One event-loop turn: lets Node run the finalizers that free native parse trees. */
+export const yieldToEventLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
 
 /**
  * Which tier extracts a file. {@link buildGraph} and `checkGraph` both dispatch on
@@ -156,6 +163,10 @@ export interface GraphBuildOptions {
    * set, only files under these prefixes are indexed; the list is recorded in the
    * fingerprint so the freshness probe enumerates the same set. */
   onlyDirs?: string[];
+  /** Most characters the map may hold before the build stops with a
+   * `GraphTooLargeError` (default `GRAPH_CHAR_BUDGET`, under V8's string limit).
+   * For tests; nothing else sets it. */
+  maxGraphChars?: number;
   onProgress?: (info: {
     phase: "parse" | "enrich";
     index: number;
@@ -235,7 +246,11 @@ export async function buildGraph(
 
   const nodes: NodeV1[] = [];
   const rawEdges: RawEdge[] = [];
-  const sources = new Map<string, string>();
+  /** rel → absolute path of every file parsed (or replayed) cleanly. Only the path
+   * is kept, not the text: on a ~77k-file repo the text alone is ~1.7 GB, which with
+   * the nodes outgrew Node's default heap and crashed the build. The meaning pass,
+   * the one reader, rereads a file when it gets to it (`sources` below). */
+  const sourcePaths = new Map<string, string>();
   /** Display labels, not grammars — `.mjs` is parsed as typescript but reported as
    * javascript, or the banner claims a repo's JavaScript went unindexed. */
   const langs = new Set<string>();
@@ -266,7 +281,8 @@ export async function buildGraph(
   const fellBack = new Set<Language>();
   const fellBackLabels = new Set<string>();
 
-  files.forEach((f, i) => {
+  /** Parse (or replay) one file; returns the size it adds to the map, for the size guard. */
+  const parseOne = (f: (typeof files)[number], i: number): number => {
     const rel = f.rel;
     opts.onProgress?.({ phase: "parse", index: i, total: files.length, file: rel });
     const { lang, container, generic, fellBack: standIn } = tierOf(f.abs);
@@ -290,6 +306,23 @@ export async function buildGraph(
     const via = standIn ? generic!.name : inner ? fallbackLangOf(inner)!.name : undefined;
     const cached = priorExtract.files[rel];
 
+    /** Replay an unchanged file's last parse. */
+    const replay = (hit: ExtractEntry, label: string): number => {
+      sourcePaths.set(rel, f.abs);
+      reused++;
+      if (hit.error) {
+        entries[rel] = { ...hit, size: f.size, mtimeMs: f.mtimeMs };
+        errors.push(hit.error); // this file failed to parse last time too
+        return 0;
+      }
+      const chars = hit.chars ?? estimateFileChars(hit.nodes, hit.rawEdges);
+      entries[rel] = { ...hit, size: f.size, mtimeMs: f.mtimeMs, chars };
+      nodes.push(...hit.nodes);
+      rawEdges.push(...hit.rawEdges);
+      langs.add(label);
+      return chars;
+    };
+
     // Every file is read and hashed, every build — only the *parse* is memoized.
     // The tempting optimization is to trust the probe's `(size, mtimeMs)` and skip
     // the read too, but then `graft build` inherits the probe's blind spot: on a
@@ -300,22 +333,33 @@ export async function buildGraph(
     // rebuild itself looks at. Reading is ~0.05ms/file against the ~4.6ms parse
     // this still skips.
     let source: string | null;
+    // A MATLAB/Simulink package is hashed as read, before it is unpacked: unpacking
+    // and rendering one (tens of MB of text) is the parse-sized cost here, and an
+    // unchanged package skips it. Its bytes are still read every build, as above.
+    let rawHash: string | null = null;
     try {
-      source = readSourceFile(f.abs);
+      const bytes = readFileSync(f.abs);
+      rawHash = packageHash(f.abs, bytes);
+      if (rawHash !== null && cached && cached.rawHash === rawHash && cached.via === via && cached.hash) {
+        // Labelled from the path: only a `.h` is labelled by its content.
+        return replay(cached, pathLabel);
+      }
+      source = decodeSource(f.abs, bytes);
     } catch (err) {
       const message = `${rel}: ${err instanceof Error ? err.message : String(err)}`;
       errors.push(message);
       // Record it anyway (with the stat we do have) so the freshness probe's
       // fast path doesn't report this file as new on every single query.
       entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash: "", nodes: [], rawEdges: [], error: message };
-      return;
+      return 0;
     }
     if (source === null) {
       // Unsupported encoding (UTF-16BE) — a skip, never an error: recorded with
       // an empty entry so the freshness probe doesn't treat it as new every run.
       entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash: "", nodes: [], rawEdges: [] };
-      return;
+      return 0;
     }
+    const raw = rawHash !== null ? { rawHash } : {};
 
     // Labelled from the source, not the path: where an extension is shared, the
     // extractor sniffs the content to pick the grammar (a C++ `.h` goes to the C++
@@ -325,19 +369,7 @@ export async function buildGraph(
     const label = languageLabelOfSource(f.abs, source) ?? container?.name ?? generic?.name ?? "unknown";
 
     const hash = contentHash(source);
-    if (cached && hash === cached.hash && cached.via === via) {
-      entries[rel] = { ...cached, size: f.size, mtimeMs: f.mtimeMs };
-      sources.set(rel, source);
-      reused++;
-      if (cached.error) {
-        errors.push(cached.error); // this file failed to parse last time too
-        return;
-      }
-      nodes.push(...cached.nodes);
-      rawEdges.push(...cached.rawEdges);
-      langs.add(label);
-      return;
-    }
+    if (cached && hash === cached.hash && cached.via === via) return replay({ ...cached, ...raw }, label);
 
     parsed++;
     try {
@@ -348,15 +380,34 @@ export async function buildGraph(
           : extractGeneric(rel, source, generic!.name);
       nodes.push(...fileNodes);
       rawEdges.push(...fileEdges);
-      sources.set(rel, source);
+      sourcePaths.set(rel, f.abs);
       langs.add(label);
-      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: fileNodes, rawEdges: fileEdges, ...(via ? { via } : {}) };
+      const chars = estimateFileChars(fileNodes, fileEdges);
+      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: fileNodes, rawEdges: fileEdges, chars, ...(via ? { via } : {}), ...raw };
+      return chars;
     } catch (err) {
       const message = `${rel}: parse failed — ${err instanceof Error ? err.message : String(err)}`;
       errors.push(message);
-      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: [], rawEdges: [], error: message, ...(via ? { via } : {}) };
+      entries[rel] = { size: f.size, mtimeMs: f.mtimeMs, hash, nodes: [], rawEdges: [], error: message, ...(via ? { via } : {}), ...raw };
+      return 0;
     }
-  });
+  };
+
+  // The loop hands the event loop a turn every PARSE_YIELD_EVERY files. A native
+  // tree-sitter tree (C, C++, C#, XML, ...: the grammars with no WASM build) is
+  // freed by a finalizer that Node runs from the event loop, not during the GC that
+  // found it dead, so a loop that never yields frees no tree until it ends: on a
+  // repo of ~77k C files that was ~43 GB of native memory and a silent crash
+  // (0xC0000409) before the parse finished. A turn costs microseconds.
+  //
+  // The size guard counts each file as it goes and throws GraphTooLargeError as soon
+  // as the map could not be written (see size-guard.ts), long before the end of a
+  // parse that would only have failed there.
+  const guard = new SizeGuard(files, opts.maxGraphChars);
+  for (let i = 0; i < files.length; i++) {
+    guard.addChars(i, parseOne(files[i]!, i));
+    if ((i + 1) % PARSE_YIELD_EVERY === 0) await yieldToEventLoop();
+  }
 
   // Persist the memo BEFORE enrichment, because `enrichGraph` mutates these very
   // node objects (summary/crux/summary_state) and the cache must only ever hold
@@ -396,6 +447,23 @@ export async function buildGraph(
   // Read BEFORE the first checkpoint can overwrite wiring.json.
   const prior = readGraph(wiringPath(outDir));
   const priorById = new Map((prior?.nodes ?? []).map((n) => [n.id, n]));
+  // A file's text, reread for the meaning pass. Only the bytes the nodes were
+  // extracted from will do (their spans index into them), so a file edited since
+  // it was parsed reads as gone and its nodes wait for the next build.
+  const sources: SourceLookup = {
+    has: (rel) => sourcePaths.has(rel),
+    get: (rel) => {
+      const abs = sourcePaths.get(rel);
+      if (abs === undefined) return undefined;
+      let text: string | null;
+      try {
+        text = readSourceFile(abs);
+      } catch {
+        return undefined;
+      }
+      return text !== null && contentHash(text) === entries[rel]?.hash ? text : undefined;
+    },
+  };
   const meaning = await enrichGraph(nodes, priorById, sources, {
     summarizer: opts.summarizer,
     concurrency: opts.concurrency,
@@ -418,7 +486,15 @@ export async function buildGraph(
     opts.onProgress?.({ phase: "enrich", index: r.added, total: r.queried, file: `lsp:${r.server ?? "none"}` });
   }
 
-  const graphPath = writeGraph(graph, outDir);
+  let graphPath: string;
+  try {
+    graphPath = writeGraph(graph, outDir);
+  } catch (err) {
+    // The estimate let through a map V8 cannot hold as one string after all:
+    // the same report as a stop in the parse loop, not "Invalid string length".
+    if (err instanceof RangeError) throw guard.tooLarge(false, MAX_STRING_CHARS);
+    throw err;
+  }
   // `ask`'s token/IDF sidecar — moves per-query corpus tokenization to build
   // time (~45% of query time on a 32k-node graph, profiled). Lives in the
   // cache dir; `ask` falls back to live tokenization when it's absent/stale.

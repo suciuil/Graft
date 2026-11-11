@@ -79,6 +79,7 @@
     "web-tree-sitter-depth": "npm:web-tree-sitter@0.22.2"
   },
   "optionalDependencies": {
+    "@acristoffers/tree-sitter-matlab": "file:../tree-sitter-matlab",
     "@ganezdragon/tree-sitter-perl": "file:../tree-sitter-perl",
     "@tree-sitter-grammars/tree-sitter-markdown": "file:../tree-sitter-markdown",
     "@tree-sitter-grammars/tree-sitter-xml": "file:../tree-sitter-xml",

@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { MAX_SIMULINK_PACKAGE_BYTES, SIMULINK_PACKAGE } from "../util/simulink-package.js";
 
 /** Directories that are dependency/build output, never source. */
 export const SKIP_DIRS = new Set([
@@ -26,6 +27,13 @@ export const SKIP_DIRS = new Set([
 
 /** Files above this size are generated/vendored in practice, not hand-written code. */
 export const MAX_FILE_BYTES = 1_000_000;
+
+/** Whether a file of `size` bytes is too big to index. MATLAB and Simulink packages
+ * (`.slx`, `.sldd`, `.mlx`) are compressed archives of hand-built work, and a `.mdl`
+ * model is text that grows with the model, so they get their own, larger limit. */
+export function tooBigToIndex(path: string, size: number): boolean {
+  return size > (SIMULINK_PACKAGE.test(path) || /\.mdl$/i.test(path) ? MAX_SIMULINK_PACKAGE_BYTES : MAX_FILE_BYTES);
+}
 
 /**
  * Whether a directory named `name` should be skipped when walking a repo tree:
@@ -423,7 +431,7 @@ function gitVisibleFiles(
 
     try {
       const stat = lstatSync(abs);
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
+      if (!stat.isFile() || tooBigToIndex(abs, stat.size)) continue;
     } catch {
       // A tracked file deleted from the working tree is still printed by
       // `--cached`; absence means it is not part of the current source set.
@@ -459,7 +467,7 @@ function gitVisibleFilesShallow(root: string, filter: DirFilter): string[] | nul
     const abs = resolve(root, rel);
     try {
       const stat = lstatSync(abs);
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
+      if (!stat.isFile() || tooBigToIndex(abs, stat.size)) continue;
     } catch {
       // A tracked file deleted from the working tree is still printed by
       // `--cached`; absence means it is not part of the current source set.
@@ -502,7 +510,7 @@ function walkFilesystem(dir: string, filter: DirFilter, rel = ""): string[] {
       // skippedPath over every path it lists, and the two must not disagree.
       if (underExcludedPath(childRel, filter.excludes)) continue;
       try {
-        if (statSync(full).size > MAX_FILE_BYTES) continue;
+        if (tooBigToIndex(full, statSync(full).size)) continue;
       } catch {
         continue;
       }

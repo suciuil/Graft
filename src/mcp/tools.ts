@@ -13,6 +13,7 @@ import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
 import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters, setCompactNudge, setTurnModels, claimedSummary, tallyWarnings } from '../context/savings.js';
 import { calledRecently, recordRecentCall, turnModels } from '../context/recent-calls.js';
+import { callerKey } from '../context/caller.js';
 import { initDueReason } from '../hosts/drift.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { liveClaudeSession, sessionPricing } from '../claude/session-metrics.js';
@@ -30,6 +31,7 @@ import {
   federateCheck,
   federateGrep,
   federateMap,
+  federateSkeleton,
   readWorkspace,
 } from '../graph/workspace.js';
 import type { NodeV1 } from '../graph/types.js';
@@ -206,9 +208,9 @@ function renderMatches(
 }
 
 /** When the MCP server is rooted at a workspace parent, the ask/callers/grep/
- * map/check tools federate across the children — identical to the CLI. Returns
- * null for tools that don't federate (skeleton is per-file), so the caller
- * falls through to the normal single-graph path. */
+ * map/check tools federate across the children — identical to the CLI, and the
+ * file API looks the file up in the child that holds it. Returns null for any
+ * other tool, so the caller falls through to the normal single-graph path. */
 async function callWorkspaceTool(
   root: string,
   dirOverride: string | undefined,
@@ -251,6 +253,12 @@ async function callWorkspaceTool(
     case 'graft_check_freshness': {
       const { text } = await federateCheck(root, dirOverride);
       return { text, isError: false };
+    }
+    case 'graft_file_api': {
+      const file = String(args.file ?? '');
+      if (!file) return { text: 'graft_file_api requires a file', isError: true };
+      const r = federateSkeleton(root, dirOverride, file);
+      return { text: formatSkeleton(r), isError: !r.entries.length && !!r.note };
     }
     default:
       return null;
@@ -336,8 +344,11 @@ async function callToolScoped(
     setModelTable(!named && isKiloClient() ? kiloModelRows() : null);
     // A call a few minutes after another one in this repo gets the short savings
     // nudge: the agent has just read the long one (see `savingsTurnNudge`).
-    setCompactNudge(calledRecently(root));
-    setTurnModels(turnModels(root));
+    // Only this client's own calls: another agent in the same repo is on a turn
+    // of its own (see `callerKey`).
+    const caller = callerKey('mcp');
+    setCompactNudge(calledRecently(root, new Date(), caller));
+    setTurnModels(turnModels(root, new Date(), caller));
     let note: string | null = null;
     let deep: string | null = null;
     setDeepDue(null);
@@ -394,7 +405,7 @@ function recordMcpSavings(root: string, res: { text: string; isError: boolean },
   // What `graft savings --last` reads back, and what makes the next call's
   // nudge short.
   const s = claimedSummary(saved);
-  recordRecentCall(root, { command: tool, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined });
+  recordRecentCall(root, { command: tool, tokens: s.tokens, usd: s.usd, model: s.model, measured: s.measured, warnings: tallyWarnings() || undefined, caller: callerKey('mcp') ?? undefined });
 }
 
 /** The single-graph path: every tool, answered from one repo's graph. */

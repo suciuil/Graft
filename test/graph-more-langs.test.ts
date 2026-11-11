@@ -42,6 +42,77 @@ test("C depth: functions, structs, resolved calls, local include", { skip: gramm
   assert.ok(hasEdge(graph, "imports", "app.c", "util.h"), '#include "util.h" is an import edge');
 });
 
+// AUTOSAR wraps types in function-like macros with a memory-class argument:
+// CONST(T, M), VAR(T, M), FUNC(T, M), P2CONST(T, M, P). The grammar fork accepts
+// them as macro_type_specifier; before that, a generated table such as
+// Dem_Lcfg.c turned into one comma_expression thousands of levels deep and
+// overflowed the extractor's stack.
+test("C depth: AUTOSAR CONST/VAR/FUNC/P2CONST type macros", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const rows = Array.from({ length: 12000 }, (_, i) => `  { ${i}u, DEM_CFG_X }`).join(",\n");
+  const graph = await build({
+    "Dem_Lcfg.c": `CONST(Dem_Cfg_EventTableType, DEM_CONST) Dem_Cfg_EventTable[12000] = {\n${rows}\n};\n`
+      + `static VAR(uint8, DEM_VAR_NOINIT) Dem_State;\n`
+      + `FUNC(void, DEM_CODE) Dem_Helper(P2CONST(Dem_ConfigType, AUTOMATIC, DEM_PBCFG) ConfigPtr) { Dem_State = 1u; }\n`
+      + `FUNC(void, DEM_CODE) Dem_Init(void) { VAR(uint16, AUTOMATIC) i = 0u; Dem_Helper(i); }\n`,
+  });
+  assert.equal(nodeById(graph, "Dem_Lcfg.c#Dem_Helper")?.kind, "function");
+  assert.equal(nodeById(graph, "Dem_Lcfg.c#Dem_Init")?.kind, "function");
+  assert.ok(hasEdge(graph, "calls", "Dem_Lcfg.c#Dem_Init", "Dem_Lcfg.c#Dem_Helper"), "Dem_Init() → Dem_Helper() resolves");
+});
+
+// Macros a parser without a preprocessor cannot expand: a test-framework macro
+// opening a function body, a storage-class macro in front of the type, a bare
+// macro statement with no semicolon, and a function whose head differs per
+// #if branch. Before the grammar fork these collapsed into ERROR nodes and the
+// functions around them were lost or invented.
+test("C depth: unit-test macro bodies, macro modifiers and #if function heads", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({
+    "unit_test.c": `#include "cou.h"\n`
+      + `STATIC FUNC(void, TST_CODE) Tst_Helper(void) { }\n`
+      + `TS_PREVENTEMPTYTRANSLATIONUNIT\n`
+      + `DefStubFunc(void, Tst_Stub, void)\n`
+      + `COU_TEST(TestCase_001, "Init check") { Tst_Helper(); }\n`
+      + `#if (TST_CAT == 1)\nIFX_INTERRUPT(Tst_Isr, 0, 10)\n#else\nISR(Tst_Isr)\n#endif\n{ Tst_Helper(); }\n`
+      + `#if (TST_WITH_ARG == 1)\nvoid Tst_Main(uint8 a)\n#else\nvoid Tst_Main(void)\n#endif\n{ Tst_Helper(); }\n`,
+  });
+  assert.equal(nodeById(graph, "unit_test.c#Tst_Helper")?.kind, "function");
+  assert.equal(nodeById(graph, "unit_test.c#TestCase_001")?.kind, "function");
+  assert.equal(nodeById(graph, "unit_test.c#Tst_Isr")?.kind, "function");
+  assert.equal(nodeById(graph, "unit_test.c#Tst_Main")?.kind, "function");
+  assert.ok(hasEdge(graph, "calls", "unit_test.c#TestCase_001", "unit_test.c#Tst_Helper"), "test body → Tst_Helper() resolves");
+  assert.ok(hasEdge(graph, "calls", "unit_test.c#Tst_Main", "unit_test.c#Tst_Helper"), "#if-headed body → Tst_Helper() resolves");
+});
+
+// Code that only makes sense one #if branch at a time: an `if (` condition per
+// branch, a brace opened in a branch and closed after the #endif. Parsed with all
+// branches at once the tree has errors and swallows the functions after it; the
+// file is parsed again as branch views, and the functions of every branch count.
+test("C depth: #if branches that only parse one at a time", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({
+    "branches.c": `void Br_Helper(void) { }\n`
+      + `void Br_Check(int a)\n{\n#if (BR_STRICT == 1)\n  if (a > 0) {\n#else\n  if (a >= 0) {\n#endif\n    Br_Helper();\n  }\n}\n`
+      + `#if (BR_NEW == 1)\nvoid Br_Run(int a) {\n  Br_New(a);\n#else\nvoid Br_Run(void) {\n  Br_Old();\n#endif\n  Br_Helper();\n}\n`
+      + `void Br_After(void) { Br_Check(1); }\n`
+      + `void Br_New(int a) { }\nvoid Br_Old(void) { }\n`
+      // A comment that goes on past the #endif line is blanked with it, not left as code.
+      + `#if (BR_A == 1) || \\\n    (BR_B == 1)\nvoid Br_Opt(void) { }\n#endif /* (BR_A == 1) || (BR_B == 1), was:\n   void Br_Gone(void) { } */\n`
+      // Types of a branch the picked view leaves out still count.
+      + `#if (BR_WIDE == 1)\nstruct Br_Wide { int a; long b; };\n#else\nstruct Br_Narrow { int a; };\n#endif\n`,
+  });
+  assert.equal(nodeById(graph, "branches.c#Br_Wide")?.kind, "struct", "struct of the first branch");
+  assert.equal(nodeById(graph, "branches.c#Br_Narrow")?.kind, "struct", "struct of the last branch");
+  const names = ["Br_Helper", "Br_Check", "Br_Run", "Br_After", "Br_New", "Br_Old", "Br_Opt"];
+  for (const name of names) assert.equal(nodeById(graph, `branches.c#${name}`)?.kind, "function", name);
+  const functions = graph.nodes.filter((n) => n.path === "branches.c" && n.kind === "function").map((n) => n.name);
+  assert.deepEqual([...new Set(functions)].sort(), [...names].sort(), "no function made up from a comment left behind");
+  assert.equal(nodeById(graph, "branches.c#Br_Run")?.span, "L13-L20", "Br_Run starts at its first head");
+  assert.equal(nodeById(graph, "branches.c#Br_Run~2")?.span, "L16-L20", "the head of the other branch is a second definition");
+  assert.ok(hasEdge(graph, "calls", "branches.c#Br_Check", "branches.c#Br_Helper"), "call inside the per-branch if");
+  assert.ok(hasEdge(graph, "calls", "branches.c#Br_After", "branches.c#Br_Check"), "functions after the #if still parse");
+  assert.ok(hasEdge(graph, "calls", "branches.c#Br_Run", "branches.c#Br_New"), "call in the first branch");
+  assert.ok(hasEdge(graph, "calls", "branches.c#Br_Run~2", "branches.c#Br_Old"), "call in the last branch");
+});
+
 test("C++ depth: classes, out-of-line methods, inheritance, calls", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   const graph = await build({
     "app.cpp": `namespace app {\nclass Base {};\nclass Repo : public Base {\npublic:\n  int Save(int x);\n};\nint helper(int x){ return x+1; }\nint Repo::Save(int x){ return helper(x); }\n}\n`,
@@ -308,6 +379,146 @@ test("Make depth: targets, prerequisites, variables, defines, includes, recursiv
   assert.ok(hasEdge(graph, "imports", "Makefile", "mk/common.mk"), "include");
   assert.ok(hasEdge(graph, "imports", "Makefile", "sub/Makefile"), "$(MAKE) -C sub");
   assert.ok(!graph.edges.some((e) => /#(main\.o|util\.o|MAKE|OS)$/.test(e.target)), "source files and make's own variables drop");
+});
+
+test("MATLAB depth: classdef, methods, properties, local/nested functions, packages, class folders, calls", { skip: grammarAvailable("matlab") ? false : "matlab grammar not built" }, async () => {
+  const graph = await buildTree({
+    "src/+geom/Base.m": [
+      "classdef Base < handle",
+      "    methods",
+      "        function describe(obj)",
+      "            disp(class(obj));",
+      "        end",
+      "    end",
+      "end",
+      "",
+    ].join("\n"),
+    "src/@Shape/Shape.m": [
+      "classdef Shape < geom.Base & matlab.mixin.Copyable",
+      "    % SHAPE a shape",
+      "    properties (Access = public)",
+      '        Name string = "x"',
+      "    end",
+      "    properties (Constant)",
+      "        MaxSize = 10",
+      "    end",
+      "    methods",
+      "        function obj = Shape(name)",
+      "            obj.Name = name;",
+      "            obj.validate();",
+      "            name.describe();",
+      "        end",
+      "        function v = get.Name(obj)",
+      "            v = obj.Name;",
+      "        end",
+      "        function a = area(obj)",
+      "            a = computeArea(obj.Name, 2);",
+      '            pkg.util.log("area");',
+      "            obj.describe();",
+      "        end",
+      "        r = externalMethod(obj, x)",
+      "    end",
+      "    methods (Static)",
+      "        function s = create(varargin)",
+      "            s = Shape(varargin{:});",
+      "        end",
+      "    end",
+      "    methods (Access = private)",
+      "        function validate(obj)",
+      "            disp hello",
+      "        end",
+      "    end",
+      "end",
+      "",
+    ].join("\n"),
+    "src/@Shape/externalMethod.m": "function r = externalMethod(obj, x)\nr = obj.area() * x;\nend\n",
+    "src/computeArea.m": [
+      "function a = computeArea(name, k)",
+      "%COMPUTEAREA the area",
+      "import pkg.util.log",
+      "scale = [1 2 3];",
+      "a = localHelper(k) * scale(2);",
+      "b = nested(3);",
+      "f = @localHelper;",
+      "    function y = nested(z)",
+      "        y = z + 1;",
+      "    end",
+      "end",
+      "",
+      "function r = localHelper(v)",
+      "r = v .^ 2;",
+      "end",
+      "",
+    ].join("\n"),
+    "src/scale.m": "function s = scale(x)\ns = 2 * x;\nend\n",
+    "src/+pkg/+util/log.m": "function log(msg)\nfprintf('%s\\n', msg);\nend\n",
+    "scripts/runme.m": [
+      "% a script",
+      "s = Shape.create('sq');",
+      "v = computeArea('sq', 3);",
+      "w = localFn(4);",
+      "plot(v, Verbose=true);",
+      "",
+      "function out = localFn(x)",
+      "out = x + 1;",
+      "end",
+      "",
+    ].join("\n"),
+    "src/Verbose.m": "function Verbose()\nend\n",
+    "other/caller.m": "function caller()\nlocalHelper(1);\nnested(2);\nlog('x');\ncomputeArea('a', 1);\nend\n",
+    "other/importer.m": "function importer()\nimport pkg.util.*\nlog('x');\nend\n",
+    "objc/Widget.m": '#import "Widget.h"\n@implementation Widget\n- (void)draw { }\n@end\n',
+  });
+  assert.deepEqual(graph.meta.languages, ["matlab"]);
+
+  const shape = nodeById(graph, "src/@Shape/Shape.m#Shape");
+  assert.equal(shape?.kind, "class");
+  assert.equal(shape?.signature, "classdef Shape < geom.Base & matlab.mixin.Copyable");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.Name")?.kind, "variable");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.MaxSize")?.kind, "constant");
+  const area = nodeById(graph, "src/@Shape/Shape.m#Shape.area");
+  assert.equal(area?.kind, "method");
+  assert.equal(area?.owner, "Shape");
+  assert.equal(area?.span, "L18-L22");
+  assert.equal(area?.signature, "function a = area(obj)");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.get.Name")?.kind, "method", "a property accessor keeps its get. prefix");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.Name~2"), undefined, "the accessor does not collide with the property");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.validate")?.exported, false, "a private methods block");
+  assert.equal(nodeById(graph, "src/@Shape/Shape.m#Shape.externalMethod"), undefined, "a bare signature is not a definition");
+  const ext = nodeById(graph, "src/@Shape/externalMethod.m#Shape.externalMethod");
+  assert.equal(ext?.kind, "method", "a function file in a class folder is a method");
+  assert.equal(ext?.owner, "Shape");
+
+  assert.equal(nodeById(graph, "src/computeArea.m#computeArea")?.exported, true);
+  assert.equal(nodeById(graph, "src/computeArea.m#computeArea")?.signature, "function a = computeArea(name, k)", "the help comment is not the signature");
+  assert.equal(nodeById(graph, "src/computeArea.m#localHelper")?.exported, false, "a local function");
+  assert.equal(nodeById(graph, "src/computeArea.m#computeArea.nested")?.kind, "function", "a nested function");
+  assert.equal(nodeById(graph, "scripts/runme.m#localFn")?.exported, false, "a script's local function");
+  assert.ok(!graph.nodes.some((n) => n.path === "objc/Widget.m" && n.kind !== "file"), "Objective-C .m files get no MATLAB symbols");
+
+  assert.ok(hasEdge(graph, "extends", "src/@Shape/Shape.m#Shape", "src/+geom/Base.m#Base"), "classdef < pkg.Base");
+  assert.ok(hasEdge(graph, "extends", "src/@Shape/Shape.m#Shape", "Copyable"), "an external base is kept by name");
+  assert.ok(hasEdge(graph, "imports", "src/computeArea.m", "src/+pkg/+util/log.m"), "import pkg.util.log");
+
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.Shape", "src/@Shape/Shape.m#Shape.validate"), "obj.m() on a constructor's output");
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.area", "src/computeArea.m#computeArea"), "a function in another file");
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.area", "src/+pkg/+util/log.m#log"), "pkg.util.log()");
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.area", "src/+geom/Base.m#Base.describe"), "an inherited method");
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.create", "src/@Shape/Shape.m#Shape"), "a constructor call");
+  assert.ok(hasEdge(graph, "calls", "src/@Shape/externalMethod.m#Shape.externalMethod", "src/@Shape/Shape.m#Shape.area"), "obj.m() in a class-folder method");
+  assert.ok(hasEdge(graph, "calls", "src/computeArea.m#computeArea", "src/computeArea.m#localHelper"), "a local function");
+  assert.ok(hasEdge(graph, "calls", "src/computeArea.m#computeArea", "src/computeArea.m#computeArea.nested"), "a nested function");
+  assert.ok(!hasEdge(graph, "calls", "src/computeArea.m#computeArea", "src/scale.m#scale"), "indexing a variable is not a call");
+  assert.ok(hasEdge(graph, "calls", "scripts/runme.m", "src/@Shape/Shape.m#Shape.create"), "Cls.staticMethod()");
+  assert.ok(hasEdge(graph, "calls", "scripts/runme.m", "src/computeArea.m#computeArea"));
+  assert.ok(hasEdge(graph, "calls", "scripts/runme.m", "scripts/runme.m#localFn"));
+  assert.ok(!graph.edges.some((e) => e.relation === "calls" && /#(disp|fprintf|class)$/.test(e.target)), "builtins drop");
+  assert.ok(!hasEdge(graph, "calls", "src/@Shape/Shape.m#Shape.Shape", "src/+geom/Base.m#Base.describe"), "a constructor's argument is not an instance");
+  assert.ok(!hasEdge(graph, "calls", "scripts/runme.m", "src/Verbose.m#Verbose"), "a Name=Value option name is not a call");
+  assert.ok(hasEdge(graph, "calls", "other/caller.m#caller", "src/computeArea.m#computeArea"), "another file's own function");
+  assert.ok(!graph.edges.some((e) => e.relation === "calls" && e.source === "other/caller.m#caller" && e.target !== "src/computeArea.m#computeArea"),
+    "local, nested and un-imported package functions of other files are out of reach");
+  assert.ok(hasEdge(graph, "calls", "other/importer.m#importer", "src/+pkg/+util/log.m#log"), "a package function imported with import pkg.util.*");
 });
 
 test("C++ header: a .h with a class is parsed as C++, not C", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {

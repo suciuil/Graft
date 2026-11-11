@@ -164,6 +164,36 @@ const MAX_CODE_CHARS = 18_000;
 const MAX_LINE_CHARS = 400;
 /** A batch that hits the output cap is halved, down to this many targets. */
 const MIN_SPLIT_TARGETS = 5;
+/**
+ * The model must echo every id it describes. An id longer than this (a CSS rule
+ * named by a selector list of hundreds of classes, a long generated name) is
+ * shown as a short alias instead: echoing five such ids verbatim spent the whole
+ * output budget before any summary was written, so the file never got one.
+ */
+const MAX_ECHO_ID_CHARS = 160;
+/** A target row's signature is clipped to this; it can be as long as the id. */
+const MAX_SIGNATURE_CHARS = 300;
+
+/**
+ * The id the model is shown (and must echo) for each node, in order: the node's
+ * own id, or a short `tN` alias when the id is longer than
+ * {@link MAX_ECHO_ID_CHARS}. An alias never equals another node's id.
+ */
+function echoKeys(nodes: readonly { id: string }[]): string[] {
+  const taken = new Set(nodes.map((n) => n.id));
+  let next = 1;
+  return nodes.map((n) => {
+    if (n.id.length <= MAX_ECHO_ID_CHARS) return n.id;
+    let alias = `t${next++}`;
+    while (taken.has(alias)) alias = `t${next++}`;
+    taken.add(alias);
+    return alias;
+  });
+}
+
+function clipSignature(sig: string): string {
+  return sig.length > MAX_SIGNATURE_CHARS ? `${sig.slice(0, MAX_SIGNATURE_CHARS)} …` : sig;
+}
 
 /**
  * Numbered source for the prompt. A file over {@link MAX_CODE_CHARS} is shown as
@@ -201,14 +231,15 @@ function numberLines(source: string, nodes: readonly NodeRef[]): string {
  * With the id first nothing terminated it, and models asked for the id
  * "verbatim" copied the whole row — `a.cs#Level | variable | lines L58-L58 | sig`
  * — into `id` (#259). {@link resolveTargetId} still repairs echoes of either layout.
+ * `keys` are the ids shown, from {@link echoKeys}.
  */
-function userContent(input: FileCruxInput): string {
+function userContent(input: FileCruxInput, keys: readonly string[]): string {
   const targets = input.nodes
     .map(
-      (n) =>
+      (n, i) =>
         `- ${n.kind} | lines L${n.startLine}-L${n.endLine}` +
-        (n.signature ? ` | ${n.signature}` : "") +
-        ` | id=${n.id}`,
+        (n.signature ? ` | ${clipSignature(n.signature)}` : "") +
+        ` | id=${keys[i]}`,
     )
     .join("\n");
   const n = input.nodes.length;
@@ -337,6 +368,7 @@ export class ChatCruxSummarizer implements CruxSummarizer {
   async describeFile(input: FileCruxInput): Promise<NodeCrux[]> {
     this.lastMiss = null;
     if (input.nodes.length === 0) return [];
+    const keys = echoKeys(input.nodes);
     const res = await this.model.create({
       temperature: 0,
       maxTokens: MAX_OUTPUT_TOKENS,
@@ -350,7 +382,7 @@ export class ChatCruxSummarizer implements CruxSummarizer {
       responseFormat: { kind: "tool", name: RECORD_TOOL },
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent(input) },
+        { role: "user", content: userContent(input, keys) },
       ],
     });
     // Classify the miss against the RAW parse, then reconcile ids. The two ask
@@ -364,7 +396,12 @@ export class ChatCruxSummarizer implements CruxSummarizer {
     const requested = input.nodes.map((n) => n.id);
     const capped = hitOutputCap(res);
     const splittable = capped && input.nodes.length > MIN_SPLIT_TARGETS;
-    const raw = parseResults(argsFromResponse(res, { quiet: splittable, capped }), requested);
+    // Resolve against the ids the model was shown, then map aliases back to node ids.
+    const realId = new Map(keys.map((k, i) => [k, requested[i]!]));
+    const raw = parseResults(argsFromResponse(res, { quiet: splittable, capped }), keys).map((r) => ({
+      ...r,
+      id: realId.get(r.id) ?? r.id,
+    }));
     const got = reconcileTargets(raw, input.nodes);
     if (splittable && got.length < input.nodes.length) {
       // The reply ran out of output budget: ask again for the rest in two halves.

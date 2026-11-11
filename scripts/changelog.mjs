@@ -72,7 +72,7 @@ export const AREAS = [
     rank: 3,
     label: "Languages",
     title: "Languages & parsing",
-    re: /grammar|parser|\blanguages?\b|tree-sitter|extractor|breadth tier|depth tier|kotlin|groovy|pl\/sql|c#|c\+\+|\bxml\b|cmake|perl|\bbash support|\bmake support|razor|\.kts\b/i,
+    re: /grammar|parser|\blanguages?\b|tree-sitter|extractor|breadth tier|depth tier|kotlin|groovy|pl\/sql|c#|c\+\+|\bxml\b|cmake|perl|\bbash support|\bmake support|razor|\.kts\b|matlab|simulink/i,
   },
   {
     key: "llm",

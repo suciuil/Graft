@@ -47,3 +47,8 @@ test("a file claimed by its whole name (CMakeLists.txt) is judged by that name, 
   assert.deepEqual(unsupportedExtensions(["CMakeLists.txt", "cmakelists.txt", ".cmake"]), []);
   assert.deepEqual(unsupportedExtensions([".txt"]), [".txt"], "claiming CMakeLists.txt does not claim every .txt");
 });
+
+test("-e m and -e mlx are accepted once the MATLAB grammar is built; Simulink files always are", { skip: supportedExtensions().includes(".m") ? false : "matlab grammar not built" }, () => {
+  assert.deepEqual(unsupportedExtensions(["m", ".M"]), []);
+  assert.deepEqual(unsupportedExtensions([".slx", ".sldd", ".mdl", ".mlx"]), []);
+});

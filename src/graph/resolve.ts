@@ -15,7 +15,7 @@
 import { posix } from "node:path";
 import { toPosixPath } from "../util/paths.js";
 import type { EdgeV1, Kind, NodeV1, Relation } from "./types.js";
-import { languageOf, type RawEdge } from "./extract.js";
+import { languageOf, matlabScope, type RawEdge } from "./extract.js";
 import { genericLangOf } from "./generic.js";
 
 const IMPORT_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".py"];
@@ -46,6 +46,15 @@ const BASH_FILE = /\.(sh|bash)$|(^|[/\\])\.bash(rc|_profile)$/i;
 const PERL_FILE = /\.(pl|pm|t)$/i;
 /** Makefiles: `Makefile` / `makefile` / `GNUmakefile` by name, fragments by extension. */
 const MAKE_FILE = /(^|[/\\])(gnu)?makefile$|\.(mk|mak)$/i;
+/** MATLAB sources (scripts, function files, classdef files). */
+const MATLAB_FILE = /\.(m|mlx)$/i;
+/** What a MATLAB bare call can reach, in the order MATLAB itself looks: a function, then
+ * a class (`Shape(…)` constructs one), then a method (`area(obj)` dispatches on `obj`). */
+const MATLAB_CALL_KINDS: ReadonlyArray<Kind[]> = [["function"], ["class", "enum"], ["method"]];
+/** Simulink models and data dictionaries (graph/simulink.ts). */
+const SIMULINK_FILE = /\.(slx|sldd|mdl)$/i;
+/** Simulink models (not dictionaries). */
+const SIMULINK_MODEL = /\.(slx|mdl)$/i;
 
 /**
  * Languages whose symbols can genuinely reach each other. A call edge may not
@@ -68,6 +77,8 @@ const FAMILIES: ReadonlyArray<readonly string[]> = [
   ["typescript", "tsx"],
   ["java", "kotlin", "scala", "clojure"],
   ["c", "cpp"],
+  // A Simulink model runs MATLAB code and reads data a dictionary or a script defines.
+  ["matlab", "simulink"],
 ];
 const FAMILY_OF = new Map<string, string>();
 for (const group of FAMILIES) for (const lang of group) FAMILY_OF.set(lang, group[0]);
@@ -151,6 +162,16 @@ export function resolveEdges(
   // node ids. A Gleam package roots every module at its own `src/` (or `test/`),
   // so an `import app/thing` is exactly that suffix under some unknown root.
   const gleamFilesBySuffix = new Map<string, string[]>();
+  // MATLAB package resolution: the package-qualified name of each file's own function
+  // or class (`+pkg/+util/log.m` → `pkg.util.log`) → that definition, for `pkg.util.log(…)`
+  // calls and `import pkg.util.log`.
+  const matlabQualified = new Map<string, NodeV1[]>();
+  // Simulink: each model's blocks by their path (`Model/Sub/Chart`, the form a library
+  // link's SourceBlock and a Model block's model name use), and MATLAB/Simulink files by
+  // lower-cased base name (`PrsReqGen_private.sldd`), for the dictionary and models a
+  // model links to: MATLAB finds them on its path, not relative to the model.
+  const simulinkPaths = new Map<string, NodeV1[]>();
+  const matlabFilesByBase = new Map<string, string[]>();
   const hasGoModules = !!opts.goModules?.length;
   for (const n of nodes) {
     if (n.kind === "file") {
@@ -182,6 +203,9 @@ export function resolveEdges(
         const parts = toPosixPath(n.path).split("/");
         for (let i = 0; i < parts.length; i++) push(gleamFilesBySuffix, parts.slice(i).join("/"), n.id);
       }
+      if (SIMULINK_FILE.test(n.path) || MATLAB_FILE.test(n.path)) {
+        push(matlabFilesByBase, posix.basename(toPosixPath(n.path)).toLowerCase(), n.id);
+      }
       {
         const p = toPosixPath(n.path);
         if (p === "lib.rs" || p === "main.rs") rustCrateRoots.push("");
@@ -193,6 +217,17 @@ export function resolveEdges(
     let fileMap = perFileName.get(n.path);
     if (!fileMap) perFileName.set(n.path, (fileMap = new Map()));
     push(fileMap, n.name, n);
+    if (SIMULINK_MODEL.test(n.path)) {
+      // The block path is the id after `#`, less a de-duplication suffix (`~2`).
+      push(simulinkPaths, n.id.slice(n.id.indexOf("#") + 1).replace(/~\d+$/, ""), n);
+    }
+    if (MATLAB_FILE.test(n.path) && n.id === `${n.path}#${n.name}` && (n.kind === "function" || n.kind === "class" || n.kind === "enum")) {
+      // Only the file's own definition is visible from outside it, under its package name.
+      const p = toPosixPath(n.path);
+      if (posix.basename(p).replace(MATLAB_FILE, "") === n.name) {
+        push(matlabQualified, [...matlabScope(p).packages, n.name].join("."), n);
+      }
+    }
     if (n.kind === "method") {
       const owner = n.owner ?? ownerFromMethodId(n.id);
       if (owner) push(ownerMethod, `${owner}.${n.name}`, n);
@@ -211,6 +246,23 @@ export function resolveEdges(
     const ownName = byId.get(e.source)?.name;
     if (!ownName) continue;
     push(classParents, ownName, e.name);
+  }
+
+  // MATLAB imports per file (`import pkg.util.log`, `import pkg.util.*`): they make
+  // those package functions and classes callable by their bare name in that file.
+  const matlabImports = new Map<string, string[]>();
+  // Simulink: the data dictionaries each model is linked to (its `.sldd` imports).
+  const simulinkDictionaries = new Map<string, Set<string>>();
+  for (const e of rawEdges) {
+    if (e.relation === "imports" && e.specifier && MATLAB_FILE.test(e.file)) push(matlabImports, e.file, e.specifier);
+    if (e.relation === "imports" && e.specifier && /\.sldd$/i.test(e.specifier) && SIMULINK_FILE.test(e.file)) {
+      const dict = resolveByBaseName(e.specifier, matlabFilesByBase);
+      if (byId.has(dict)) {
+        let set = simulinkDictionaries.get(e.file);
+        if (!set) simulinkDictionaries.set(e.file, (set = new Set()));
+        set.add(dict);
+      }
+    }
   }
 
   // classTraits: class name → trait names from raw `implements` edges in PHP files.
@@ -263,7 +315,11 @@ export function resolveEdges(
                           ? resolveMakeInclude(e.specifier, e.file, byId)
                           : e.file.endsWith(".gleam")
                             ? resolveGleamImport(e.specifier, gleamFilesBySuffix)
-                            : resolveImport(e.specifier, e.file, byId);
+                            : MATLAB_FILE.test(e.file)
+                              ? resolveMatlabImport(e.specifier, matlabQualified)
+                              : SIMULINK_FILE.test(e.file)
+                                ? resolveByBaseName(e.specifier, matlabFilesByBase)
+                                : resolveImport(e.specifier, e.file, byId);
       add(e.source, target, "imports", "extracted");
     } else if (e.relation === "extends" || e.relation === "implements") {
       // `implements` also resolves to a `trait` — PHP models trait composition
@@ -287,6 +343,34 @@ export function resolveEdges(
         if (!byId.has(targetFile)) continue; // external or unresolved module
         const candidates = narrowGleamByKind(perFileName.get(targetFile)?.get(e.name) ?? [], e.file, TYPE_KINDS);
         if (candidates.length === 1) add(e.source, candidates[0].id, "references", "extracted");
+      } else if (SIMULINK_FILE.test(e.file) && byId.get(e.source)?.origin === "ast") {
+        // Simulink: a library link names its block by path (`Lib/Sub/Block`); a block
+        // parameter, a signal name or a data type names a dictionary entry or a
+        // variable a MATLAB script defines.
+        let hit: { id: string; confidence: EdgeV1["confidence"] } | null = null;
+        if (e.name.includes("/")) {
+          const all = (simulinkPaths.get(e.name) ?? []).filter((c) => reachable(e.file, c.path));
+          if (all.length === 1) hit = { id: all[0].id, confidence: all[0].path === e.file ? "extracted" : "inferred" };
+        } else {
+          // Model data lives outside a model (a dictionary, a script), so a same-named
+          // block in the model itself (a root port carrying that signal) is not it; a
+          // dictionary's entries do use the types it defines itself.
+          const kinds = e.kinds ?? ["variable", "constant", "type", "enum"];
+          const model = SIMULINK_MODEL.test(e.file);
+          const all = (globalName.get(e.name) ?? []).filter(
+            (c) => kinds.includes(c.kind) && (model ? c.path !== e.file : true) && reachable(e.file, c.path),
+          );
+          const local = all.filter((c) => c.path === e.file);
+          let pick = local.length > 0 ? local : all;
+          // Several dictionaries define the name: the one this model is linked to wins.
+          if (pick.length > 1 && model) {
+            const linked = simulinkDictionaries.get(e.file);
+            const narrowed = linked ? pick.filter((c) => linked.has(c.path)) : [];
+            if (narrowed.length > 0) pick = narrowed;
+          }
+          if (pick.length === 1) hit = { id: pick[0].id, confidence: pick[0].path === e.file ? "extracted" : "inferred" };
+        }
+        if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (e.file.endsWith(".php") && byId.get(e.source)?.origin === "ast") {
         // PHP attribute without a `use` import (same-file or globally unique class).
         const refKinds: Kind[] = ["class", "interface", "trait", "enum"];
@@ -348,6 +432,37 @@ export function resolveEdges(
       if (PLSQL_EXT.test(e.file) && byId.get(e.source)?.origin !== "generic") {
         const hit = resolvePlsqlCall(e, plsql());
         if (hit) add(e.source, hit.id, "calls", hit.confidence);
+        continue;
+      }
+      // MATLAB: a dotted call is a method of a known class (`obj.m()`, `Cls.m()`) or a
+      // package function or class (`pkg.f()`, `pkg.Cls()`); a bare call is a function,
+      // else a constructor, else a method dispatched on its first argument. A dotted call
+      // in a Simulink model comes from MATLAB code in it (a MATLAB Function block).
+      if ((MATLAB_FILE.test(e.file) || (SIMULINK_FILE.test(e.file) && e.viaMember)) && byId.get(e.source)?.origin === "ast") {
+        let hit: { id: string; confidence: EdgeV1["confidence"] } | "ambiguous" | null = null;
+        if (e.viaMember) {
+          if (e.recvType) hit = resolveTypedMember(e.recvType, e.name!, e.file, ownerMethod, classParents, classTraits);
+          if (!hit && e.specifier) {
+            const all = (matlabQualified.get(`${e.specifier}.${e.name}`) ?? []).filter((c) => reachable(e.file, c.path));
+            if (all.length === 1) hit = { id: all[0].id, confidence: all[0].path === e.file ? "extracted" : "inferred" };
+          }
+        } else {
+          hit = resolveMatlabBareCall(e.name!, e.file, perFileName, globalName, matlabQualified, matlabImports.get(e.file) ?? []);
+        }
+        if (hit && hit !== "ambiguous") add(e.source, hit.id, "calls", hit.confidence);
+        continue;
+      }
+      // Simulink: a Model block calls the model it references (by the model's name);
+      // `name(…)` in a chart or MATLAB Function block calls MATLAB code.
+      if (SIMULINK_FILE.test(e.file) && byId.get(e.source)?.origin === "ast") {
+        const models = (simulinkPaths.get(e.name!) ?? []).filter((c) => !c.id.slice(c.id.indexOf("#") + 1).includes("/"));
+        const hit =
+          models.length === 1
+            ? { id: models[0].id, confidence: "inferred" as const }
+            : models.length > 1
+              ? null
+              : resolveMatlabBareCall(e.name!, e.file, perFileName, globalName, matlabQualified, []);
+        if (hit && hit.id !== e.source) add(e.source, hit.id, "calls", hit.confidence);
         continue;
       }
       if (e.viaMember) {
@@ -809,6 +924,76 @@ function resolvePerlModule(spec: string, bySuffix: Map<string, string[]>): strin
   if (!/^[A-Za-z_]\w*(?:::\w+)*$/.test(spec)) return spec;
   const hits = bySuffix.get(`${spec.split("::").join("/")}.pm`);
   return hits && hits.length === 1 ? hits[0] : spec;
+}
+
+/**
+ * Resolve a MATLAB bare call (`f(x)`, `f`, `f arg`, `@f`) by MATLAB's own visibility
+ * rules, which a repo-wide unique-name match would break:
+ * 1. this file: its local and nested functions, its class (a constructor call) and
+ *    that class's methods, in that order;
+ * 2. a package function or class this file imports (`import pkg.f`, `import pkg.*`);
+ * 3. elsewhere, only what MATLAB's search path exposes: another file's own function or
+ *    class outside any `+package` (never its local or nested functions), else a public
+ *    method, which `m(obj)` dispatches to.
+ * Anything ambiguous at a step drops the call rather than guessing.
+ */
+function resolveMatlabBareCall(
+  name: string,
+  file: string,
+  perFileName: Map<string, Map<string, NodeV1[]>>,
+  globalName: Map<string, NodeV1[]>,
+  byQualified: Map<string, NodeV1[]>,
+  imports: string[],
+): { id: string; confidence: EdgeV1["confidence"] } | null {
+  const local = perFileName.get(file)?.get(name) ?? [];
+  for (const kinds of MATLAB_CALL_KINDS) {
+    const hits = local.filter((n) => kinds.includes(n.kind));
+    if (hits.length === 1) return { id: hits[0].id, confidence: "extracted" };
+    if (hits.length > 1) return null;
+  }
+  const imported = new Set<NodeV1>();
+  for (const spec of imports) {
+    const q = spec.endsWith(".*") ? `${spec.slice(0, -2)}.${name}` : spec.endsWith(`.${name}`) ? spec : null;
+    for (const n of (q && byQualified.get(q)) || []) imported.add(n);
+  }
+  if (imported.size === 1) return { id: [...imported][0].id, confidence: "extracted" };
+  if (imported.size > 1) return null;
+  // Keyed by the bare name: only definitions outside any package are indexed under it.
+  const onPath = (byQualified.get(name) ?? []).filter((n) => reachable(file, n.path));
+  for (const kinds of MATLAB_CALL_KINDS.slice(0, 2)) {
+    const hits = onPath.filter((n) => kinds.includes(n.kind));
+    if (hits.length === 1) return { id: hits[0].id, confidence: "inferred" };
+    if (hits.length > 1) return null;
+  }
+  const methods = (globalName.get(name) ?? []).filter((n) => n.kind === "method" && n.exported && reachable(file, n.path));
+  return methods.length === 1 ? { id: methods[0].id, confidence: "inferred" } : null;
+}
+
+/**
+ * Resolve a file a Simulink model links to by name (`PrsReqGen_private.sldd`, or a
+ * referenced model, named without its extension) to the one in-repo file with that
+ * base name, ignoring case: MATLAB finds both on its search path, not relative to the
+ * model. A model name matches `<name>.slx` or `<name>.mdl`. Unknown or ambiguous names
+ * stay the text.
+ */
+function resolveByBaseName(spec: string, byBase: Map<string, string[]>): string {
+  const base = posix.basename(spec.replace(/\\/g, "/")).toLowerCase();
+  const hits = /\.[a-z]+$/.test(base)
+    ? (byBase.get(base) ?? [])
+    : [...(byBase.get(`${base}.slx`) ?? []), ...(byBase.get(`${base}.mdl`) ?? [])];
+  return hits.length === 1 ? hits[0]! : spec;
+}
+
+/**
+ * Resolve a MATLAB `import pkg.util.log` to the file that defines `log` in package
+ * folder `+pkg/+util/`, when exactly one does. A wildcard (`import pkg.util.*`) names a
+ * folder, not a file, and an unknown name is a toolbox or another project's package:
+ * both stay the import text.
+ */
+function resolveMatlabImport(spec: string, byQualified: Map<string, NodeV1[]>): string {
+  if (spec.endsWith(".*")) return spec;
+  const hits = byQualified.get(spec);
+  return hits && hits.length === 1 ? hits[0].path : spec;
 }
 
 /**

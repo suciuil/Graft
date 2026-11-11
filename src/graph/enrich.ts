@@ -88,10 +88,16 @@ export interface EnrichStats {
   fatal?: string;
 }
 
+/** The source text of a file, by repo-relative path. A `Map` does; so does
+ * buildGraph's lookup that reads the file only when the meaning pass asks, so a
+ * Tier-1 build never holds the whole repo's text in memory. `get` may return
+ * undefined for a file that went away since it was parsed. */
+export type SourceLookup = Pick<ReadonlyMap<string, string>, "has" | "get">;
+
 export async function enrichGraph(
   nodes: NodeV1[],
   prior: Map<string, NodeV1>,
-  sources: Map<string, string>,
+  sources: SourceLookup,
   opts: EnrichOptions = {},
 ): Promise<EnrichStats> {
   const stats: EnrichStats = {
@@ -185,14 +191,14 @@ export async function enrichGraph(
 
   await mapWithConcurrency(files, limit, async (path) => {
     const fileNodes = byFile.get(path)!;
-    const source = sources.get(path)!;
-    const lineCount = source.split("\n").length;
+    const source = gate.stopped ? undefined : sources.get(path);
 
     // Once the pass is fatal, the remaining files are not attempted: every call
     // would fail the same way, and on a metered gateway each one still costs a
     // request. They are counted so the caller can report what was left undone.
-    if (gate.stopped) {
-      gate.skip();
+    // A file that can no longer be read is left as it was too, for the next build.
+    if (gate.stopped || source === undefined) {
+      if (gate.stopped) gate.skip();
       for (const node of fileNodes) leaveAsIs(node);
       // Still reported, so the caller's progress counter reaches `total` instead of
       // freezing at the file that broke — the abort is announced by the build's
@@ -200,6 +206,7 @@ export async function enrichGraph(
       opts.onProgress?.({ index: done++, total: files.length, node: path });
       return;
     }
+    const lineCount = source.split("\n").length;
 
     const refs: NodeRef[] = fileNodes.map((n) => {
       const [startLine, endLine] = spanLines(n.span, lineCount);
