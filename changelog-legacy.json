@@ -11,8 +11,7 @@
         "Opt-in cost savings reporting. After you run \"graft savings-report enable\", each saving and billing entry graft records is also sent, in the background, to the company's Oracle database for analytics: a random install id, the day, the model, the tokens saved or billed and their dollar value, and which graft surface and command filed it, with no repo, path or user name. It is off until enabled and can be switched off from the database.",
         "On Windows PCs without an Oracle Client the rows are sent through Oracle's managed .NET driver (ODP.NET 19.33, vendored from nuget.org), which the database's encryption requires.",
         "The Windows offline kit now includes this driver. The kit build checks its SHA-256 and the installer verifies it, unblocks it and test-loads it, with a warning only if something is wrong.",
-        "The savings report upload on Windows no longer fails with \"module could not be loaded\" when PowerShell 7 is present.",
-        "The fork report now states that the opt-in savings report is the one exception to the no-cloud rule, and that the owner approved it."
+        "The savings report upload on Windows no longer fails with \"module could not be loaded\" when PowerShell 7 is present."
       ]
     },
     {
