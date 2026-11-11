@@ -57,7 +57,7 @@ import { openBrowser } from "./util/browser.js";
 import { committedAtBase, learningsAtBase, teammateEdits, withBaseLearnings } from "./check/learning-edits.js";
 import { CACHE_DIR, contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
-import { deepDueFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
+import { combinedStaleness, deepDueFor, deepRebuildDue, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, initDeepSuggestion, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
 import { federateSkeleton, isPartsWorkspace, isWorkspaceBuildRoot, readWorkspace, removeWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
@@ -117,6 +117,7 @@ import {
   patchBuildConfig,
   patchGlobalSettings,
   readBuildConfig,
+  readDeepStaleThreshold,
   readGlobalSettings,
   resolveDeepStaleThreshold,
   type BuildConfig,
@@ -3308,14 +3309,23 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
       })
       .map(({ d, o }) => loadGraphCached(contextDirFor(d, o)))
       .filter((g): g is NonNullable<typeof g> => g !== null);
+    // Init builds the structural graph only: suggest the deep build when none has
+    // run here yet, or the summaries are out of date past the repo's threshold.
+    const staleness = combinedStaleness(graphs);
+    const deepThreshold = readDeepStaleThreshold(repo);
     if (verbose) console.error(
       "\n" +
         formatInitEpilogue({
           graphBuilt: graphs.length > 0,
           nodes: graphs.reduce((n, g) => n + g.meta.nodeCount, 0),
           edges: graphs.reduce((n, g) => n + g.meta.edgeCount, 0),
+          deepDue: deepRebuildDue(staleness, deepThreshold),
         }),
     );
+    else {
+      const deepLine = initDeepSuggestion(staleness, deepThreshold, { agent: !process.stderr.isTTY });
+      if (deepLine) console.error(deepLine);
+    }
     // Hand what was found to the review page, and leave a child waiting for
     // the person to connect and review there.
     if (pair) {

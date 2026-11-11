@@ -13,11 +13,12 @@ import { runCli, tmpRepo } from './helpers.js';
 
 function fresh(): string { return tmpRepo('hostsinit'); }
 
-test('writes only detected hosts by default', () => {
+test('writes only detected hosts by default, plus copilot', () => {
   const home = fresh(); const repo = fresh();
   mkdirSync(join(home, '.cursor'));
   const r = runHostsInit(repo, { home });
-  assert.deepEqual(r.written.map((w) => w.id), ['cursor']);
+  // Copilot is selected by default, with no `.github/` in the repo.
+  assert.deepEqual(r.written.map((w) => w.id), ['cursor', 'copilot']);
   const mdc = readFileSync(join(repo, '.cursor', 'rules', 'graft.mdc'), 'utf8');
   assert.match(mdc, /alwaysApply: true/);
   assert.ok(!existsSync(join(repo, 'AGENTS.md')));
@@ -184,8 +185,9 @@ test('CLI: no flags and no TTY writes nothing and names the detected agents', ()
   mkdirSync(join(home, '.cursor'));
   const out = cliStderr(repo, home);
   assert.match(out, /nothing written/);
-  assert.match(out, /detected: claude, cursor/);
-  assert.match(out, /graft init --agents claude cursor/);
+  // Copilot is selected by default, with no `.github/` in the repo.
+  assert.match(out, /detected: claude, cursor, copilot/);
+  assert.match(out, /graft init --agents claude cursor copilot/);
   assert.deepEqual(readdirSync(repo), []);
 });
 
@@ -212,6 +214,8 @@ test('CLI: --yes wires every detected agent (the pre-0.8 default)', () => {
   cliStderr(repo, home, ['--yes']);
   assert.ok(existsSync(join(repo, '.claude', 'settings.json')));
   assert.ok(existsSync(join(repo, '.cursor', 'rules', 'graft.mdc')));
+  // Copilot is selected by default, though the repo had no `.github/`.
+  assert.ok(existsSync(join(repo, '.github', 'copilot-instructions.md')));
   // gemini was never installed in this scratch home, so it is not wired.
   assert.ok(!existsSync(join(repo, 'GEMINI.md')));
 });

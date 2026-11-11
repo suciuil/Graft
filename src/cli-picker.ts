@@ -150,7 +150,9 @@ export function visibleRows(state: PickerState): PickerRow[] {
 }
 
 /**
- * Claude Code starts checked — it's the deep integration — everything else off.
+ * Claude Code (the deep integration) and GitHub Copilot start checked, whether
+ * or not their folders are found here; everything else starts off unless a
+ * previous init wired it.
  *
  * `offerTelemetry` appends the consent row, unchecked unless `telemetryChecked`
  * (the user already opted in). Default false so every existing caller (and every
@@ -170,11 +172,12 @@ export function initialPickerState(
     summary: compactWrites(p.writes, repo, home),
     hasGlobal: p.writes.some((w) => w.scope === 'global'),
   }));
-  // Claude Code, plus every agent a previous init wired here: init retracts what
-  // is not picked, so a re-run (the one the "Run 'graft init'" nudge asks for)
-  // must start from the current wiring, or enter would remove it.
+  // The agents selected by default (Claude Code, GitHub Copilot), plus every
+  // agent a previous init wired here: init retracts what is not picked, so a
+  // re-run (the one the "Run 'graft init'" nudge asks for) must start from the
+  // current wiring, or enter would remove it.
   const checked = new Set([
-    ...(plan.some((p) => p.id === 'claude') ? ['claude'] : []),
+    ...plan.filter((p) => p.byDefault).map((p) => p.id),
     ...plan.filter((p) => p.wired).map((p) => p.id),
   ]);
   if (opts.offerTelemetry) {

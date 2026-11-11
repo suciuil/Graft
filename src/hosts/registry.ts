@@ -29,6 +29,14 @@ export interface HostTarget {
   /** The text, in the spelling of the repo's name for the tool. */
   content(name?: Brand): string;
   detect(probe: DetectProbe): boolean;
+  /**
+   * Selected by default, whether or not `detect` finds the tool's folders. For
+   * agents most repos use, whose own folders are no sign of them: GitHub
+   * Copilot reads `.github/copilot-instructions.md`, and a repo with no
+   * `.github/` (or a machine with no trace of VS Code) still has Copilot users.
+   * Claude Code, outside this registry, is selected by default the same way.
+   */
+  byDefault?: boolean;
 }
 
 export const HOSTS: HostTarget[] = [
@@ -109,6 +117,7 @@ export const HOSTS: HostTarget[] = [
     relPath: join('.github', 'copilot-instructions.md'),
     content: copilotInstructions,
     detect: (p) => p.dirExists(join(p.repo, '.github')),
+    byDefault: true,
   },
   {
     id: 'kilo',
@@ -150,6 +159,11 @@ export function hostIds(): string[] {
 
 export function detectHosts(probe: DetectProbe): HostTarget[] {
   return HOSTS.filter((h) => h.detect(probe));
+}
+
+/** The hosts init selects when not told which: every one found here (`detectHosts`), plus those selected by default (`byDefault`). */
+export function defaultHosts(probe: DetectProbe): HostTarget[] {
+  return HOSTS.filter((h) => h.byDefault === true || h.detect(probe));
 }
 
 /**

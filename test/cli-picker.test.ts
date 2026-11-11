@@ -94,14 +94,22 @@ test('a batched chunk drives the reducer to a complete selection', () => {
   let state = initialPickerState(planInit(repo, { home }), repo, home);
   for (const key of keysOf(`${KEY_DOWN} \r`)) state = reducePicker(state, key);
   assert.ok(state.done);
-  assert.deepEqual(pickedIds(state), ['claude', 'agents']);
+  assert.deepEqual(pickedIds(state), ['claude', 'agents', 'copilot']);
 });
 
-test('claude starts checked, nothing else does', () => {
+test('claude and copilot start checked, nothing else does', () => {
   const repo = fresh(); const home = fullHome();
   const state = initialPickerState(planInit(repo, { home }), repo, home);
-  assert.deepEqual(pickedIds(state), ['claude']);
+  assert.deepEqual(pickedIds(state), ['claude', 'copilot']);
   assert.equal(state.rows[0].id, 'claude');
+});
+
+test('claude and copilot start checked and shown with no .claude/ or .github/ and nothing installed', () => {
+  const repo = fresh(); const home = fresh();
+  const state = initialPickerState(planInit(repo, { home }), repo, home);
+  assert.deepEqual(pickedIds(state), ['claude', 'copilot']);
+  assert.deepEqual(visibleRows(state).map((r) => r.id), ['claude', 'copilot']);
+  assert.match(renderPicker(state, false), /\[✓\] copilot/);
 });
 
 test('a re-run starts with the agents already wired here checked and shown, even ones this machine lacks', () => {
@@ -116,30 +124,30 @@ test('a re-run starts with the agents already wired here checked and shown, even
   assert.deepEqual(pickedIds(state).sort(), ['claude', 'copilot', 'kilo']);
 });
 
-test('enter with no toggling wires claude only', () => {
+test('enter with no toggling wires claude and copilot only', () => {
   const repo = fresh(); const home = fullHome();
   const state = drive(repo, home, ['enter']);
   assert.ok(state.done);
-  assert.deepEqual(pickedIds(state), ['claude']);
+  assert.deepEqual(pickedIds(state), ['claude', 'copilot']);
 });
 
 test('space toggles the row under the cursor, off and on again', () => {
   const repo = fresh(); const home = fullHome();
-  assert.deepEqual(pickedIds(drive(repo, home, ['space'])), []);
-  assert.deepEqual(pickedIds(drive(repo, home, ['space', 'space'])), ['claude']);
+  assert.deepEqual(pickedIds(drive(repo, home, ['space'])), ['copilot']);
+  assert.deepEqual(pickedIds(drive(repo, home, ['space', 'space'])), ['claude', 'copilot']);
 });
 
 test('down then space adds the second host', () => {
   const repo = fresh(); const home = fullHome();
   const state = drive(repo, home, ['down', 'space', 'enter']);
-  assert.deepEqual(pickedIds(state), ['claude', 'agents']);
+  assert.deepEqual(pickedIds(state), ['claude', 'agents', 'copilot']);
 });
 
 test('enter on a highlighted, unticked agent selects it and confirms', () => {
   const repo = fresh(); const home = fullHome();
   const state = drive(repo, home, ['down', 'enter']);
   assert.ok(state.done);
-  assert.deepEqual(pickedIds(state), ['claude', 'agents']);
+  assert.deepEqual(pickedIds(state), ['claude', 'agents', 'copilot']);
 });
 
 test('enter on an undetected agent shown with m selects it too', () => {
@@ -154,7 +162,7 @@ test('enter on an undetected agent shown with m selects it too', () => {
 
 test('enter never re-ticks an agent the user unticked', () => {
   const repo = fresh(); const home = fullHome();
-  assert.deepEqual(pickedIds(drive(repo, home, ['space', 'enter'])), [], 'claude unticked stays unticked');
+  assert.deepEqual(pickedIds(drive(repo, home, ['space', 'enter'])), ['copilot'], 'claude unticked stays unticked');
   assert.deepEqual(pickedIds(drive(repo, home, ['all', 'all', 'down', 'enter'])), [], 'nor one `a` turned off');
 });
 

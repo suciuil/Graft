@@ -78,11 +78,13 @@ test('global writes vanish when the CLI is not installed', () => {
   assert.match(agents.writes[0].path, /AGENTS\.md$/);
 });
 
-test('detected mirrors detectHosts; claude is always available', () => {
+test('detected mirrors detectHosts; claude and copilot are always available', () => {
   const home = fresh(); mkdirSync(join(home, '.adal'));
   const plan = planInit(fresh(), { home });
   const detected = plan.filter((p) => p.detected).map((p) => p.id).sort();
-  assert.deepEqual(detected, ['adal', 'claude']);
+  assert.deepEqual(detected, ['adal', 'claude', 'copilot']);
+  const byDefault = plan.filter((p) => p.byDefault).map((p) => p.id).sort();
+  assert.deepEqual(byDefault, ['claude', 'copilot']);
 });
 
 test('adal is an instruction-only host — no MCP target', () => {

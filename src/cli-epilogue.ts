@@ -48,12 +48,15 @@ export interface InitEpilogueOptions {
   nodes?: number;
   /** Edge count from the built graph — only meaningful when `graphBuilt`. */
   edges?: number;
+  /** A `graft build --deep` is due (none has run yet, or the summaries are out
+   * of date past the threshold): adds a step suggesting it. */
+  deepDue?: boolean;
 }
 
 /** Renders the `graft init` next-steps epilogue (no trailing newline — the
  * caller's `console.error` adds the one trailing newline). */
 export function formatInitEpilogue(opts: InitEpilogueOptions): string {
-  const { graphBuilt, nodes, edges } = opts;
+  const { graphBuilt, nodes, edges, deepDue } = opts;
   const tty = Boolean(process.stderr.isTTY);
 
   const wordmark = WORDMARKS[brand()].map((l) => (tty ? indigo(l) : l));
@@ -64,6 +67,9 @@ export function formatInitEpilogue(opts: InitEpilogueOptions): string {
 
   const steps: Step[] = [
     ...(graphBuilt ? [] : [{ label: "build the graph", command: cmd("graft build") }]),
+    ...(graphBuilt && deepDue
+      ? [{ label: "add summaries", command: cmd("graft build --deep"), extra: ["an LLM pass: it needs an API key and costs tokens"] }]
+      : []),
     { label: "restart your agent", command: `a new session picks up ${brand()} automatically` },
     {
       label: "code as usual",

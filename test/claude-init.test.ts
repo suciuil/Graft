@@ -11,6 +11,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { buildGraphIfMissing, runInit } from '../src/claude/init.js';
 import { formatInitEpilogue } from '../src/cli-epilogue.js';
 import { readStamp } from '../src/upkeep.js';
+import { runCli } from './helpers.js';
 
 function fresh(): string { return mkdtempSync(join(tmpdir(), 'graft-init-')); }
 
@@ -173,6 +174,60 @@ test('formatInitEpilogue: graph not built shows "build the graph" as step 1, no 
   // identically whether there are 3 or 4 numbered steps.
   const col = (text: string, marker: string) => text.split('\n').find((l) => l.includes(marker))!.indexOf('a new session');
   assert.equal(col(built, 'restart your agent'), col(notBuilt, 'restart your agent'));
+});
+
+test('formatInitEpilogue: a due deep build adds an "add summaries" step after the graph, never before it is built', () => {
+  const due = formatInitEpilogue({ graphBuilt: true, nodes: 4, edges: 4, deepDue: true });
+  assert.ok(due.includes('1. add summaries'), due);
+  assert.ok(due.includes('graft build --deep'));
+  assert.ok(due.includes('an LLM pass: it needs an API key and costs tokens'));
+  assert.ok(due.includes('2. restart your agent'));
+  assert.ok(!formatInitEpilogue({ graphBuilt: true, nodes: 4, edges: 4 }).includes('--deep'), 'not due: no step');
+  assert.ok(!formatInitEpilogue({ graphBuilt: false, deepDue: true }).includes('--deep'), 'no graph yet: build it first');
+});
+
+/**
+ * A repo holding one function, with its structural graph built (no `--deep`).
+ * Built here rather than by init: init's own build spawns the CLI with this
+ * run's `--import tsx`, which a temp folder cannot resolve when run from source.
+ */
+function builtRepo(home: string): string {
+  const d = fresh();
+  writeFileSync(join(d, 'a.ts'), 'export function hello(): number {\n  return 1;\n}\n');
+  const b = runCli(['build', d], { home });
+  assert.equal(b.status, 0, b.describe());
+  return d;
+}
+
+test('CLI: graft init suggests graft build --deep when no deep build has run on the repo', () => {
+  // A scratch home: a real `~/.graft/settings.json` threshold must not steer this.
+  const home = fresh();
+  const d = builtRepo(home);
+  const res = runCli(['init', d, '--no-agents'], { home });
+  assert.equal(res.status, 0, res.describe());
+  assert.match(res.stderr, /graph ready/);
+  assert.match(res.stderr, /· run `graft build --deep` next: no `graft build --deep` has run here yet, so none of the \d+ nodes has a prose summary/);
+  // Run with no terminal, as an agent runs it: the agent is told to pass it on.
+  assert.match(res.stderr, /Tell the user a `graft build --deep` is recommended\./);
+
+  const verbose = runCli(['init', d, '--no-agents', '--verbose'], { home });
+  assert.equal(verbose.status, 0, verbose.describe());
+  assert.match(verbose.stderr, /1\. add summaries +graft build --deep/);
+});
+
+test('CLI: graft init suggests no deep build when there is no graph, or the repo opted out', () => {
+  const home = fresh();
+  const skipped = runCli(['init', fresh(), '--no-build', '--no-agents'], { home });
+  assert.equal(skipped.status, 0, skipped.describe());
+  assert.doesNotMatch(skipped.stderr, /build --deep/);
+
+  const optedOut = builtRepo(home);
+  const t = runCli(['deep-threshold', '100', optedOut], { home });
+  assert.equal(t.status, 0, t.describe());
+  const res = runCli(['init', optedOut, '--no-agents'], { home });
+  assert.equal(res.status, 0, res.describe());
+  assert.match(res.stderr, /graph ready/);
+  assert.doesNotMatch(res.stderr, /build --deep/);
 });
 
 test('CLI: graft init prints one line per step, and no banner', () => {

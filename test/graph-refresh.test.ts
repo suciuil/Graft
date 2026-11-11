@@ -19,6 +19,7 @@ import {
   ensureFreshChildren,
   ensureFreshGraph,
   formatStalenessReport,
+  initDeepSuggestion,
   outdatedPercent,
   refreshNote,
   stalenessReport,
@@ -592,6 +593,24 @@ test("deepRebuildNote honors a custom threshold: 0 = anything out of date, 100 =
   assert.equal(deepRebuildNote(counts(500, 500, 1000), 100), null);
   assert.equal(deepRebuildNote(counts(2, 1, 10), 50), null);
   assert.match(deepRebuildNote(counts(3, 3, 10), 50) ?? "", /change with `graft deep-threshold <percent>` \(100 = never\)/);
+});
+
+test("initDeepSuggestion: init suggests a deep build when none ran yet or the summaries are past the threshold", () => {
+  const keyless = summaryStaleness(graphWith(node("a", "pending"), node("b", "pending")));
+  assert.match(
+    initDeepSuggestion(keyless) ?? "",
+    /^· run `graft build --deep` next: no `graft build --deep` has run here yet, so none of the 2 nodes has a prose summary\. .*API key.*`graft deep-threshold 100` stops this suggestion$/,
+  );
+  assert.match(initDeepSuggestion(counts(1, 1, 10)) ?? "", /2 of 10 node summaries \(20%\) are out of date since the last one \(1 changed, 1 new\)/);
+  assert.equal(initDeepSuggestion(counts(1, 0, 10)), null, "exactly 10% is not above the default threshold");
+  assert.equal(initDeepSuggestion(counts(0, 0, 10)), null, "up to date: nothing to suggest");
+  assert.equal(initDeepSuggestion(counts(0, 0, 0)), null, "no graph: nothing to suggest");
+  assert.equal(initDeepSuggestion(keyless, 100), null, "100 opts the repo out");
+  assert.equal(initDeepSuggestion(counts(2, 1, 10), 50), null);
+  assert.match(initDeepSuggestion(keyless, 10, { agent: true }) ?? "", /\. Tell the user a `graft build --deep` is recommended\.$/);
+  // The same rule as the query nudge, so the two never disagree.
+  for (const s of [keyless, counts(1, 1, 10), counts(1, 0, 10), counts(0, 0, 0)])
+    for (const t of [0, 10, 50, 100]) assert.equal(initDeepSuggestion(s, t) !== null, deepRebuildDue(s, t), JSON.stringify([s, t]));
 });
 
 /** A scratch `~`, so a real `~/.graft/settings.json` can never steer these tests. */

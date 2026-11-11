@@ -10,7 +10,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { statSync } from 'node:fs';
-import { HOSTS, detectHosts, hostRelPath, hostWiringName, type DetectProbe, type HostTarget } from './registry.js';
+import { HOSTS, defaultHosts, hostRelPath, hostWiringName, type DetectProbe, type HostTarget } from './registry.js';
 import { mcpTargets } from './mcp-config.js';
 import { hookTargets } from './codex-hooks.js';
 import { cursorHookTargets } from './cursor-hooks.js';
@@ -45,6 +45,8 @@ export interface HostPlan {
    * stamp lists it). Re-running init must keep it: init retracts every host it
    * is not given, so leaving it unticked would remove its instructions. */
   wired?: boolean;
+  /** Ticked by default in the picker, found here or not (Claude Code and GitHub Copilot). */
+  byDefault?: boolean;
   writes: PlannedWrite[];
 }
 
@@ -69,13 +71,15 @@ function instructionTarget(repo: string, host: HostTarget, name: Brand): Planned
 
 /**
  * Every host graft can wire, each with the full set of files selecting it would
- * touch. Claude Code comes first — it's the deep integration and the picker's
- * default. `ids`, when given, restricts the plan to those hosts.
+ * touch. Claude Code comes first — it's the deep integration and, with GitHub
+ * Copilot, the picker's default. `ids`, when given, restricts the plan to those hosts.
  */
 export function planInit(repo: string, opts: { home?: string; ids?: string[] } = {}): HostPlan[] {
   const home = opts.home ?? homedir();
   const probe = probeFor(home, repo);
-  const detected = new Set(detectHosts(probe).map((h) => h.id));
+  // Found here, or selected by default (GitHub Copilot): listed in the picker,
+  // and wired by `--yes`, whether or not its folders are found.
+  const detected = new Set(defaultHosts(probe).map((h) => h.id));
   // Detection asks "which editors does this machine have"; a repo committed by a
   // teammate can be wired for an agent this machine lacks (AGENTS.md is detected
   // only from ~/.codex and friends), and that wiring must still count.
@@ -86,12 +90,13 @@ export function planInit(repo: string, opts: { home?: string; ids?: string[] } =
     // Repo writes plus the user-level copy under `~/.claude` — the picker and
     // `--dry-run` render 'global' writes in their own section, so a user sees
     // what lands outside the repo before agreeing to it.
-    { id: 'claude', name: 'Claude Code', detected: true, wired: wired.has('claude'), writes: [...claudeTargets(repo, brand()), ...claudeGlobalTargets(home, brand())] },
+    { id: 'claude', name: 'Claude Code', detected: true, wired: wired.has('claude'), byDefault: true, writes: [...claudeTargets(repo, brand()), ...claudeGlobalTargets(home, brand())] },
     ...HOSTS.map((host) => ({
       id: host.id,
       name: host.name,
       detected: detected.has(host.id) || wired.has(host.id),
       wired: wired.has(host.id),
+      byDefault: host.byDefault === true,
       writes: [
         instructionTarget(repo, host, name),
         ...mcpTargets(repo, [host.id], { home, name }),

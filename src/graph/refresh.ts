@@ -465,6 +465,35 @@ export function deepRebuildNote(
 }
 
 /**
+ * `graft init`'s closing suggestion to run `graft build --deep`, or null when
+ * none is due. The same rule as the query nudge ({@link deepRebuildDue}): due
+ * when no deep build has run on the repo yet (no node has a prose summary), or
+ * when more than `thresholdPct` percent of the summaries are out of date. Init
+ * only ever builds the structural graph, so a first init always gets it unless
+ * the repo opted out with `graft deep-threshold 100`. `agent` (init run with no
+ * terminal, by an agent) adds the instruction to pass it on.
+ */
+export function initDeepSuggestion(
+  s: SummaryStaleness,
+  thresholdPct: number = DEFAULT_DEEP_STALE_THRESHOLD,
+  opts: { agent?: boolean } = {},
+): string | null {
+  if (!deepRebuildDue(s, thresholdPct)) return null;
+  const n = (x: number) => x.toLocaleString("en-US");
+  const deep = cmd("graft build --deep");
+  const why =
+    s.summarized === 0
+      ? `no \`${deep}\` has run here yet, so none of the ${n(s.total)} nodes has a prose summary`
+      : `${n(s.stale + s.unsummarized)} of ${n(s.total)} node summaries (${Math.round(outdatedPercent(s))}%) are out of date ` +
+        `since the last one (${n(s.stale)} changed, ${n(s.unsummarized)} new)`;
+  return (
+    `· run \`${deep}\` next: ${why}. It writes them in an LLM pass that needs an API key and costs tokens; ` +
+    `\`${cmd("graft deep-threshold")} 100\` stops this suggestion` +
+    (opts.agent ? `. Tell the user a \`${deep}\` is recommended.` : "")
+  );
+}
+
+/**
  * The deep-rebuild nudge for a repo (or, given `children`, a workspace's child
  * repos combined), read from the graph on disk. For hosts with no statusline —
  * Kilo over MCP, Copilot over the CLI — the agent relaying this is the only way
@@ -547,6 +576,14 @@ const addStaleness = (into: SummaryStaleness, s: SummaryStaleness): void => {
   into.total += s.total;
   into.summarized += s.summarized;
 };
+
+/** Several graphs' summary staleness added up (a workspace's child repos), the
+ * same sum `deepDueFor` and `stalenessReport` judge. */
+export function combinedStaleness(graphs: (GraphV1 | null)[]): SummaryStaleness {
+  const sum: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
+  for (const g of graphs) addStaleness(sum, summaryStaleness(g));
+  return sum;
+}
 
 /**
  * The out-of-date share of `root`'s node summaries (or, given `children`, a

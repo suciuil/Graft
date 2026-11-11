@@ -6,7 +6,7 @@
 import { statSync, writeFileSync, readFileSync, mkdirSync, existsSync, rmSync, rmdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { HOSTS, detectHosts, hostRelPath, hostWiringName, type DetectProbe, type HostTarget } from './registry.js';
+import { HOSTS, defaultHosts, hostRelPath, hostWiringName, type DetectProbe, type HostTarget } from './registry.js';
 import { GRAFT_MARKERS, markersFor, upsertSection } from './sections.js';
 import type { Brand } from '../brand.js';
 import { registerMcpConfigs, type McpWrite } from './mcp-config.js';
@@ -80,7 +80,7 @@ export function runHostsInit(
   } else if (opts.all) {
     selected = HOSTS;
   } else {
-    selected = detectHosts(probe);
+    selected = defaultHosts(probe);
   }
 
   const written: HostsInitResult['written'] = [];
