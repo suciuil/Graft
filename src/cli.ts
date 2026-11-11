@@ -136,6 +136,7 @@ import {
   runVarCommand,
   type EnvDeps,
 } from "./env-cli.js";
+import { runLocationCommand } from "./context/store-location.js";
 import { latestSession, liveClaudeSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { readRepoRegistry, registerDiscovered, repoRegistryPath } from "./claude/repo-registry.js";
 import { knownFolders } from "./hosts/known-folders.js";
@@ -1950,6 +1951,30 @@ pricesCommand
         process.exitCode = await runVarCommand(v, value, opts, envDeps());
       });
   }
+  // Not a variable: moves every repo's generated files to a new folder and saves
+  // it in ~/.graft/settings.json (src/context/store-location.ts).
+  groups
+    .get("files")
+    ?.command("location")
+    .description(
+      "Choose the folder every repo's generated files are kept in (default ~/.graft/repos), and move the ones already there; " +
+        "checks the destination has room first",
+    )
+    .argument("[folder]", "new parent folder for every repo's <name>-<hash> folder (omit to show the current one)")
+    .option("--default", "move everything back to ~/.graft/repos and use the default again")
+    .option("--dry-run", "show what would move and the space needed, change nothing")
+    .option("--from <folder...>", "also move repo folders from this old location")
+    .action((value: string | undefined, opts: { default?: boolean; dryRun?: boolean; from?: string[] }) => {
+      process.exitCode = runLocationCommand(value, opts, {
+        env: process.env,
+        home: homedir(),
+        cwd: process.cwd(),
+        platform: process.platform,
+        store: userEnvStore(),
+        out: (l) => console.log(l),
+        err: (l) => console.error(l),
+      });
+    });
 }
 
 grouped(program.command("staleness"), GROUP.setup)

@@ -41,7 +41,7 @@ const ON = new Set(["1", "true", "yes", "on"]);
 const OFF = new Set(["0", "false", "no", "off"]);
 
 /** What a setting's value says: off, on at the default root, or on at a folder. */
-function readSwitch(raw: unknown, home: string): string | false | undefined {
+export function readSwitch(raw: unknown, home: string): string | false | undefined {
   if (raw === true) return defaultProfileStoreRoot(home);
   if (raw === false) return false;
   if (typeof raw !== "string") return undefined;
@@ -60,17 +60,33 @@ function readSwitch(raw: unknown, home: string): string | false | undefined {
  * anything the store is ON, at `~/.graft/repos`.
  */
 export function profileStoreRoot(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string | null {
+  return profileStoreSetting(env, home).root;
+}
+
+/** Which setting decided the store's root: the variable, `~/.graft/settings.json`, or neither. */
+export type ProfileStoreSource = "GRAFT_PROFILE_STORE" | "settings" | "default";
+
+/** {@link profileStoreRoot}, with the setting that decided it. */
+export function profileStoreSetting(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): { root: string | null; source: ProfileStoreSource } {
   const fromEnv = readSwitch(env.GRAFT_PROFILE_STORE, home);
-  if (fromEnv !== undefined) return fromEnv || null;
+  if (fromEnv !== undefined) return { root: fromEnv || null, source: "GRAFT_PROFILE_STORE" };
+  const fromSettings = settingsProfileStore(home);
+  if (fromSettings !== undefined) return { root: fromSettings || null, source: "settings" };
+  return { root: defaultProfileStoreRoot(home), source: "default" };
+}
+
+/** What `"profileStore"` in `~/.graft/settings.json` says, read as {@link readSwitch} reads it. */
+export function settingsProfileStore(home: string = homedir()): string | false | undefined {
   let settings: { profileStore?: unknown } | null = null;
   try {
     settings = JSON.parse(readFileSync(join(home, ".graft", "settings.json"), "utf8"));
   } catch {
     // no settings file, or an unreadable one: the default applies
   }
-  const fromSettings = readSwitch(settings?.profileStore, home);
-  if (fromSettings !== undefined) return fromSettings || null;
-  return defaultProfileStoreRoot(home);
+  return readSwitch(settings?.profileStore, home);
 }
 
 /**

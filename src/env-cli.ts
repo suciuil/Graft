@@ -70,12 +70,14 @@ export interface EnvVar {
 /** The command groups the variables live in, other than `api` and `prices`, which exist already. */
 export const ENV_GROUPS: Record<string, { title: string; help: string }> = {
   files: {
-    title: "Show or set where graft keeps its files: the profile store, the map folder, and the cross-repo savings list",
+    title: "Show or set where graft keeps its files: their location, the profile store, the map folder, and the cross-repo savings list",
     help:
-      "Where graft keeps what it writes. `files store` decides whether a repo that has no map or settings inside it yet " +
-      "keeps them in your profile (the default) or inside the repo; `files map-dir` names one map folder to use instead; " +
-      "`files repos-list` moves the list `graft savings --all` adds up. Each is a user environment variable, saved for " +
-      "every new terminal. `graft where` shows where the current repo's files ended up.",
+      "Where graft keeps what it writes. `files location` moves every repo's generated files to a folder you choose " +
+      "(default ~/.graft/repos) and keeps new repos there too, after checking the folder has room. `files store` decides " +
+      "whether a repo that has no map or settings inside it yet keeps them in your profile (the default) or inside the " +
+      "repo, without moving anything; `files map-dir` names one map folder to use instead; `files repos-list` moves the " +
+      "list `graft savings --all` adds up. Those three are user environment variables, saved for every new terminal. " +
+      "`graft where` shows where the current repo's files ended up.",
   },
   refresh: {
     title: "Show or set how the graph keeps up with the code: refresh before queries, change detection, worktree seeding, ignore files",
@@ -123,7 +125,8 @@ export const ENV_VARS: EnvVar[] = [
       "~/.graft/repos/<folder>-<hash of the repo path>/, so nothing is written into the checkout. An absolute folder: the " +
       "same layout under that folder. off: inside the repo as before (graft/ and .graft/config.json). A map or settings " +
       "file already in a repo is always used and never moved, whatever this says. Wins over \"profileStore\" in " +
-      "~/.graft/settings.json; --dir and GRAFT_DIR win over both. `graft where` shows the folder a repo uses.",
+      "~/.graft/settings.json; --dir and GRAFT_DIR win over both. Nothing already there is moved: " +
+      "`graft files location` moves every repo's folder to a new location. `graft where` shows the folder a repo uses.",
     unset: "on, at ~/.graft/repos (or what ~/.graft/settings.json says)",
     kind: "store",
     examples: ["graft files store", "graft files store off", "graft files store D:\\graft-maps", "graft files store --unset"],

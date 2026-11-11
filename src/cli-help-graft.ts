@@ -293,6 +293,31 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft env unset GRAFT_DIR"],
   },
   ...envVarHelp(),
+  "files location": {
+    description:
+      "Choose the folder every repo's generated files are kept in, and move the ones already there. Each repo has its " +
+      "own <folder>-<hash of the repo path> folder (its map, its settings and repo.json), by default under " +
+      "~/.graft/repos; the folder you name becomes their parent, so every repo keeps its own folder and finds it again " +
+      "from its path. Every repo folder graft knows of moves: from the current location, from the folders " +
+      "GRAFT_PROFILE_STORE or ~/.graft/settings.json name, from ~/.graft/repos, and from each --from folder. The new " +
+      "location is saved as \"profileStore\" in ~/.graft/settings.json, so all current repos and every new one use it, " +
+      "including hooks and MCP servers already running; a saved GRAFT_PROFILE_STORE, which would win over it, is removed. " +
+      "Before anything moves, graft checks that the destination has room: folders on the same drive are renamed and need " +
+      "no space, folders on another drive are copied, so their size on disk plus 5% must be free there. " +
+      "If there is not enough space, a build is running in one of them, or the destination is inside the current " +
+      "location, nothing is moved and nothing changes. The move is all or nothing: every folder on another drive is " +
+      "copied and checked first, then the ones on the same drive are renamed, and only when every folder has arrived is " +
+      "the new location saved and are the copied originals deleted from the old one; if any folder cannot be brought " +
+      "over, everything is put back and nothing is deleted. A folder of the same name already at the destination is kept and " +
+      "the old one left in place. Maps kept inside a repo (graft/) are not moved; --dir and GRAFT_DIR still win. Without a " +
+      "folder it shows the current location; --default moves everything back to ~/.graft/repos.",
+    examples: [
+      "graft files location",
+      "graft files location D:\\graft-maps --dry-run",
+      "graft files location D:\\graft-maps",
+      "graft files location --default",
+    ],
+  },
   grep: {
     description:
       "Search the indexed files for a regular expression (or plain text with --fixed). Unlike plain grep, every " +
