@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { detectOrigin, type OriginProbe } from '../src/reporting/origin.js';
+import { callerOf, detectOrigin, type OriginProbe } from '../src/reporting/origin.js';
 import { mcpClient, mcpClientVersion, setMcpClient } from '../src/mcp/client.js';
 
 const norm = (p: string): string => p.replace(/\\/g, '/');
@@ -103,6 +103,29 @@ test('names and versions are cut to the column widths; a failing read is not an 
   assert.equal(o.assistantVersion?.length, 50);
   const throwing: Partial<OriginProbe> = { env: { VSCODE_PID: '1', VSCODE_CWD: 'C:\\x' }, client: { name: null, version: null }, home: '/h', readJson: () => { throw new Error('EACCES'); } };
   assert.doesNotThrow(() => detectOrigin('cli', throwing));
+});
+
+test('callerOf: one key per agent, so two agents in one repo are not one turn', () => {
+  // Kilo over MCP and from its own shell is one caller, whatever its platform
+  assert.equal(callerOf(detectOrigin('mcp', probe({}, {}, { name: 'Kilo Code', version: '7.8.27' }))), 'Kilo');
+  assert.equal(callerOf(detectOrigin('cli', probe(KILO_IN_VSCODE))), 'Kilo');
+  assert.equal(callerOf(detectOrigin('cli', probe({ KILO: '1', KILO_PLATFORM: 'cli' }))), 'Kilo');
+  // Copilot drives graft from a VS Code terminal that names no agent, or as VS Code's MCP client
+  const copilotTerminal = callerOf(detectOrigin('cli', probe({ TERM_PROGRAM: 'vscode', TERM_PROGRAM_VERSION: '1.145.1' })));
+  assert.equal(copilotTerminal, 'GitHub Copilot');
+  assert.equal(callerOf(detectOrigin('mcp', probe({ VSCODE_PID: '1' }, {}, { name: 'Visual Studio Code', version: '1.145.1' }))), 'GitHub Copilot');
+  assert.notEqual(copilotTerminal, callerOf(detectOrigin('cli', probe(KILO_IN_VSCODE))), 'Kilo in VS Code is not Copilot');
+  // Claude Code in VS Code's terminal is Claude Code, not Copilot
+  assert.equal(callerOf(detectOrigin('cli', probe({ CLAUDECODE: '1', TERM_PROGRAM: 'vscode' }))), 'Claude Code');
+  // A person at a plain terminal: the terminal; nothing at all: null
+  assert.equal(callerOf(detectOrigin('cli', probe({ WT_SESSION: 'abc' }))), 'Windows Terminal');
+  assert.equal(callerOf({ assistant: null, assistantVersion: null, hostEnv: null, hostEnvVersion: null }), null);
+  // Every VS Code build counts, and only those: the editor names itself from product.json
+  const host = (hostEnv: string) => callerOf({ assistant: null, assistantVersion: null, hostEnv, hostEnvVersion: null });
+  for (const name of ['Visual Studio Code', 'Visual Studio Code - Insiders', 'Code - OSS', 'VSCodium']) {
+    assert.equal(host(name), 'GitHub Copilot', name);
+  }
+  assert.equal(host('Cursor'), 'Cursor');
 });
 
 test('the MCP handshake keeps the client version, and clears it with the name', () => {

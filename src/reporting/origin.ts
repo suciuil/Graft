@@ -258,6 +258,31 @@ export function detectOrigin(channel: Channel, probe?: Partial<OriginProbe>): Re
   return origin;
 }
 
+/**
+ * Which agent made a call, as a key that tells one agent's calls from
+ * another's in the same repo (`graft savings --last`, the turn's model mix in
+ * the savings footer). Kilo Code and the Kilo CLI are one key: Kilo reaches
+ * graft over MCP and from its shell in the same turn. A VS Code terminal with
+ * no agent of its own named is GitHub Copilot's, as `hostModelFor` assumes
+ * (graft registers no MCP server for Copilot, which drives the CLI). Null when
+ * nothing names the caller.
+ */
+export function callerOf(o: ReportOrigin): string | null {
+  const a = o.assistant;
+  if (a) return /^Kilo\b/.test(a) ? 'Kilo' : a;
+  if (o.hostEnv && VSCODE_CLIENT.test(o.hostEnv)) return 'GitHub Copilot';
+  return o.hostEnv;
+}
+
+/** {@link callerOf} for this process. Never throws. */
+export function callerKey(channel: Channel): string | null {
+  try {
+    return callerOf(processOrigin(channel));
+  } catch {
+    return null;
+  }
+}
+
 let cached: { key: string; origin: ReportOrigin } | null = null;
 
 /** {@link detectOrigin} for this process, cached: neither the environment nor the
