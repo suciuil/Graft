@@ -45,32 +45,14 @@ function scratchHome(): string {
   return mkdtempSync(join(tmpdir(), "graft-notice-"));
 }
 
-test("a person typing graft sees the new name once a day, with what it ran", () => {
+test("this fork never shows a person typing graft the rename notice or the upgrade hint, and stamps nothing", () => {
   const home = scratchHome();
-  const env = { PATH: "" };
   const now = Date.parse("2026-10-07T10:00:00Z");
-  const first = graftNotice({ ran: "graft ask", tty: true, env, home, now });
-  assert.equal(
-    first,
-    "· graft is now trail. this ran trail ask, and graft keeps working (shown once a day)\n" +
-      "· run graft upgrade to get the trail command too",
-  );
-  assert.equal(graftNotice({ ran: "graft ask", tty: true, env, home, now: now + 60_000 }), null, "not twice in a day");
-  assert.ok(graftNotice({ ran: "graft ask", tty: true, env, home, now: now + 25 * 3600_000 }), "again the next day");
-});
-
-test("the notice names the trail spelling of a renamed command", () => {
-  const out = graftNotice({ ran: "graft check", tty: true, env: { PATH: "" }, home: scratchHome() });
-  assert.match(out ?? "", /this ran trail build --check,/);
-});
-
-test("no upgrade hint once a trail command is on PATH", () => {
-  const bin = mkdtempSync(join(tmpdir(), "graft-bin-"));
-  const exe = join(bin, process.platform === "win32" ? "trail.cmd" : "trail");
-  writeFileSync(exe, "");
-  chmodSync(exe, 0o755);
-  const out = graftNotice({ ran: "graft grep", tty: true, env: { PATH: bin }, home: scratchHome() });
-  assert.equal(out, "· graft is now trail. this ran trail grep, and graft keeps working (shown once a day)");
+  for (const ran of ["graft ask", "graft check", "graft build --deep"]) {
+    assert.equal(graftNotice({ ran, tty: true, env: { PATH: "" }, home, now }), null, ran);
+    assert.equal(graftNotice({ ran, tty: true, env: { PATH: "" }, home, now: now + 25 * 3600_000 }), null, `${ran}, next day`);
+  }
+  assert.equal(existsSync(noticeStampPath(home)), false, "nothing stamped");
 });
 
 test("agents, pipes, CI and trail itself never see the notice, and it isn't stamped for them", () => {
@@ -334,14 +316,12 @@ test("both tool vocabularies count as retrievals", async () => {
 
 // --- the agent's line on a machine with graft and no trail ---
 
-test("on graft without trail, the agent is told once a week how to get trail", () => {
+test("this fork never tells the agent on graft without trail how to get trail, and stamps nothing", () => {
   const home = scratchHome();
   const now = Date.parse("2026-10-14T10:00:00Z");
-  const line = trailHandoverLine({ env: { PATH: "" }, home, now });
-  assert.match(line ?? "", /graft is now Trail-code/);
-  assert.match(line ?? "", /`graft upgrade` adds it and graft keeps working/);
-  assert.equal(trailHandoverLine({ env: { PATH: "" }, home, now: now + 3 * 86400_000 }), null, "not again that week");
-  assert.ok(trailHandoverLine({ env: { PATH: "" }, home, now: now + 8 * 86400_000 }), "again the next week");
+  assert.equal(trailHandoverLine({ env: { PATH: "" }, home, now }), null);
+  assert.equal(trailHandoverLine({ env: { PATH: "" }, home, now: now + 8 * 86400_000 }), null, "nor the next week");
+  assert.equal(existsSync(handoverStampPath(home)), false, "nothing stamped");
 });
 
 test("no handover line once trail is installed, under trail, in CI, or opted out", () => {

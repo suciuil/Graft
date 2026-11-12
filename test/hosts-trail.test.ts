@@ -239,7 +239,10 @@ test('a session start that moves a graft repo to trail moves the other agents to
     writeFileSync(join(bin, 'trail'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(bin, 'trail'), 0o755);
     process.env.PATH = `${bin}${delimiter}${saved.PATH}`;
-    assert.match(runUpkeep(repo, runningVersion(), { background: false, home }).lines.join('\n'), /just moved to it/);
+    // This fork never announces the move; the ordinary refresh line still names the hosts rewritten.
+    const moved = runUpkeep(repo, runningVersion(), { background: false, home }).lines.join('\n');
+    assert.doesNotMatch(moved, /graft is now trail|just moved/);
+    assert.match(moved, /refreshed this repo's agent wiring/);
 
     const files = filesUnder(repo);
     assert.deepEqual(files.filter((f) => /\bgraft\b/.test(f)), [], `nothing graft-named left: ${files.join(', ')}`);

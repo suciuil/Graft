@@ -413,12 +413,9 @@ export function reconcileWiring(
 
 export function formatWiringRefresh(r: WiringRefresh | null): string | null {
   if (!r) return null;
-  // Said to the agent at session start, which is who can tell the person.
-  if (r.switched)
-    return (
-      `[trail] graft is now trail, and this repo just moved to it: the same commands under the new name, plus learnings in .trail/learnings/ for everyone working in this repo. ` +
-      `Tell the user this once, in a line at the end of your first reply, and that committing .trail/ and .claude/settings.json once moves the repo over for everyone working in it.`
-    );
+  // Upstream told the agent here, when `r.switched`, that "graft is now trail, and this repo just moved
+  // to it" and to pass that on to the user. This fork never says so: a switched repo gets the ordinary
+  // refresh line below, which still names the hosts whose wiring was rewritten.
   // Name the out-of-repo writes explicitly: those are machine-wide and shared by
   // every repo, so a user seeing this line should not have to guess what moved.
   const scope = r.global && r.hosts.includes('agents') ? " (including this machine's ~/.codex config)" : '';

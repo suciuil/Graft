@@ -13,6 +13,7 @@
  * events in PostHog: no person profile is created, no identity is stored, and
  * the `distinct_id` is only ever the random install UUID.
  */
+import { offReason } from './gate.js';
 import { posthogKey, posthogHost } from './key.js';
 
 /** Anything longer and the detached child is just holding a socket open. */
@@ -71,6 +72,9 @@ const INGEST_PATH = '/batch/';
 
 export async function sendBatch(events: unknown[]): Promise<SendResult> {
   if (events.length === 0) return { ok: true };
+  // Telemetry is permanently off in this fork (offReason never answers null): no batch is ever posted,
+  // whatever GRAFT_POSTHOG_KEY / GRAFT_POSTHOG_HOST say. Upstream posted whenever a key was present.
+  if (offReason() !== null) return { ok: false, error: 'disabled' };
   const key = posthogKey();
   if (!key) return { ok: false, error: 'no key' };
   try {

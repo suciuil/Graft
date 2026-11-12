@@ -301,7 +301,7 @@ Learnings reach your teammates through git, with no server: commit `.trail/`, an
 trail team                     # this week's learnings and overlaps
 ```
 
-Coming soon: a Trail workspace, for your team's view across repos. A team page will show who is learning what, how often learnings were reused, and where work overlaps.
+This fork has no Trail workspace or team page: Trail cloud is permanently disabled, so `trail team` reads only your repo and its git history.
 
 ---
 
@@ -431,7 +431,7 @@ No. Each prompt gets only pointers to the matching code, and the learnings that 
 No. The graft map, the hooks, learnings and `trail check` all work without one. A key only adds the written summaries from `trail build --deep`.
 
 **Do I need to sign in?**
-No. Everything above works on your machine, and learnings reach your team through git. A Trail workspace, coming soon, is only for the team page across repos.
+No. Everything above works on your machine, and learnings reach your team through git. There is nothing to sign in to: Trail cloud (the workspace) is permanently disabled in this fork.
 
 **Which agents does it work with?**
 Claude Code gets the deepest setup: hooks, statusline, and learnings with every prompt. Trail-code also wires Cursor, Codex and other `AGENTS.md` readers, Gemini CLI, GitHub Copilot, Windsurf, Kiro, Antigravity, Grok, Hermes and AdaL, and serves any agent that speaks MCP.
@@ -828,7 +828,7 @@ trail refresh hash [on|off]          # GRAFT_REFRESH: find changed files by thei
 trail refresh seed [on|off]          # GRAFT_NO_SEED: start a new worktree from its parent's graph
 trail refresh gitignore [on|off]     # GRAFT_NO_GITIGNORE · refresh ignore-file [on|off]: GRAFT_NO_IGNORE
 trail agents gate [on|off]           # GRAFT_NO_GATE · agents statusline / npx / trail-switch
-trail output savings-copy [on|off]   # GRAFT_STDERR_SAVINGS · output rename-notice / browser
+trail output savings-copy [on|off]   # GRAFT_STDERR_SAVINGS · output browser
 trail env list [--set]               # all of them: the command, the variable, its default, its value here and saved
 trail env get|set|unset <NAME> ...   # the same by the variable's name
 ```

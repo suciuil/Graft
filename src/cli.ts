@@ -10,7 +10,7 @@
  */
 import { spawnSync } from "node:child_process";
 import "dotenv/config";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -620,6 +620,12 @@ program
   .argument("[server]", "the Trail the run reported to (init's --server)")
   .option("--resumed", "a later command's wait, after the first one ran out")
   .action(async (state: string, dir: string, server: string | undefined, o: { resumed?: boolean }) => {
+    // Trail cloud is permanently off in this fork: refuse before any server or pair state is written.
+    if (!cloudEnabled()) {
+      console.error(`✗ ${CLOUD_DISABLED}`);
+      process.exitCode = 1;
+      return;
+    }
     const base = serverUrl(server);
     if (base) useServer(base);
     await finishPair(state, resolve(dir), o.resumed ? { resumed: true, waitMs: WAIT_MS } : {});
@@ -1297,9 +1303,9 @@ grouped(program.command("build"), GROUP.setup)
         console.log(`  the map is kept outside the repo, so nothing in the repo changed; teammates run \`${cmd("graft build")}\` to get their own.`);
       } else if (process.env.GRAFT_NO_GITIGNORE) {
         console.log(`  ${rel}/ is a local cache: add it to your gitignore if you want it untracked.`);
-      } else {
-        console.log(`  ${rel}/ is git-ignored (added automatically), a local cache; teammates run \`${cmd("graft build")}\` to get their own.`);
       }
+      // Upstream also printed "<map>/ is git-ignored (added automatically), a local cache; teammates run
+      // `graft build` to get their own." after every build. This fork leaves that tip out.
 
       // A build that found no files used to end on the footer above, a "✓ 0 nodes"
       // that read like a broken install. The usual cause is a folder git-ignored by
@@ -2295,7 +2301,9 @@ program
   .command("mcp", { hidden: TRAIL })
   .description("Serve the graph over MCP (stdio): exposes graft_find_code, graft_trace_calls, graft_find_all, graft_file_api, graft_repo_map and graft_check_freshness as tools")
   .argument(...DIR_ARG)
-  .option("--brains", "serve only the paired Trail workspace's tools and skills (what Claude Code gets after init --connect)")
+  // Trail cloud's workspace server: permanently off in this fork. Kept, out of --help, so an old
+  // `mcp --brains` entry in an agent's config still starts and answers that the cloud is disabled.
+  .addOption(new Option("--brains", "Trail cloud: disabled in this fork").hideHelp())
   .action(async (dirArg: string | undefined, opts: { brains?: boolean }) => {
     const { startMcpServer } = await import("./mcp/server.js");
     if (opts.brains) {
@@ -2565,12 +2573,11 @@ grouped(program.command("init"), GROUP.setup)
   .option("--workspace <file>", "wire the folders of this VS Code .code-workspace file (default: the one in [dir], asking when there are several)")
   .option("--no-workspace", "ignore .code-workspace files and wire [dir] itself")
   .option("--verbose", "print every file written, the graph build's own output and the closing banner")
-  .option(
-    "--connect <code>",
-    "connect this machine to your Trail workspace with the one-time code from team.trailhq.com, and send it a summary of this repo (titles, counts and names; never code)",
-  )
-  .option("--pair <code>", "the pair code from Trail's onboarding page: that page shows this run live, then you review what it found")
-  .option("--server <url>", "the Trail that gave the code (default: Trail cloud, https://team.trailhq.com)")
+  // Trail cloud options: permanently off in this fork (they refuse with CLOUD_DISABLED below), so kept
+  // only to give that answer, and left out of --help.
+  .addOption(new Option("--connect <code>", "Trail cloud: disabled in this fork").hideHelp())
+  .addOption(new Option("--pair <code>", "Trail cloud: disabled in this fork").hideHelp())
+  .addOption(new Option("--server <url>", "Trail cloud: disabled in this fork").hideHelp())
   .option("--plain", "look back without asking Claude to name what it finds")
   .option("--look-back", "look back at your past sessions again, for what isn't kept or closed yet (the look-back is off unless TRAIL_NO_LOOK_BACK=0)")
   .action(async (dir: string, opts: InitOptions) => {
@@ -3774,9 +3781,11 @@ function loginCommand(name = "login"): Command {
   return new Command(name)
     .description("Sign this laptop in to a Trail workspace (disabled in this fork: Trail cloud is off)")
     .argument("[dir]", "the repo to add", ".")
-    .option("--code <code>", "a one-time sign-in code from Trail's web app (TRL-…): signs in with no browser step")
-    .option("--workspace <slug>", "the workspace to sign in to, as its page names it (default: this repo's, if it has one)")
-    .option("--server <url>", "a self-hosted Trail, e.g. https://trail.acme.internal (default: Trail cloud, https://team.trailhq.com)")
+    // Trail cloud is off in this fork: the options are still parsed (the action refuses), but `--help`
+    // no longer advertises a sign-in code, a workspace or a server (upstream defaulted to team.trailhq.com).
+    .addOption(new Option("--code <code>", "Trail cloud: disabled in this fork").hideHelp())
+    .addOption(new Option("--workspace <slug>", "Trail cloud: disabled in this fork").hideHelp())
+    .addOption(new Option("--server <url>", "Trail cloud: disabled in this fork").hideHelp())
     .action(async (dir: string, opts: { server?: string; workspace?: string; code?: string }) => {
       // Trail cloud is permanently off: refuse, like `telemetry enable`, before
       // anything is remembered, opened or sent.
@@ -4162,7 +4171,8 @@ function localTeam(repo: string, days: number, json: boolean): void {
     console.log("\noverlap");
     for (const o of overlaps) for (const [i, l] of wrap(o, 66, "    ").entries()) console.log(i === 0 ? `  ● ${l}` : l);
   }
-  console.log("\n· reuse and the team page, across your repos, are in a Trail workspace");
+  // Upstream ends with "reuse and the team page, across your repos, are in a Trail workspace":
+  // Trail cloud is permanently off in this fork, so that pointer is left out.
   printLines(cloudLines(repo, { command: "check" }));
 }
 

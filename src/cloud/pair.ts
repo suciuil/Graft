@@ -24,7 +24,7 @@ import { newState, pairSettled, PAIR_WAIT_MS, rememberPair } from "./nudge.js";
 import type { TeammateSummary, TokensSummary } from "./onboarding.js";
 import { dropActivity, reviewPayload, syncRepo } from "./workspace-sync.js";
 import { machinePayload, otherRepos, setUpPicked, type OtherRepo } from "./other-repos.js";
-import { claimHandoff, cloudForRepo, fetchMe, isError, postHandoffProgress, readCloud, readClouds, registerHandoff, sendMachineRepos, trailUrl, writeCloud, type Cloud, type SetupFailure } from "./workspace.js";
+import { claimHandoff, cloudEnabled, cloudForRepo, fetchMe, isError, postHandoffProgress, readCloud, readClouds, registerHandoff, sendMachineRepos, trailUrl, writeCloud, type Cloud, type SetupFailure } from "./workspace.js";
 
 /** A pair code as the onboarding page prints it: letters and digits. */
 export function validPairCode(code: string): boolean {
@@ -291,6 +291,9 @@ const PICK_AFTER_REVIEW_MS = 10 * 60 * 1000;
  * Returns what happened, for tests.
  */
 export async function finishPair(state: string, repo: string, opts: FinishOptions = {}): Promise<"uploaded" | "expired" | "timed_out" | "failed"> {
+  // Trail cloud is permanently off in this fork: no wait (it used to poll for up to an hour), no
+  // request, and no pair state written.
+  if (!cloudEnabled()) return "failed";
   const { outcome, learnings } = await waitAndUpload(state, repo, opts);
   const now = (opts.now ?? Date.now)();
   if (outcome === "timed_out") pairSettled(state, "timed_out", undefined, undefined, now);

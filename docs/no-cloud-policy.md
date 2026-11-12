@@ -64,7 +64,17 @@ cherry-pick, copy) that sends data to a cloud:
    your reply.
 5. Keep the code compiling and the rest of the product working: disable at the
    gate, do not rip out callers.
-6. Record the change in `CHANGELOG.md` under "Change request", as was done for
+6. Also check the gate at the point where the request would leave, not only in
+   the command that leads there, and let no injected `fetchImpl`, key or host
+   setting through it. In this fork that is `call()` in
+   `src/cloud/workspace.ts`, `post()` in `src/cloud/onboarding.ts`,
+   `WorkspaceConnector.post()` in `src/mcp/connector.ts`, `finishPair()` in
+   `src/cloud/pair.ts` (and the hidden `_trail-pair` command that runs it), and
+   `sendBatch()` in `src/telemetry/send.ts`. Hide the options of a disabled
+   feature from `--help` with commander's `Option#hideHelp()` rather than
+   deleting them (`init --connect/--pair/--server`, `mcp --brains`,
+   `login --code/--workspace/--server`).
+7. Record the change in `CHANGELOG.md` under "Change request", as was done for
    Trail cloud and telemetry.
 
 ## Rule 2: users cannot turn cloud-sending features back on

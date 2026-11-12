@@ -44,7 +44,18 @@ function reset(): void { hits = []; missing = new Set(); status = 200; }
 
 const EVENTS = [{ event: 'query', properties: { command: 'ask' }, distinct_id: 'abc', timestamp: '2026-01-01T00:00:00Z' }];
 
-test('the batch goes to /batch/, in one request', async () => {
+// Telemetry is permanently off in this fork, so sendBatch never posts: the tests of what it does with a
+// server's answer run only with CLOUD_TESTS=1 (and fail there, by design, until the gate is lifted).
+const CLOUD_SKIP = process.env.CLOUD_TESTS === '1' ? false : 'needs data sent to a cloud, which this fork disables';
+
+test('telemetry is off: a batch is never posted, even with a key and a host configured', async () => {
+  reset();
+  const res = await sendBatch(EVENTS);
+  assert.deepEqual(res, { ok: false, error: 'disabled' });
+  assert.deepEqual(hits, [], 'nothing reached the server');
+});
+
+test('the batch goes to /batch/, in one request', { skip: CLOUD_SKIP }, async () => {
   reset();
   const res = await sendBatch(EVENTS);
   assert.equal(res.ok, true);
@@ -54,7 +65,7 @@ test('the batch goes to /batch/, in one request', async () => {
   assert.equal(hits[0].body.batch[0].properties.$process_person_profile, false);
 });
 
-test('a 404 is reported rather than retried elsewhere', async () => {
+test('a 404 is reported rather than retried elsewhere', { skip: CLOUD_SKIP }, async () => {
   reset();
   missing.add('/batch/');
   const res = await sendBatch(EVENTS);
@@ -63,7 +74,7 @@ test('a 404 is reported rather than retried elsewhere', async () => {
   assert.deepEqual(hits, [], 'no second path is attempted');
 });
 
-test('a rejected key is reported as 401 — the state the probe produced', async () => {
+test('a rejected key is reported as 401 — the state the probe produced', { skip: CLOUD_SKIP }, async () => {
   reset();
   status = 401;
   const res = await sendBatch(EVENTS);
@@ -72,14 +83,14 @@ test('a rejected key is reported as 401 — the state the probe produced', async
   assert.deepEqual(hits.map((h) => h.path), ['/batch/']);
 });
 
-test('a 500 is reported so the queue keeps the batch', async () => {
+test('a 500 is reported so the queue keeps the batch', { skip: CLOUD_SKIP }, async () => {
   reset();
   status = 500;
   const res = await sendBatch(EVENTS);
   assert.equal(res.status, 500);
 });
 
-test('an unreachable host is a transport error, not a path problem', async () => {
+test('an unreachable host is a transport error, not a path problem', { skip: CLOUD_SKIP }, async () => {
   reset();
   const saved = process.env.GRAFT_POSTHOG_HOST;
   process.env.GRAFT_POSTHOG_HOST = 'http://127.0.0.1:1';

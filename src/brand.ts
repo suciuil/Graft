@@ -16,7 +16,7 @@
  *
  * This file imports nothing heavier than node:fs, because the hooks load it.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -138,8 +138,6 @@ export function adoptRepoBrand(
 /* the once-a-day line for people still typing graft                          */
 /* -------------------------------------------------------------------------- */
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export function noticeStampPath(home: string = homedir()): string {
   return join(home, ".graft", "rename-notice.json");
 }
@@ -184,34 +182,14 @@ export interface NoticeInput {
 }
 
 /**
- * The line a person typing `graft` sees, at most once a day, or null.
- *
- * Never shown to an agent (no terminal, or Claude Code's `CLAUDECODE` is set),
- * in CI, or under trail itself: agents and scripts get graft's output exactly
- * as it was. Writing the stamp is best-effort; a home we cannot write to just
- * means the line may show again tomorrow.
+ * The once-a-day rename notice upstream shows a person typing `graft`
+ * ("graft is now trail. this ran trail …" and "run graft upgrade to get the
+ * trail command too"). This fork never shows it, to anyone, and writes no
+ * stamp: always null. Kept as a function so the call site and an upstream
+ * merge that touches it stay visible.
  */
-export function graftNotice(input: NoticeInput): string | null {
-  const env = input.env ?? process.env;
-  if (brand(env) !== "graft" || !input.tty) return null;
-  if (env.CLAUDECODE !== undefined || env.CI || env.GRAFT_NO_RENAME_NOTICE) return null;
-  const now = input.now ?? Date.now();
-  const path = noticeStampPath(input.home);
-  try {
-    const last = (JSON.parse(readFileSync(path, "utf8")) as { shownAt?: number }).shownAt ?? 0;
-    if (now - last < DAY_MS) return null;
-  } catch {
-    /* never shown */
-  }
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ shownAt: now }) + "\n");
-  } catch {
-    /* shown again next time */
-  }
-  const lines = [`· graft is now trail. this ran ${cmd(input.ran, "trail")}, and graft keeps working (shown once a day)`];
-  if (!trailOnPath(env)) lines.push("· run graft upgrade to get the trail command too");
-  return lines.join("\n");
+export function graftNotice(_input: NoticeInput): string | null {
+  return null;
 }
 
 /** The nearest directory at or above `dir` holding a `.git`, or null. */
@@ -249,40 +227,17 @@ export function strandedRepoNotice(input: { cwd: string; tty: boolean; env?: Nod
   return "· this repo's agent hooks were set up by an older graft and can't find trail. run trail init here once to move the repo over";
 }
 
-const WEEK_MS = 7 * DAY_MS;
-
 export function handoverStampPath(home: string = homedir()): string {
   return join(home, ".graft", "trail-handover.json");
 }
 
 /**
- * The line a Claude Code session start hands the agent on a machine that has
- * graft but not the trail command, at most once a week; or null.
- *
- * {@link graftNotice} reaches a person typing graft. Most people only meet
- * graft through their agent, so the agent is the one who can tell them that
- * `graft upgrade` adds trail. Once trail is installed, the next session moves
- * the repo over by itself (see upkeep-run.ts), so this stops.
+ * The line upstream has a Claude Code session start hand the agent, at most
+ * once a week, on a machine with graft but no trail command ("graft is now
+ * Trail-code … tell the user that `graft upgrade` adds it"). This fork never
+ * hands it over and writes no stamp: always null. Kept as a function so the
+ * call site and an upstream merge that touches it stay visible.
  */
-export function trailHandoverLine(input: { env?: NodeJS.ProcessEnv; home?: string; now?: number } = {}): string | null {
-  const env = input.env ?? process.env;
-  if (brand(env) !== "graft" || env.CI || env.GRAFT_NO_RENAME_NOTICE || trailOnPath(env)) return null;
-  const now = input.now ?? Date.now();
-  const path = handoverStampPath(input.home);
-  try {
-    const last = (JSON.parse(readFileSync(path, "utf8")) as { shownAt?: number }).shownAt ?? 0;
-    if (now - last < WEEK_MS) return null;
-  } catch {
-    /* never shown */
-  }
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ shownAt: now }) + "\n");
-  } catch {
-    /* shown again next time */
-  }
-  return (
-    "· graft is now Trail-code: the same code map under the `trail` command, plus learnings everyone working in the repo shares in .trail/. " +
-    "Tell the user once, in a line at the end of your first reply, that `graft upgrade` adds it and graft keeps working."
-  );
+export function trailHandoverLine(_input: { env?: NodeJS.ProcessEnv; home?: string; now?: number } = {}): string | null {
+  return null;
 }

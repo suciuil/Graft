@@ -8,7 +8,7 @@
  *   graft prices file | bundled
  *   graft refresh auto | hash | seed | gitignore | ignore-file
  *   graft agents gate | statusline | npx | trail-switch
- *   graft output savings-copy | rename-notice | browser
+ *   graft output savings-copy | browser
  *
  * plus `graft env list|get|set|unset` over all of them. Each saves a USER
  * environment variable through the store `graft api key` uses (llm-settings.ts):
@@ -97,11 +97,11 @@ export const ENV_GROUPS: Record<string, { title: string; help: string }> = {
       "variable, saved for every new terminal.",
   },
   output: {
-    title: "Show or set what graft prints: the savings copy on stderr, the rename notice, and opening a browser",
+    title: "Show or set what graft prints: the savings copy on stderr, and opening a browser",
     help:
       "What graft prints or opens besides the answer: `output savings-copy` the copy of the savings line on stderr when " +
-      "stdout is piped, `output rename-notice` the notice that graft is now trail, and `output browser` whether " +
-      "`graft viz` opens a browser. Each is a user environment variable, saved for every new terminal.",
+      "stdout is piped, and `output browser` whether `graft viz` opens a browser. Each is a user environment variable, " +
+      "saved for every new terminal.",
   },
 };
 
@@ -499,20 +499,8 @@ export const ENV_VARS: EnvVar[] = [
     isOn: (raw) => raw !== "0",
     examples: ["graft output savings-copy", "graft output savings-copy off"],
   },
-  {
-    name: "GRAFT_NO_RENAME_NOTICE",
-    command: "output rename-notice",
-    title: "Show or set GRAFT_NO_RENAME_NOTICE: the notice that graft is now called trail",
-    help:
-      "Once a day, someone typing graft in a terminal is told it is now called trail. Agents, hooks, CI and pipes never " +
-      "see it. off = never show it.",
-    unset: "on",
-    kind: "switch",
-    defaultOn: true,
-    store: { on: null, off: "1" },
-    isOn: () => false,
-    examples: ["graft output rename-notice", "graft output rename-notice off"],
-  },
+  // Upstream's GRAFT_NO_RENAME_NOTICE (`output rename-notice`) is gone: this fork never shows the
+  // "graft is now called trail" notice (graftNotice in src/brand.ts), so there is nothing to switch off.
   {
     name: "GRAFT_NO_BROWSER",
     command: "output browser",

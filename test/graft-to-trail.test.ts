@@ -38,7 +38,9 @@ test('the refresh moves a repo when asked to, even when graft itself has not cha
   const moved = reconcileWiring(repo, '1.0.0', { ...deps, toTrail: () => true });
   assert.equal(moved?.switched, true);
   assert.deepEqual(calls, [false, true]);
-  assert.match(formatWiringRefresh(moved)!, /graft is now trail, and this repo just moved to it/);
+  // This fork never announces the move; the ordinary refresh line still names the hosts rewritten.
+  assert.doesNotMatch(formatWiringRefresh(moved)!, /graft is now trail|just moved/);
+  assert.match(formatWiringRefresh(moved)!, /refreshed this repo's agent wiring .*: claude\./);
 });
 
 test('a graft repo moves to trail once the trail command is installed, and only once', () => {
@@ -61,7 +63,7 @@ test('a graft repo moves to trail once the trail command is installed, and only 
 
     process.env.PATH = `${binWith('trail')}${delimiter}${saved.path}`;
     const first = runUpkeep(repo, runningVersion(), { background: false, home });
-    assert.match(first.lines.join('\n'), /graft is now trail, and this repo just moved to it/);
+    assert.doesNotMatch(first.lines.join('\n'), /graft is now trail|just moved/, 'this fork never announces the move');
     assert.ok(repoWiredForTrail(repo));
     assert.ok(existsSync(join(repo, '.trail', 'hook.cjs')), "trail's shared hook");
     assert.ok(existsSync(join(home, '.claude', 'skills', 'trail', 'SKILL.md')), 'the skill is the person’s own');

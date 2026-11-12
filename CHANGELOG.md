@@ -715,6 +715,18 @@
   stays hard-off: `readClouds()` is always empty, so `trail login` and
   `trail workspace` refuse, and `login`, `logout` and `workspace` stay out of
   `trail --help`.
+- **No more graft-to-trail rename tips, and no Trail cloud in help or
+  messages.** The "graft is now trail" notices, the handover line and the
+  build footer's git-ignore tip are gone, and so is the setting that switched
+  the notice off (`graft output rename-notice`, `GRAFT_NO_RENAME_NOTICE`). `init --connect`, `--pair` and
+  `--server`, `mcp --brains` and `login --code`, `--workspace` and `--server`
+  are hidden from `--help` (still refused), `trail check` no longer points to
+  a Trail workspace, and the README no longer announces one as coming soon.
+- **Every Trail cloud and telemetry send point refuses on its own.** The
+  onboarding requests, the workspace connector in `trail mcp`, the background
+  pair wait (`_trail-pair`, which used to poll for up to an hour) and the
+  telemetry batch never send, even when a test hook, a key or a host is
+  supplied, and leftover pairing state never turns into "connected" news.
 - **`trail init` no longer sends past sessions or PR reviews to Claude.** The
   new read of past Claude Code sessions (`src/learn/sessions.ts`) and the
   PR-review read are permanently off. The PR-review read now also sends PR

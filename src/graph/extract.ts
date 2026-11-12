@@ -755,6 +755,7 @@ interface CFamilyParse {
   result: ExtractResult;
   errors: number;
   regions: number;
+  rows: number[];
 }
 
 /**
@@ -764,13 +765,17 @@ interface CFamilyParse {
  * in one branch and closed after the `#endif`), the tree has errors, and the
  * functions caught in them are lost.
  *
- * Such a file is parsed again as two branch views (see {@link conditionalViews}):
+ * Such a file is parsed again as two branch views (see {@link pickBranches} and
+ * {@link renderConditionalView}):
  * each `#if` chain keeps only its first branch, or only its last. The tree whose
  * errors cover the least text is extracted. A function, type or variable the other
  * parses found and it did not (one defined in a branch that view left out, or one
  * lost in an error) is added, and so are the calls the other parses saw in a function they share, so
- * calls written in a left-out branch still count. Files that parse without errors,
- * nearly all of them, are parsed once, as before.
+ * calls written in a left-out branch still count. When the best view still has
+ * errors, other branches (or none) of the chains next to them are tried (see
+ * {@link refineConditionalView}): code that cannot compile usually sits in a
+ * branch no build turns on. Files that parse without errors, nearly all of
+ * them, are parsed once, as before.
  *
  * An EB tresos code template is never parsed as written: its two template views
  * (see {@link tresosViews}) take the original's place, and the branch views are
@@ -847,7 +852,9 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   }
   // Initializer elements in `#if` blocks that are never on together, each
   // without its comma (see withInitializerCommas).
-  const commas = firsts[base].errors > 0 ? withInitializerCommas(texts[base]) : null;
+  const commaOrigin = texts[base];
+  const commaLines = firsts[base].errors > 0 ? initializerCommaLines(commaOrigin.split("\n")) : [];
+  const commas = withCommaLines(commaOrigin, commaLines);
   if (commas !== null) {
     texts.push(commas);
     firsts.push(parse(commas));
@@ -862,12 +869,35 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   // in another branch (assembler in `#if OS_ASM`), while only its views close
   // nothing they did not open.
   const viewed = cOnly !== null && texts[base] !== cOnly ? [texts[base], cOnly] : [texts[base]];
-  const views = original.errors === 0 ? [] : viewed.flatMap(conditionalViews);
+  const chainsOf = (text: string): ConditionalSet | null => {
+    if (text !== commas) return conditionalChains(text);
+    const set = conditionalChains(commaOrigin);
+    return set === null ? null : { ...set, commas: commaLines };
+  };
+  const sets = original.errors === 0 ? [] : viewed.map(chainsOf).filter((s): s is ConditionalSet => s !== null);
+  const views = sets.flatMap((set) =>
+    (["first", "last"] as const).map((pick) => {
+      const keep = pickBranches(set, pick);
+      return { set, keep, parse: parse(renderConditionalView(set, keep).text) };
+    }),
+  );
   if (views.length === 0 && texts.length === 1)
     return { result: markParseErrors(original.result, original.regions), errors: original.errors, first };
-  const parses = [original, ...firsts.filter((p) => p !== original), ...views.map(parse)];
+  const parses = [original, ...firsts.filter((p) => p !== original), ...views.map((v) => v.parse)];
   let best = original;
   for (const p of parses) if (p.errors < best.errors) best = p;
+  // Errors left in the best view: try other branches of the chains next to
+  // them (see refineConditionalView). Trials are only counted, not extracted.
+  const seed = views.reduce<(typeof views)[number] | null>((a, v) => (a === null || v.parse.errors < a.parse.errors ? v : a), null);
+  if (seed !== null && best.errors > 0 && seed.parse.errors > 0) {
+    const countErrors = (text: string) => parseDepth(grammar, text, (root) => syntaxErrors(asNative(root)));
+    const refined = refineConditionalView(seed.set, seed.keep, seed.parse, countErrors);
+    if (refined !== null) {
+      const p = parse(refined.text);
+      parses.push(p);
+      if (p.errors < best.errors) best = p;
+    }
+  }
   const merged = best.result;
   if (texts[base] !== source || best !== original) {
     // The view's text has the left-out lines blanked; the file node describes
@@ -889,28 +919,33 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
  * plus one for each MISSING node. Sizes, not node counts: when the parser gives
  * up, one ERROR can hold the whole file, which is worse than a few small errors.
  * `regions` is how many places the parser could not read: those ERROR and
- * MISSING nodes, counted once each.
+ * MISSING nodes, counted once each. `rows` are the 0-based lines they start
+ * on (an ERROR's last line too), in order.
  */
-function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: number } {
-  if (!root.hasError) return { errors: 0, regions: 0 };
+function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: number; rows: number[] } {
+  if (!root.hasError) return { errors: 0, regions: 0, rows: [] };
   let errors = 0;
   let regions = 0;
+  const rows: number[] = [];
   const stack: Parser.SyntaxNode[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (node.type === "ERROR") {
       errors += Math.max(1, node.endIndex - node.startIndex);
       regions++;
+      rows.push(node.startPosition.row);
+      if (node.endPosition.row !== node.startPosition.row) rows.push(node.endPosition.row);
       continue;
     }
     if (node.isMissing) {
       errors++;
       regions++;
+      rows.push(node.startPosition.row);
       continue;
     }
     for (const child of node.children) if (child.hasError || child.isMissing) stack.push(child);
   }
-  return { errors, regions };
+  return { errors, regions, rows: rows.sort((a, b) => a - b) };
 }
 
 const symbolKey = (n: NodeV1): string => `${n.kind}:${n.name}@${n.span.slice(0, n.span.indexOf("-"))}`;
@@ -968,20 +1003,30 @@ function mergeCFamilyParse(into: ExtractResult, other: ExtractResult, rel: strin
 const CONDITIONAL_DIRECTIVE = /^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$/;
 const IF_ZERO = /^\s*\(?\s*0\s*\)?\s*(\/[/*].*)?$/;
 
-/**
- * Two views of a C/C++ file with `#if` chains: in the first, each chain keeps its
- * first branch (the second for `#if 0`); in the last, its last branch (the
- * `#else` when there is one). The directive lines and the left-out branches are
- * blanked with spaces, so every line, column and offset stays where it was.
- * A chain without its `#endif` is left as it is. Empty when the file has no
- * complete chain.
- */
-export function conditionalViews(source: string): string[] {
+/** `#error` and `#warning`: a message for the compiler, no code. */
+const DIAGNOSTIC_DIRECTIVE = /^[ \t]*#[ \t]*(error|warning)\b/;
+
+interface ConditionalBranch { at: number; end: number; cond: string; kw: string }
+/** One `#if` chain: its branches (each opened by the directive at `at`, which
+ * goes on to `end`), its `#endif` (-1 when the file never closes the chain),
+ * and the chain and branch it sits in (-1 at the top). */
+interface ConditionalChain {
+  branches: ConditionalBranch[];
+  endif: number;
+  endifEnd: number;
+  parent: number;
+  parentBranch: number;
+}
+/** A text's lines and its `#if` chains, in the order they open. A view says, per
+ * chain, which branch it keeps (-1: none). `commas` are directive lines each
+ * view turns into a comma (see {@link initializerCommaLines}). */
+interface ConditionalSet { lines: string[]; chains: ConditionalChain[]; commas?: number[] }
+
+/** The `#if` chains of a text, or null when none of them is complete. */
+function conditionalChains(source: string): ConditionalSet | null {
   const lines = source.split("\n");
-  interface Branch { at: number; end: number; cond: string }
-  interface Chain { branches: Branch[]; endif: number; endifEnd: number }
-  const chains: Chain[] = [];
-  const open: Chain[] = [];
+  const chains: ConditionalChain[] = [];
+  const open: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     const m = CONDITIONAL_DIRECTIVE.exec(lines[i].replace(/\r$/, ""));
     let end = i;
@@ -990,41 +1035,158 @@ export function conditionalViews(source: string): string[] {
     if (m) {
       const kw = m[1];
       if (kw.startsWith("if")) {
-        const chain: Chain = { branches: [{ at: i, end, cond: m[2] }], endif: -1, endifEnd: -1 };
-        chains.push(chain);
-        open.push(chain);
+        const parent = open.length > 0 ? open[open.length - 1] : -1;
+        const parentBranch = parent >= 0 ? chains[parent].branches.length - 1 : -1;
+        chains.push({ branches: [{ at: i, end, cond: m[2], kw }], endif: -1, endifEnd: -1, parent, parentBranch });
+        open.push(chains.length - 1);
       } else if (kw === "endif") {
-        const chain = open.pop();
-        if (chain) {
-          chain.endif = i;
-          chain.endifEnd = end;
+        const c = open.pop();
+        if (c !== undefined) {
+          chains[c].endif = i;
+          chains[c].endifEnd = end;
         }
-      } else open[open.length - 1]?.branches.push({ at: i, end, cond: m[2] });
+      } else if (open.length > 0) chains[open[open.length - 1]].branches.push({ at: i, end, cond: m[2], kw });
     }
     i = end;
   }
-  const complete = chains.filter((c) => c.endif >= 0);
-  if (complete.length === 0) return [];
-  const view = (pick: "first" | "last"): string => {
-    const blank = new Uint8Array(lines.length);
-    for (const chain of complete) {
-      const { branches } = chain;
-      for (const b of branches) blank.fill(1, b.at, b.end + 1);
-      blank.fill(1, chain.endif, chain.endifEnd + 1);
-      const zero = IF_ZERO.test(branches[0].cond);
-      const keep =
-        pick === "first"
-          ? zero ? (branches.length > 1 ? 1 : -1) : 0
-          : branches.length > 1 ? branches.length - 1 : zero ? -1 : 0;
-      branches.forEach((b, k) => {
-        if (k === keep) return;
-        const to = k + 1 < branches.length ? branches[k + 1].at : chain.endif;
+  return chains.some((c) => c.endif >= 0) ? { lines, chains } : null;
+}
+
+/** The branch each chain keeps in the first view of a C/C++ file (its first
+ * branch, the second for `#if 0`) or the last (its last branch, the `#else`
+ * when there is one). A chain without its `#endif` is left as it is (see
+ * {@link renderConditionalView}). */
+function pickBranches(set: ConditionalSet, pick: "first" | "last"): number[] {
+  return set.chains.map(({ branches }) => {
+    const zero = IF_ZERO.test(branches[0].cond);
+    return pick === "first"
+      ? zero ? (branches.length > 1 ? 1 : -1) : 0
+      : branches.length > 1 ? branches.length - 1 : zero ? -1 : 0;
+  });
+}
+
+/**
+ * The view of `set` that keeps branch `keep[c]` of each complete chain `c` (none
+ * for -1): directive lines and left-out branches are blanked with spaces, and so
+ * are `#error` and `#warning` lines, which hold no code but break the grammar
+ * where they sit inside an expression (`f(a` `#warning "todo"` `+ b);`).
+ * `blanked` counts the lines of code the view leaves out. A comma line in a
+ * left-out branch stays blank, with the elements around it.
+ */
+function renderConditionalView(set: ConditionalSet, keep: number[]): { text: string; blanked: number } {
+  const { lines, chains } = set;
+  const blank = new Uint8Array(lines.length);
+  const dropped = new Uint8Array(lines.length);
+  let blanked = 0;
+  chains.forEach((chain, c) => {
+    if (chain.endif < 0) return;
+    const { branches } = chain;
+    for (const b of branches) blank.fill(1, b.at, b.end + 1);
+    blank.fill(1, chain.endif, chain.endifEnd + 1);
+    branches.forEach((b, k) => {
+      if (k === keep[c]) return;
+      const to = k + 1 < branches.length ? branches[k + 1].at : chain.endif;
+      if (to > b.end + 1) {
         blank.fill(1, b.end + 1, to);
-      });
+        dropped.fill(1, b.end + 1, to);
+        blanked += to - b.end - 1;
+      }
+    });
+  });
+  for (let i = 0; i < lines.length; i++) {
+    if (blank[i] || !DIAGNOSTIC_DIRECTIVE.test(lines[i])) continue;
+    const end = directiveEnd(lines, i);
+    blank.fill(1, i, end + 1);
+    i = end;
+  }
+  const out = lines.map((line, i) => (blank[i] ? line.replace(/[^\r]/g, " ") : line));
+  for (const i of set.commas ?? []) if (!dropped[i]) out[i] = commaLine(lines[i]);
+  return { text: out.join("\n"), blanked };
+}
+
+/** Whether every branch around chain `c` is one `keep` keeps. */
+function chainActive(set: ConditionalSet, keep: number[], c: number): boolean {
+  for (let { parent, parentBranch } = set.chains[c]; parent >= 0; { parent, parentBranch } = set.chains[parent])
+    if (set.chains[parent].endif >= 0 && keep[parent] !== parentBranch) return false;
+  return true;
+}
+
+/** How many chains near the errors a refinement round tries, how far before an
+ * error a chain may end, and how many trial parses a file gets in all. */
+const FLIP_CHAINS = 6;
+const FLIP_WINDOW = 400;
+const FLIP_BUDGET = 16;
+
+/**
+ * Other branch choices for the chains next to the first errors of a view: those
+ * the error sits in (innermost first), then those that end shortly before it
+ * (nearest first). Each chain may keep another of its branches, or none when it
+ * has no `#else`. A `__cplusplus` chain is left as it is: its branch is code a
+ * C++ compiler builds, which the C-only view and the C++ parse of a header
+ * already deal with (see {@link extractCFamily}).
+ */
+function flipCandidates(set: ConditionalSet, keep: number[], rows: number[]): Array<{ chain: number; branch: number }> {
+  const rank = new Map<number, number>();
+  for (const row of rows.slice(0, 3)) {
+    set.chains.forEach((chain, c) => {
+      if (chain.endif < 0 || chain.branches.some((b) => /\b__cplusplus\b/.test(b.cond))) return;
+      const from = chain.branches[0].at;
+      const to = chain.endifEnd;
+      let score: number;
+      if (from <= row && row <= to) score = (to - from) / (set.lines.length + 1);
+      else if (to < row && row - to <= FLIP_WINDOW) score = row - to;
+      else return;
+      if (!chainActive(set, keep, c)) return;
+      const known = rank.get(c);
+      if (known === undefined || score < known) rank.set(c, score);
+    });
+  }
+  const out: Array<{ chain: number; branch: number }> = [];
+  for (const [c] of [...rank].sort((a, b) => a[1] - b[1]).slice(0, FLIP_CHAINS)) {
+    const { branches } = set.chains[c];
+    const options = branches.map((_, k) => k);
+    if (branches[branches.length - 1].kw !== "else") options.push(-1);
+    for (const branch of options) if (branch !== keep[c]) out.push({ chain: c, branch });
+  }
+  return out;
+}
+
+/**
+ * A view with fewer errors than `start`, found by keeping other branches of the
+ * chains next to its errors (see {@link flipCandidates}), or null. Code that
+ * cannot compile in a branch (a stray brace, a call with one parenthesis too
+ * many, a statement list ended with commas) is code no build turns on, so a view
+ * without it is closer to the file a compiler sees. Each round keeps the trial
+ * with the fewest errors, the one leaving out the fewest lines on a tie.
+ */
+function refineConditionalView(
+  set: ConditionalSet,
+  keep: number[],
+  start: { errors: number; rows: number[] },
+  countErrors: (text: string) => { errors: number; rows: number[] },
+): { text: string; keep: number[] } | null {
+  let current = start;
+  let currentKeep = keep;
+  let text: string | null = null;
+  let budget = FLIP_BUDGET;
+  while (current.errors > 0 && budget > 0) {
+    let found: { errors: number; rows: number[]; keep: number[]; text: string; blanked: number } | null = null;
+    for (const { chain, branch } of flipCandidates(set, currentKeep, current.rows)) {
+      if (budget-- <= 0) break;
+      const trial = currentKeep.slice();
+      trial[chain] = branch;
+      const view = renderConditionalView(set, trial);
+      const counted = countErrors(view.text);
+      if (counted.errors >= current.errors) continue;
+      if (found === null || counted.errors < found.errors || (counted.errors === found.errors && view.blanked < found.blanked))
+        found = { ...counted, keep: trial, text: view.text, blanked: view.blanked };
     }
-    return lines.map((line, i) => (blank[i] ? line.replace(/[^\r]/g, " ") : line)).join("\n");
-  };
-  return [view("first"), view("last")];
+    if (found === null) break;
+    current = found;
+    currentKeep = found.keep;
+    text = found.text;
+  }
+  return text === null ? null : { text, keep: currentKeep };
 }
 
 /**
@@ -1069,17 +1231,36 @@ function directiveEnd(lines: string[], start: number): number {
  *        &OBJ_Y
  *     #endif
  *
- * The grammar sees every block at once, and the elements run together. The view
+ * The same holds for the enumerators of an `enum`. The grammar sees every block
+ * at once, and the elements run together. The view
  * returned puts a comma where the first directive line between two such
  * elements was (the rest of that line becomes spaces), so every line, column and
  * offset stays where it was. Null when no gap needs one.
  */
 export function withInitializerCommas(source: string): string | null {
+  return withCommaLines(source, initializerCommaLines(source.split("\n")));
+}
+
+/** `source` with lines `at` turned into commas, or null when there are none. */
+function withCommaLines(source: string, at: number[]): string | null {
+  if (at.length === 0) return null;
   const lines = source.split("\n");
+  for (const i of at) lines[i] = commaLine(lines[i]);
+  return lines.join("\n");
+}
+
+/** `line` blanked, with a comma where it started. */
+const commaLine = (line: string): string => line.replace(/[^\r]/g, " ").replace(/^ /, ",");
+
+/** The directive lines {@link withInitializerCommas} turns into commas. The
+ * `#if` views of that text are made from the text without them, with the commas
+ * put back on the blanked lines (see {@link renderConditionalView}), so the
+ * chain whose `#endif` became a comma still closes. */
+function initializerCommaLines(lines: string[]): number[] {
   const code = codeOfLines(lines);
   const directive = (i: number): boolean => CONDITIONAL_DIRECTIVE.test(lines[i].replace(/\r$/, "")) && directiveEnd(lines, i) === i;
   const inList = initializerLines(code);
-  let changed = false;
+  const at: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (!inList[i] || !directive(i)) continue;
     // The code line before this run of directive lines, and the one after it.
@@ -1091,31 +1272,49 @@ export function withInitializerCommas(source: string): string | null {
     if (next >= lines.length) break;
     const before = code[prev].trim();
     const after = code[next].trim();
+    // An `#elif` or `#else` of a chain the element before sits in makes the two
+    // elements alternatives, never on together: they need no comma.
+    let opened = 0;
+    let alternatives = false;
+    for (let k = i; k < next && !alternatives; k++) {
+      const kw = directive(k) ? CONDITIONAL_DIRECTIVE.exec(lines[k].replace(/\r$/, ""))![1] : "";
+      if (kw.startsWith("if")) opened++;
+      else if (kw === "endif") opened = Math.max(0, opened - 1);
+      else if (kw !== "") alternatives = opened === 0;
+    }
     // An element ends in a name, a literal or a closing bracket; the next one
     // starts like an expression, a designator or a nested list.
-    if (/[\w)\]}"']$/.test(before) && !before.startsWith("#") && /^[(&\w"'.{-]/.test(after) && !/^(&&|\|\|)/.test(after)) {
-      lines[i] = lines[i].replace(/[^\r]/g, " ").replace(/^ /, ",");
-      changed = true;
-    }
+    if (!alternatives && /[\w)\]}"']$/.test(before) && !before.startsWith("#") && /^[(&\w"'.{-]/.test(after) && !/^(&&|\|\|)/.test(after))
+      at.push(i);
     while (i + 1 < next) i++;
   }
-  return changed ? lines.join("\n") : null;
+  return at;
 }
 
 /** For each line, whether it starts inside an initializer list: a `{` after
- * `=`, or after `{` or `,` inside another list. */
+ * `=`, or after `{` or `,` inside another list. The enumerator list of an
+ * `enum` counts as one too. */
 function initializerLines(code: string[]): boolean[] {
   const stack: boolean[] = [];
   let last = "";
+  // The last code before the current character, to spot `enum Name {`.
+  let tail = "";
   return code.map((line) => {
     const inside = stack.length > 0 && stack[stack.length - 1];
     // A preprocessor line holds no braces of the code around it.
     if (/^\s*#/.test(line)) return inside;
     for (const ch of line) {
-      if (ch === "{") stack.push(last === "=" || ((last === "{" || last === ",") && stack.length > 0 && stack[stack.length - 1]));
+      if (ch === "{")
+        stack.push(
+          last === "=" ||
+            /\benum(\s+(class|struct)\b)?(\s+\w+)?(\s*:\s*[\w:\s]+)?\s*$/.test(tail) ||
+            ((last === "{" || last === ",") && stack.length > 0 && stack[stack.length - 1]),
+        );
       else if (ch === "}") stack.pop();
       if (!/\s/.test(ch)) last = ch;
+      tail = (tail + ch).slice(-80);
     }
+    tail += " ";
     return inside;
   });
 }

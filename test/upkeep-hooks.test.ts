@@ -135,7 +135,7 @@ test('a nudge still lands in a wired repo with no graph built yet', async () => 
   assert.match(ctx, /99\.0\.0 available/, 'the no-INDEX.md path still reports upkeep');
 });
 
-test('a repo graft set up, on a machine without trail, hands the agent the trail line once a week', async () => {
+test('a repo graft set up, on a machine without trail, never hands the agent the trail line in this fork', async () => {
   const path = process.env.PATH;
   const ci = process.env.CI;
   // node and git, and no trail command; and not CI, where the line stays quiet
@@ -144,10 +144,9 @@ test('a repo graft set up, on a machine without trail, hands the agent the trail
   try {
     const home = homeWithCache('hook-handover-home', null);
     const first = contextOf(await runHook('session-start', wiredRepo('hook-handover'), home));
-    assert.match(first, /graft is now Trail-code/);
-    assert.match(first, /`graft upgrade` adds it/);
+    assert.doesNotMatch(first, /graft is now Trail-code|`graft upgrade` adds it/);
     const again = contextOf(await runHook('session-start', wiredRepo('hook-handover-2'), home));
-    assert.doesNotMatch(again, /graft is now Trail-code/, 'once a week, not every session');
+    assert.doesNotMatch(again, /graft is now Trail-code/, 'nor a later session');
   } finally {
     process.env.PATH = path;
     if (ci !== undefined) process.env.CI = ci;

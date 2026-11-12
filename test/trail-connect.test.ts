@@ -51,6 +51,10 @@ function git(cwd: string, ...args: string[]): string {
   return r.stdout;
 }
 
+// Tests that need an onboarding request to reach a (fake) Trail: this fork never sends one, so they run
+// only with CLOUD_TESTS=1, like the tagged cloud-sending test files (docs/no-cloud-policy.md, Rule 3).
+const CLOUD_SKIP = process.env.CLOUD_TESTS === "1" ? false : "needs data sent to a cloud, which this fork disables";
+
 const json = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
 
 /* the code ----------------------------------------------------------------- */
@@ -78,7 +82,7 @@ test("the repo goes up as a name and a clean URL: never a path here, never a tok
 
 /* the claim ---------------------------------------------------------------- */
 
-test("claiming a code gives a connection with no repos picked, marked as made by --connect", async () => {
+test("claiming a code gives a connection with no repos picked, marked as made by --connect", { skip: CLOUD_SKIP }, async () => {
   const sent: any[] = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
     sent.push({ url, body: JSON.parse(String(init.body)) });
@@ -118,16 +122,24 @@ test("Trail cloud is off: with no injected fetch, claiming a code and reporting 
   }
 });
 
-test("a connect answer without a slug or urls still parses, but Trail cloud is off: it is never stored or read back", async () => {
-  const fetchImpl = (async () => json(200, { token: "trl_abc", workspace: { id: "w1", name: "Acme" }, user: { name: "R" } })) as unknown as typeof fetch;
+test("Trail cloud is off: even an injected fetch is never called, by a claim or by the stages and summary", async () => {
+  let fetched = 0;
+  const fetchImpl = (async () => { fetched++; return json(200, { token: "trl_abc", workspace: { id: "w1", name: "Acme", slug: "w1" } }); }) as unknown as typeof fetch;
   const got = await claimConnectCode("http://trail.test", "TRL-7F2A-K9QD", { machine: "m", repo: { name: "retry" } }, { fetchImpl });
-  assert.ok("cloud" in got);
-  assert.equal(got.cloud.workspace.slug, "w1");
-  writeCloud(got.cloud);
+  assert.ok("error" in got && /permanently disabled/.test(got.error));
+  const r = new OnboardingReporter(CLOUD, { name: "retry" }, { fetchImpl, machine: "m" });
+  assert.equal(await r.stage("connected"), false);
+  assert.equal(await r.summary({ tokens: null, learnings: [], teammates: [] }), false);
+  await r.flush();
+  assert.equal(fetched, 0, "nothing left the machine");
+});
+
+test("Trail cloud is off: a connection is never stored or read back", () => {
+  writeCloud(CLOUD);
   assert.equal(readCloud(), null);
 });
 
-test("a used, expired or wrong code is refused; an unreachable Trail is offline, not refused", async () => {
+test("a used, expired or wrong code is refused; an unreachable Trail is offline, not refused", { skip: CLOUD_SKIP }, async () => {
   const answer = (status: number) => (async () => json(status, { error: "x", error_code: "code_invalid" })) as unknown as typeof fetch;
   for (const status of [400, 404, 410]) {
     const got = await claimConnectCode("http://trail.test", "TRL-7F2A-K9QD", { machine: "m", repo: { name: "r" } }, { fetchImpl: answer(status) });
@@ -157,7 +169,7 @@ const CLOUD: Cloud = {
   via: "connect",
 };
 
-test("stages and the summary go up in order, with the token, and the repo and machine on each stage", async () => {
+test("stages and the summary go up in order, with the token, and the repo and machine on each stage", { skip: CLOUD_SKIP }, async () => {
   const seen: Array<{ path: string; body: any; auth?: string }> = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
     seen.push({ path: new URL(url).pathname, body: JSON.parse(String(init.body)), auth: (init.headers as Record<string, string>).authorization });
@@ -180,7 +192,7 @@ test("stages and the summary go up in order, with the token, and the repo and ma
   assert.deepEqual(seen[1]!.body, { repo: { name: "retry", remote_url: "https://github.com/acme/retry" }, stage: "mapped", machine: "MacBook", data: { nodes: 97, edges: 241, files: 6 } });
 });
 
-test("offline, the first stage that can't reach Trail turns the rest off, and nothing throws", async () => {
+test("offline, the first stage that can't reach Trail turns the rest off, and nothing throws", { skip: CLOUD_SKIP }, async () => {
   let calls = 0;
   const fetchImpl = (async () => {
     calls++;
@@ -194,7 +206,7 @@ test("offline, the first stage that can't reach Trail turns the rest off, and no
   assert.equal(calls, 1);
 });
 
-test("an HTTP error is that call's alone: the next one still goes", async () => {
+test("an HTTP error is that call's alone: the next one still goes", { skip: CLOUD_SKIP }, async () => {
   let calls = 0;
   const fetchImpl = (async () => (++calls === 1 ? json(500, { error: "boom" }) : json(200, { ok: true }))) as unknown as typeof fetch;
   const r = new OnboardingReporter(CLOUD, { name: "retry" }, { fetchImpl });

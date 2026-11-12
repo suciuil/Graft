@@ -22,7 +22,7 @@
  * Nothing here throws. A listing that can't be had is null; a call that
  * can't be made is an MCP error result the agent can read.
  */
-import { CLOUD_DISABLED, cloudIn, isLocalServer, readClouds, serverUrl, type Cloud } from '../cloud/workspace.js';
+import { CLOUD_DISABLED, cloudEnabled, cloudIn, isLocalServer, readClouds, serverUrl, type Cloud } from '../cloud/workspace.js';
 import { repoPlace } from '../notes/home.js';
 
 /**
@@ -178,6 +178,9 @@ export class WorkspaceConnector {
   }
 
   private async post(s: { token: string; url: string; id?: string; protocol?: string }, body: object, timeoutMs: number): Promise<Response> {
+    // Trail cloud is permanently off in this fork: nothing is ever posted to a workspace, whatever
+    // pairing or fetch implementation reached this point.
+    if (!cloudEnabled()) throw new ConnectorError(NOT_CONNECTED, false, undefined, true);
     const f = this.opts.fetchImpl ?? fetch;
     const headers: Record<string, string> = {
       'content-type': 'application/json',

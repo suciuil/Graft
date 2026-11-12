@@ -244,6 +244,9 @@ export function hookNotice(repo: string, why: string, opts: { session?: string; 
 /** The news that this machine just connected, once, for the person: on the next prompt rather than the next trail command. */
 export function linkedNews(env: NodeJS.ProcessEnv = process.env): string | null {
   try {
+    // Trail cloud is permanently off in this fork: a leftover `linked` entry in the nudge state never
+    // turns into "connected to workspace …" news.
+    if (!cloudEnabled(env)) return null;
     if (brand() !== "trail") return null;
     const st = readState(env);
     if (!st.linked) return null;

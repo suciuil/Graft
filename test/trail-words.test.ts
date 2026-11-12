@@ -105,9 +105,8 @@ test("the READMEs Trail writes into .trail/ and ~/.trail say learnings", () => {
   check("~/.trail/README.md", HOME_README.replace(/\S*\/notes\/\S*/g, ""));
 });
 
-test("graft's handover line names the repo's learnings, not the team's", () => {
+test("graft's handover line is never handed over in this fork", () => {
   const home = mkdtempSync(join(tmpdir(), "words-handover-"));
   const line = trailHandoverLine({ env: { TRAIL_INVOKED_AS: "graft", PATH: "" }, home, now: Date.parse("2026-10-15") });
-  assert.ok(line, "shown once");
-  check("handover", line);
+  assert.equal(line, null);
 });

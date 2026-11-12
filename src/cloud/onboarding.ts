@@ -106,9 +106,9 @@ interface ConnectBody {
 
 /**
  * The one place an onboarding request leaves this machine. Trail cloud is
- * permanently off, so it never reaches the network: without an injected
- * `fetchImpl` (only tests pass one, to check the parsing) it answers
- * {@link CLOUD_DISABLED}, the same as workspace.ts's `call()`. The CLI refuses
+ * permanently off, so it never reaches the network: it answers
+ * {@link CLOUD_DISABLED}, the same as workspace.ts's `call()`, even with an
+ * injected `fetchImpl` (upstream let one through). The CLI refuses
  * `--connect` before getting here; this holds should that check ever move.
  */
 async function post<T>(
@@ -116,7 +116,7 @@ async function post<T>(
   body: unknown,
   opts: { token?: string; timeoutMs?: number; fetchImpl?: Fetch },
 ): Promise<{ status: number; body: T } | ApiError> {
-  if (!opts.fetchImpl && !cloudEnabled()) return { error: CLOUD_DISABLED };
+  if (!cloudEnabled()) return { error: CLOUD_DISABLED };
   const f = opts.fetchImpl ?? fetch;
   try {
     const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
