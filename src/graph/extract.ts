@@ -701,14 +701,21 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   // Objective-C shares `.m`: leave it a file node without spending a MATLAB parse on it.
   if (grammar === "matlab" && OBJC_MARKERS.test(source)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   if (grammar === "c" || grammar === "cpp") return extractCFamily(rel, source, grammar);
-  return parseDepth(grammar, source, (root) => extractTree(rel, source, grammar, root));
+  return parseDepth(grammar, source, (root) => markParseErrors(extractTree(rel, source, grammar, root), syntaxErrors(asNative(root)).regions));
+}
+
+/** Record on the file node (`nodes[0]`) that its parse had `regions` syntax errors. */
+function markParseErrors(result: ExtractResult, regions: number): ExtractResult {
+  if (regions > 0 && result.nodes[0]?.kind === "file") result.nodes[0].parse_errors = regions;
+  return result;
 }
 
 /** One parse of a C/C++ file (or of one of its branch views): what it yields and
- * how much of the tree is syntax errors (see {@link syntaxErrorCount}). */
+ * how much of the tree is syntax errors (see {@link syntaxErrors}). */
 interface CFamilyParse {
   result: ExtractResult;
   errors: number;
+  regions: number;
 }
 
 /**
@@ -728,11 +735,11 @@ interface CFamilyParse {
  */
 function extractCFamily(rel: string, source: string, grammar: Language): ExtractResult {
   const parse = (text: string): CFamilyParse =>
-    parseDepth(grammar, text, (root) => ({ result: extractTree(rel, text, grammar, root), errors: syntaxErrorCount(asNative(root)) }));
+    parseDepth(grammar, text, (root) => ({ result: extractTree(rel, text, grammar, root), ...syntaxErrors(asNative(root)) }));
   const original = parse(source);
   if (original.errors === 0) return original.result;
   const views = conditionalViews(source);
-  if (views.length === 0) return original.result;
+  if (views.length === 0) return markParseErrors(original.result, original.regions);
   const parses = [original, ...views.map(parse)];
   let best = original;
   for (const p of parses) if (p.errors < best.errors) best = p;
@@ -746,32 +753,39 @@ function extractCFamily(rel: string, source: string, grammar: Language): Extract
   }
   for (const p of parses) if (p !== best) mergeCFamilyParse(merged, p.result, rel);
   merged.nodes[0].body_text = fileResidual(source, merged.nodes.slice(1));
-  return merged;
+  // The parse the symbols came from still has errors: say so on the file. Symbols
+  // merged in from the other views may fill some of its gaps, not all of them.
+  return markParseErrors(merged, best.regions);
 }
 
 /**
- * How much of a tree is syntax errors: the characters inside ERROR nodes (not
- * counting those nested in another ERROR), plus one for each MISSING node. Sizes,
- * not node counts: when the parser gives up, one ERROR can hold the whole file,
- * which is worse than a few small errors.
+ * The syntax errors in a tree. `errors` is how much of it they cover: the
+ * characters inside ERROR nodes (not counting those nested in another ERROR),
+ * plus one for each MISSING node. Sizes, not node counts: when the parser gives
+ * up, one ERROR can hold the whole file, which is worse than a few small errors.
+ * `regions` is how many places the parser could not read: those ERROR and
+ * MISSING nodes, counted once each.
  */
-function syntaxErrorCount(root: Parser.SyntaxNode): number {
-  if (!root.hasError) return 0;
-  let count = 0;
+function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: number } {
+  if (!root.hasError) return { errors: 0, regions: 0 };
+  let errors = 0;
+  let regions = 0;
   const stack: Parser.SyntaxNode[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (node.type === "ERROR") {
-      count += Math.max(1, node.endIndex - node.startIndex);
+      errors += Math.max(1, node.endIndex - node.startIndex);
+      regions++;
       continue;
     }
     if (node.isMissing) {
-      count++;
+      errors++;
+      regions++;
       continue;
     }
     for (const child of node.children) if (child.hasError || child.isMissing) stack.push(child);
   }
-  return count;
+  return { errors, regions };
 }
 
 const symbolKey = (n: NodeV1): string => `${n.kind}:${n.name}@${n.span.slice(0, n.span.indexOf("-"))}`;
@@ -2432,10 +2446,72 @@ function cExported(node: Parser.SyntaxNode): boolean {
   return !node.namedChildren.some((c) => c.type === "storage_class_specifier" && c.text === "static");
 }
 
-/** Whether a `.h` header uses C++-only constructs (so it should be parsed as C++
- * rather than C). Deliberately conservative â€” bare C headers never match. */
+/**
+ * Constructs only C++ has, matched in a header's code with its comments, strings
+ * and character literals blanked, its `#if(def) __cplusplus` branches left out and
+ * its C23 attributes (`[[gnu::packed]]`) removed. Each one, measured on ~97,000
+ * headers of large C/C++ code bases, parses better as C++ in nearly every header
+ * that has it. A lone `class`, `::` or `template` in a comment no longer counts:
+ * that sent thousands of C headers to the C++ grammar, which parsed them worse.
+ */
+const CPP_HEADER_SIGNS: readonly RegExp[] = [
+  // class Foo {  /  class Foo : public Bar  /  struct Foo : public Bar
+  /\b(?:class|struct)\s+(?:[A-Za-z_]\w*\s+)*[A-Za-z_]\w*\s*(?:final\s*)?:\s*(?:public|private|protected|virtual)\b|\bclass\s+(?:[A-Za-z_]\w*\s+)*[A-Za-z_]\w*\s*(?:final\s*)?\{/,
+  /^\s*class\s+[A-Za-z_]\w*\s*;/m,
+  /\bnamespace\s+[A-Za-z_][\w:]*\s*\{|\bnamespace\s*\{|\busing\s+namespace\s+[A-Za-z_]/,
+  /\btemplate\s*<|\busing\s+[A-Za-z_]\w*\s*=/,
+  /^\s*(?:public|private|protected)\s*:/m,
+  /(?:\b[A-Za-z_]\w*|>)\s*::\s*~?[A-Za-z_]\w*|(?:^|[\s(,=])::\s*[A-Za-z_]/,
+  /\b(?:virtual|constexpr|nullptr|static_cast|reinterpret_cast|const_cast|dynamic_cast|typename|noexcept|decltype)\b|\boperator\s*(?:[=!<>+\-*/%&|^~[(]|new\b|delete\b)/,
+  /(?:=|return)\s*new\s+[A-Za-z_][\w:]*\s*[([;]|\bdelete(?:\s*\[\s*\]\s*|\s+)[A-Za-z_]\w*\s*;/,
+  /^\s*#\s*include\s*<(?:iostream|ostream|istream|string|string_view|vector|map|set|memory|algorithm|cstdint|cstddef|cstring|cstdlib|cstdio|cmath|cassert|climits|cfloat|cstdarg|array|list|deque|utility|functional|type_traits|limits|sstream|fstream|iomanip|thread|mutex|atomic|chrono|tuple|optional|variant|any|unordered_map|unordered_set|new|exception|stdexcept|initializer_list|iterator|numeric|bitset|queue|stack|regex|random|condition_variable|future)>/m,
+  // A declaration of a template type: `Vec<float64> speed;`
+  /^\s*(?:(?:static|extern|const|mutable|inline)\s+)*[A-Za-z_]\w*\s*<\s*[A-Za-z_]\w*(?:\s*[*&])?(?:\s*,\s*[A-Za-z_0-9]\w*(?:\s*[*&])?)*\s*>\s*[*&]?\s*[A-Za-z_]\w*\s*[;=(,)[]/m,
+];
+
+/** Whether a `.h` header is C++ (so it should be parsed as C++ rather than C):
+ * `extern "C++"`, or one of {@link CPP_HEADER_SIGNS} in its code. */
 function looksLikeCpp(source: string): boolean {
-  return /\b(class|namespace|template)\b|\bpublic:|\bprivate:|\bprotected:|::/.test(source);
+  if (lastCppSniff?.source === source) return lastCppSniff.cpp;
+  let cpp = /\bextern\s+"C\+\+"/.test(source);
+  if (!cpp) {
+    const code = headerCode(source);
+    cpp = CPP_HEADER_SIGNS.some((re) => re.test(code));
+  }
+  lastCppSniff = { source, cpp };
+  return cpp;
+}
+/** The build labels a header and then extracts it: both ask about the same text. */
+let lastCppSniff: { source: string; cpp: boolean } | undefined;
+
+/** A header's code as {@link CPP_HEADER_SIGNS} read it; every line stays a line. */
+function headerCode(source: string): string {
+  const blank = (m: string): string => m.replace(/[^\n]/g, " ");
+  const text = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, blank);
+  const lines = text.split("\n");
+  // Each open #if: whether it tests __cplusplus, and whether its current branch is C++-only.
+  const open: { cpp: boolean; skip: boolean }[] = [];
+  const negated = (cond: string): boolean => /!\s*(?:defined\s*\(?\s*)?__cplusplus/.test(cond);
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)/.exec(lines[i]);
+    if (m) {
+      const [, kw, cond] = m;
+      if (kw === "if" || kw === "ifdef" || kw === "ifndef") {
+        const cpp = /\b__cplusplus\b/.test(cond);
+        open.push({ cpp, skip: cpp && kw !== "ifndef" && !negated(cond) });
+      } else if (kw === "endif") open.pop();
+      else {
+        const top = open[open.length - 1];
+        if (top?.cpp) top.skip = !top.skip;
+        else if (top && kw === "elif" && /\b__cplusplus\b/.test(cond)) {
+          top.cpp = true;
+          top.skip = !negated(cond);
+        }
+      }
+      lines[i] = "";
+    } else if (open.some((o) => o.skip)) lines[i] = "";
+  }
+  return lines.join("\n").replace(/\[\[[^\]\n]*\]\]/g, blank);
 }
 
 /** Kotlin definition shapes. Unlike Java's, tree-sitter-kotlin exposes no `name`

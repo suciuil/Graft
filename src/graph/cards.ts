@@ -21,6 +21,7 @@ import { matter } from "../util/front-matter.js";
 import type { GraphV1, NodeV1 } from "./types.js";
 import { CACHE_DIR, readNodes } from "../context/node-file.js";
 import { GRAPH_DIR } from "./write.js";
+import { parseErrorWarning } from "./parse-errors.js";
 import { inBrand } from "../brand.js";
 
 const INDEX_FILE = "INDEX.md";
@@ -109,6 +110,8 @@ function renderCard(
     .join(" ");
   const head = uplinks ? `# ${sourcePath} · ${uplinks}` : `# ${sourcePath}`;
   const lines: string[] = [head, ""];
+  // A reader browsing cards instead of running graft must learn it too.
+  if (fileNode?.parse_errors) lines.push(parseErrorWarning(fileNode.parse_errors), "");
 
   const fileSummary = fileNode ? oneLiner(fileNode) : "";
   if (fileSummary) lines.push(fileSummary, "");

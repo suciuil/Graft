@@ -69,10 +69,10 @@
 <div class="stats">
 <!-- stats:start -->
   <div class="stat feature"><b>47</b><span>New features</span></div>
-  <div class="stat improvement"><b>35</b><span>Improvements</span></div>
+  <div class="stat improvement"><b>37</b><span>Improvements</span></div>
   <div class="stat fix"><b>29</b><span>Bug fixes</span></div>
   <div class="stat change"><b>16</b><span>Change requests</span></div>
-  <div class="stat"><b>127</b><span>Items in total</span></div>
+  <div class="stat"><b>129</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -83,13 +83,13 @@
     <tbody>
 <!-- counts:start -->
       <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>8</td><td>5</td><td>6</td><td>2</td><td>21</td></tr>
-      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>5</td><td>7</td><td>5</td><td>27</td></tr>
-      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>8</td><td>11</td><td>8</td><td>2</td><td>29</td></tr>
+      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>5</td><td>8</td><td>5</td><td>28</td></tr>
+      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>8</td><td>11</td><td>9</td><td>2</td><td>30</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>1</td><td>11</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>12</td><td>3</td><td>6</td><td>0</td><td>21</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>1</td><td>3</td><td>4</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>9</td><td>1</td><td>3</td><td>4</td><td>17</td></tr>
-      <tr class="total"><td>Total</td><td>47</td><td>29</td><td>35</td><td>16</td><td>127</td></tr>
+      <tr class="total"><td>Total</td><td>47</td><td>29</td><td>37</td><td>16</td><td>129</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
@@ -139,6 +139,8 @@
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A repository too big for one map no longer fails. The build lists the parts it can be split into and, in a terminal, lets you pick which ones to build. The new "--all-parts" option builds each part into its own map, and queries, callers, grep, map and file overviews run from the top folder search all parts together.</span></li>
     <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The fork changelog opened by "graft about fork" (and shipped with the package and the offline installer kit) is now built automatically from the fork's commit messages.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A new "changelog" command regenerates the fork changelog on demand, with a check mode that reports whether the page is up to date.</span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The full command list shown by "graft help" (or "graft --help") now ends with a short "Common commands" section listing the most used commands (find-command, model, build, deep-threshold, staleness, config, savings, files location), each with a one-line description, followed by a hint to use "graft &lt;command&gt; --help" or "graft help &lt;command&gt;" for details.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The fork changelog page opened by "graft about fork" now lists the latest changes, including the new "graft find-command" command and the setup suggestion to run the deep build.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>The help for "graft help" now mentions "graft find-command" as a way to find a command by keyword.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The fork changelog page opened by "graft about fork" now lists two more recent changes: setup suggests running the deep build when code summaries are missing or out of date, and setup now selects GitHub Copilot by default.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>The help for the file-location settings now explains the new location command and says that "files store" only decides where new files go and does not move files that already exist.</span></li>

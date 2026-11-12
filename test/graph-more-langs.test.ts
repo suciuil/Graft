@@ -536,3 +536,69 @@ test("C header: a .h with no C++ constructs stays C", { skip: grammarAvailable("
   assert.ok(!graph.meta.languages.includes("cpp"), "languages do NOT include cpp");
 });
 
+// The sniff reads code only: C++ words in comments and strings, and C++ kept
+// behind `#ifdef __cplusplus` (the usual guard of a C header), do not count.
+// Sending such a C header to the C++ grammar made it parse worse, not better.
+test("C header: C++ words in comments, strings or __cplusplus branches keep a .h C", { skip: grammarAvailable("c") && grammarAvailable("cpp") ? false : "c/cpp grammar not built" }, async () => {
+  const graph = await build({
+    "comment.h": "/* this class of helpers: new values, delete old ones */\n// namespace std::vector\nint helper(int x);\n",
+    "string.h": 'static const char *msg = "class Foo { public: };";\nint use(void);\n',
+    "guard.h": "#ifdef __cplusplus\r\nnamespace api { class Wrap; }\r\nextern \"C\" {\r\n#endif\r\nstruct Api { int a; };\r\n#ifdef __cplusplus\r\n}\r\n#endif\r\n",
+    "template.h": "#define LIST(T) T##_list\nint new_count; int delete_flag;\nint value = a < b;\n",
+  });
+  assert.ok(!graph.meta.languages.includes("cpp"), `languages do NOT include cpp: ${graph.meta.languages.join(",")}`);
+  assert.equal(nodeById(graph, "guard.h#Api")?.kind, "struct");
+  assert.equal(nodeById(graph, "guard.h")?.parse_errors, undefined, "the C view of guard.h reads whole");
+});
+
+test("C++ header: namespace, std:: or a template sends a .h to C++", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
+  for (const src of [
+    "namespace app {\nint run();\n}\n",
+    "#include <vector>\nint count(const std::vector<int> &v);\n",
+    "template <typename T>\nT max_of(T a, T b);\n",
+  ]) {
+    const graph = await build({ "api.h": src });
+    assert.deepEqual(graph.meta.languages, ["cpp"], src);
+  }
+});
+
+// A file the parser could not read whole says so on its file node, and the
+// readers built on the graph pass that on. A clean file carries nothing.
+test("C depth: a file with syntax errors is flagged parse_errors", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-lang-"));
+  try {
+    writeFileSync(join(dir, "broken.c"), "int ok(void) { return 1; }\nint broken(void) { return ok() +; }\n");
+    writeFileSync(join(dir, "clean.c"), "int fine(void) { return ok(); }\n");
+    await buildGraph(dir);
+    const graph = readGraph(wiringPath(join(dir, "graft")))!;
+    const broken = nodeById(graph, "broken.c");
+    assert.ok((broken?.parse_errors ?? 0) >= 1, `broken.c flagged: ${broken?.parse_errors}`);
+    assert.equal(nodeById(graph, "clean.c")?.parse_errors, undefined, "clean.c carries no flag");
+    assert.equal(nodeById(graph, "broken.c#ok")?.parse_errors, undefined, "symbols carry no flag of their own");
+
+    const { skeleton, formatSkeleton, ask, formatAsk } = await import("../src/ask/ask.js");
+    const sk = skeleton(dir, "broken.c");
+    assert.equal(sk.parse_errors, broken?.parse_errors);
+    assert.match(formatSkeleton(sk), /⚠ parsed with \d+ syntax errors?: symbols, calls or spans in this file may be missing/);
+    assert.doesNotMatch(formatSkeleton(skeleton(dir, "clean.c")), /syntax error/);
+
+    const r = ask(dir, "broken", { limit: 3 });
+    const hit = r.hits.find((h) => h.pointer.startsWith("broken.c"));
+    assert.ok(hit?.parse_errors, "the ask hit in broken.c is flagged");
+    assert.match(formatAsk(r), /⚠ parsed with/);
+
+    const { buildRepoMap, formatRepoMap } = await import("../src/graph/map.js");
+    const map = buildRepoMap(graph);
+    assert.equal(map.totals.parse_error_files, 1);
+    assert.match(formatRepoMap(map), /⚠ 1 file was parsed with syntax errors/);
+
+    const { headerOf, hitLine } = await import("../src/graph/traverse-cli.js");
+    assert.match(headerOf(nodeById(graph, "broken.c#broken")!, graph), /\n  ⚠ parsed with/);
+    assert.doesNotMatch(headerOf(nodeById(graph, "clean.c#fine")!, graph), /syntax error/);
+    const okNode = nodeById(graph, "broken.c#ok")!;
+    assert.match(hitLine("in", { id: okNode.id, node: okNode, relation: "calls", depth: 1 }, false, undefined, graph), /⚠ file parsed with/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+

@@ -154,6 +154,7 @@ export function extractContainer(rel: string, source: string, lang: ContainerLan
   const nodes: NodeV1[] = [];
   const rawEdges: RawEdge[] = [];
   const residuals: string[] = [];
+  let parseErrors = 0;
 
   const language = loaded.get(lang.name);
   const root = language ? parseWasm(language, source) : null;
@@ -191,6 +192,8 @@ export function extractContainer(rel: string, source: string, lang: ContainerLan
       // file, so it is dropped and its residual folded into the .vue file node.
       const [scriptFile, ...symbols] = inner.nodes;
       if (scriptFile?.body_text) residuals.push(scriptFile.body_text);
+      // Syntax errors in a block are errors in the file.
+      parseErrors += scriptFile?.parse_errors ?? 0;
 
       const renamed = new Map<string, string>();
       for (const node of symbols) {
@@ -209,6 +212,8 @@ export function extractContainer(rel: string, source: string, lang: ContainerLan
 
   // Built last so it can carry the residual, but unshifted first so the file node
   // stays at index 0 like every other tier's output.
-  nodes.unshift(containerFileNode(rel, source, residuals.join("\n")));
+  const file = containerFileNode(rel, source, residuals.join("\n"));
+  if (parseErrors > 0) file.parse_errors = parseErrors;
+  nodes.unshift(file);
   return { nodes, rawEdges };
 }

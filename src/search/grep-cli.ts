@@ -25,8 +25,13 @@ export interface GrepCliOptions {
 }
 
 function groupHeader(g: GrepGroup): string {
-  if (g.symbol) return `${g.symbol.name} · ${g.symbol.kind} · ${g.symbol.path}:${g.symbol.span} · ${g.inDegree} in-edges`;
-  return `${g.path} (module level) · ${g.inDegree} in-edges`;
+  // The hits are read from the file; the symbol they are grouped under comes
+  // from the parse, which had errors in this file.
+  const tag = g.parse_errors
+    ? ` · ⚠ file parsed with ${g.parse_errors === 1 ? "1 syntax error" : `${g.parse_errors} syntax errors`}, grouping may be off`
+    : "";
+  if (g.symbol) return `${g.symbol.name} · ${g.symbol.kind} · ${g.symbol.path}:${g.symbol.span} · ${g.inDegree} in-edges${tag}`;
+  return `${g.path} (module level) · ${g.inDegree} in-edges${tag}`;
 }
 
 function formatGroup(g: GrepGroup): string {

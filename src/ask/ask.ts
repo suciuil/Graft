@@ -47,6 +47,7 @@ import {
   preparePageRankPartitions,
 } from "./graphrank.js";
 import { readSourceFile } from "../util/source.js";
+import { parseErrorFiles, parseErrorWarning, parseErrorsOf, pointerPath } from "../graph/parse-errors.js";
 import { counts, tokenize, type AskIndex, type AskIndexDoc } from "./index-file.js";
 import { cmd, tag } from "../brand.js";
 import { formatNoteHits, learningSavingsLine, type NoteHit } from "../notes/notes.js";
@@ -68,6 +69,10 @@ export interface AskHit {
    * hit was ranked within — answers "which sub-project is this from?". Drives
    * the `[scope/] ` label in formatAsk. Absent on single-scope repos. */
   scope?: string;
+  /** The hit's file was parsed with this many syntax errors (see
+   * `NodeV1.parse_errors`): what the graph says about it may be incomplete.
+   * Absent when the file parsed cleanly. */
+  parse_errors?: number;
 }
 
 /** Internal file-aware ranking group. The first hit is the one document that
@@ -1393,6 +1398,16 @@ export function ask(dir: string, query: string, opts: AskOptions = {}): AskResul
       opts.includeRankingMetadata ?? false,
     );
   }
+  if (corpus.graph) {
+    markParseErrors(result.hits, corpus.graph);
+    if (result.ranking) {
+      for (const group of result.ranking.groups) {
+        markParseErrors(group.hits, corpus.graph);
+        markParseErrors(group.baselineHits ?? [], corpus.graph);
+      }
+      markParseErrors(result.ranking.baseline.map((entry) => entry.hit), corpus.graph);
+    }
+  }
   if (opts.source) {
     inlineSource(root, result.hits, corpus.graph, opts.full ?? false);
     if (result.ranking) {
@@ -1415,6 +1430,18 @@ export function ask(dir: string, query: string, opts: AskOptions = {}): AskResul
   return result;
 }
 
+/** Flag each code hit whose file was parsed with syntax errors. Concept hits
+ * cover several files and are left alone. */
+function markParseErrors(hits: AskHit[], graph: GraphV1): void {
+  const files = parseErrorFiles(graph);
+  if (files.size === 0) return;
+  for (const h of hits) {
+    if (h.kind === "concept") continue;
+    const count = files.get(pointerPath(h.pointer));
+    if (count) h.parse_errors = count;
+  }
+}
+
 // ── Skeleton view ────────────────────────────────────────────────────────────
 
 export interface SkeletonEntry {
@@ -1430,6 +1457,9 @@ export interface SkeletonResult {
   file: string;
   entries: SkeletonEntry[];
   note?: string;
+  /** The file was parsed with this many syntax errors: the list may lack some
+   * of its definitions. Absent when it parsed cleanly. */
+  parse_errors?: number;
   /** Tokens-saved baseline: this file read whole vs the signatures-only view. */
   saved?: Savings;
 }
@@ -1451,13 +1481,20 @@ export function skeleton(dir: string, file: string, opts: { contextDir?: string 
       return { file, entries: [], note: `ambiguous — matches: ${[...matches].sort().join(", ")}` };
     const [path] = matches;
     if (path) defs = graph.nodes.filter((n) => n.kind !== "file" && n.path === path);
+    if (!defs.length && path) {
+      // No definitions found may be the parser's doing: say so.
+      const errors = parseErrorsOf(graph, path);
+      if (errors) return { file: path, entries: [], parse_errors: errors, note: "no definitions indexed for this file" };
+    }
   }
   if (!defs.length) return { file, entries: [], note: "no definitions indexed for this file" };
 
   const startLine = (span: string) => Number(span.match(/^L(\d+)/)?.[1] ?? 0);
   defs.sort((a, b) => startLine(a.span) - startLine(b.span));
+  const parseErrors = parseErrorsOf(graph, defs[0].path);
   return {
     file: defs[0].path,
+    ...(parseErrors ? { parse_errors: parseErrors } : {}),
     entries: defs.map((n) => ({
       name: n.name,
       kind: n.kind,
@@ -1471,7 +1508,8 @@ export function skeleton(dir: string, file: string, opts: { contextDir?: string 
 
 /** Render a {@link SkeletonResult} as compact markdown. */
 export function formatSkeleton(r: SkeletonResult): string {
-  const head = `${cmd("graft skeleton")} — ${r.file}`;
+  const title = `${cmd("graft skeleton")} — ${r.file}`;
+  const head = r.parse_errors ? `${title}\n${parseErrorWarning(r.parse_errors)}` : title;
   if (!r.entries.length) return `${head}\n\n${r.note ?? "no definitions."}\n`;
   const lines = r.entries.map((e) => {
     const sig = e.signature ? `  ${e.signature}` : "";
@@ -1524,6 +1562,7 @@ function renderAsk(r: AskResult): { body: string } | { text: string } {
     for (const h of r.hits) {
       const tail = h.snippet ? ` — ${h.snippet}` : "";
       lines.push(`- ${h.title}  ${h.pointer}  (${h.relation})${tail}`);
+      if (h.parse_errors) lines.push(`  ${parseErrorWarning(h.parse_errors)}`);
       if (h.code) lines.push("", "```", h.code, "```", "");
     }
   } else {
@@ -1533,6 +1572,7 @@ function renderAsk(r: AskResult): { body: string } | { text: string } {
       const label = r.scopes && h.scope ? `[${h.scope}/] ` : "";
       lines.push(`${i + 1}. ${label}${h.title}  [${h.kind}]`);
       lines.push(`   ${h.pointer}`);
+      if (h.parse_errors) lines.push(`   ${parseErrorWarning(h.parse_errors)}`);
       if (h.snippet) lines.push(`   ${h.snippet}`);
       if (h.related?.length) lines.push(`   related: ${h.related.join(", ")}`);
       if (h.code) lines.push("", "```", h.code, "```");

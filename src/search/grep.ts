@@ -43,6 +43,10 @@ export interface GrepGroup {
    * file-level groups (there's no single symbol id to count edges against). */
   inDegree: number;
   hits: GrepHit[];
+  /** The file was parsed with this many syntax errors, so the enclosing symbol
+   * a hit is grouped under may be wrong (the hits themselves are read from the
+   * file and complete). Absent when it parsed cleanly. */
+  parse_errors?: number;
 }
 
 export interface GrepResult {
@@ -197,6 +201,7 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
           inDegree: sym ? (inDegree.get(sym.id) ?? 0) : 0,
           hits: [],
         };
+        if (file.parse_errors) group.parse_errors = file.parse_errors;
         groups.set(key, group);
       }
       const trimmed = raw.trim();

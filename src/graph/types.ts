@@ -89,6 +89,11 @@ export interface NodeV1 {
   body_hash: string; // sha256 of the definition text; the Tier-2 re-run trigger
   chars?: number; // byte length of the WHOLE file (file nodes only); the baseline
   //                 `ask` uses to estimate tokens saved vs reading the file whole
+  parse_errors?: number; // file nodes only: how many places the parser could not read
+  //                 (syntax errors) in the parse the file's symbols came from. Absent
+  //                 when it read the whole file. Where it is set, symbols, calls and
+  //                 spans in that file may be missing or cut short, and every reader
+  //                 that shows them says so.
   body_text?: string; // searchable whitespace-normalized definition body (Tier-1,
   //                 symbol nodes only, capped). Ranks `ask` queries so a term in
   //                 the code — not just the name/signature — is findable; never

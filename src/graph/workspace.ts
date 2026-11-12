@@ -824,9 +824,9 @@ export function federateCallers(
       const results = matches.map((m) => ({ symbol: m, hits: edgeWalk(graph, m, direction, depth) }));
       const lines = [`## ${child}/`];
       for (const { symbol: sym, hits } of results) {
-        lines.push(headerOf(sym));
-        if (hits.length === 0) lines.push(looseNoteFor(direction, sym.name, matches.length));
-        else for (const h of hits) lines.push(hitLine(direction, h, showDepth));
+        lines.push(headerOf(sym, graph));
+        if (hits.length === 0) lines.push(looseNoteFor(direction, sym.name, matches.length, graph));
+        else for (const h of hits) lines.push(hitLine(direction, h, showDepth, undefined, graph));
       }
       return withSavings(lines.join("\n"), callersSavings(graph, results));
     });

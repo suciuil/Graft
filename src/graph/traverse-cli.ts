@@ -19,6 +19,7 @@ import { loadGraphCached } from "./load.js";
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from "./traverse.js";
 import type { GraphV1, NodeV1 } from "./types.js";
 import { cmd } from "../brand.js";
+import { parseErrorFiles, parseErrorWarning, parseErrorsOf } from "./parse-errors.js";
 
 export interface CallersCliOptions {
   in?: string;
@@ -37,8 +38,16 @@ const DEFAULT_DEPTH = 1;
 /** Exported so the MCP `graft_trace_calls` tool (`src/mcp/tools.ts`) can render the
  * same human report format as the CLI, rather than re-implementing it — both
  * surfaces walk the same edges via the same `resolveSymbol` / `edgeWalk` core. */
-export function headerOf(n: NodeV1): string {
-  return `${n.name} · ${n.kind} · ${n.path}:${n.span}`;
+export function headerOf(n: NodeV1, graph?: GraphV1 | null): string {
+  const head = `${n.name} · ${n.kind} · ${n.path}:${n.span}`;
+  // The symbol's own file did not parse whole: its edges may be incomplete.
+  const errors = parseErrorsOf(graph, n.path);
+  return errors ? `${head}\n  ${parseErrorWarning(errors)}` : head;
+}
+
+/** Short tag for a hit in a file parsed with syntax errors. */
+function parseErrorTag(count: number): string {
+  return count ? `  ⚠ file parsed with ${count === 1 ? "1 syntax error" : `${count} syntax errors`}` : "";
 }
 
 /** `showDepth` is set for multi-hop walks (depth > 1), matching the old
@@ -48,11 +57,12 @@ export function headerOf(n: NodeV1): string {
  * references the symbol. An edge that says "total calls add" is a claim; the line
  * under it is the evidence, and it saves opening the file to check.
  */
-export function hitLine(direction: Direction, hit: EdgeHit, showDepth: boolean, quote?: Quote): string {
+export function hitLine(direction: Direction, hit: EdgeHit, showDepth: boolean, quote?: Quote, graph?: GraphV1 | null): string {
   const arrow = ARROW[direction];
   const depthTag = showDepth ? ` [depth ${hit.depth}]` : "";
   const label = hit.node ? `${hit.node.name} (${hit.node.path}:${hit.node.span})` : `${hit.id} (unresolved import)`;
-  const line = `  ${hit.relation} ${arrow} ${label}${depthTag}`;
+  const errorTag = hit.node ? parseErrorTag(parseErrorsOf(graph, hit.node.path)) : "";
+  const line = `  ${hit.relation} ${arrow} ${label}${depthTag}${errorTag}`;
   return quote ? `${line}\n      ${quote.n}: ${quote.text.trim()}` : line;
 }
 
@@ -101,14 +111,19 @@ export function callersSavings(
  * `resolve.ts` drops a cross-file call/reference for rather than guessing which
  * one it means. Without saying so, a zero-hit result here reads as "nothing
  * calls this" when it may really be "something does, but the edge was dropped". */
-export function looseNoteFor(direction: Direction, name: string, candidateCount: number): string {
+export function looseNoteFor(direction: Direction, name: string, candidateCount: number, graph?: GraphV1 | null): string {
   const label = direction === "out" ? "callees" : "callers";
   const dir = direction === "out" ? "outgoing" : "incoming";
   const ambiguity =
     candidateCount > 1
       ? ` ${candidateCount} definitions share the name "${name}"; a cross-file caller of an ambiguous name is dropped rather than guessed, so this may undercount.`
       : "";
-  return `  no indexed ${label} — the graph has no ${dir} call/reference edges for this symbol as written.${ambiguity} Check the name (try the bare symbol, or "Type.method"), or find its uses with ${cmd("graft grep")} "${name}". Fall back to raw grep -rn only for unindexed files`;
+  // Callers sitting in a part of a file the parser could not read have no edges.
+  const unread = direction === "in" && graph ? parseErrorFiles(graph).size : 0;
+  const partial = unread
+    ? ` ${unread} indexed ${unread === 1 ? "file was" : "files were"} parsed with syntax errors; a caller in a part the parser could not read is not in the graph.`
+    : "";
+  return `  no indexed ${label} — the graph has no ${dir} call/reference edges for this symbol as written.${ambiguity}${partial} Check the name (try the bare symbol, or "Type.method"), or find its uses with ${cmd("graft grep")} "${name}". Fall back to raw grep -rn only for unindexed files`;
 }
 
 interface SymbolJson {
@@ -117,6 +132,8 @@ interface SymbolJson {
   kind: string;
   path: string;
   span: string;
+  /** Syntax errors in the symbol's file; absent when it parsed cleanly. */
+  parse_errors?: number;
 }
 
 interface MatchJson {
@@ -133,19 +150,25 @@ interface HitJson {
   span?: string;
   relation: string;
   depth: number;
+  parse_errors?: number;
 }
 
-function symbolJson(n: NodeV1): SymbolJson {
-  return { id: n.id, name: n.name, kind: n.kind, path: n.path, span: n.span };
+function symbolJson(n: NodeV1, graph: GraphV1): SymbolJson {
+  const out: SymbolJson = { id: n.id, name: n.name, kind: n.kind, path: n.path, span: n.span };
+  const errors = parseErrorsOf(graph, n.path);
+  if (errors) out.parse_errors = errors;
+  return out;
 }
 
-function hitJson(hit: EdgeHit): HitJson {
+function hitJson(hit: EdgeHit, graph: GraphV1): HitJson {
   const out: HitJson = { id: hit.id, relation: hit.relation, depth: hit.depth };
   if (hit.node) {
     out.name = hit.node.name;
     out.kind = hit.node.kind;
     out.path = hit.node.path;
     out.span = hit.node.span;
+    const errors = parseErrorsOf(graph, hit.node.path);
+    if (errors) out.parse_errors = errors;
   }
   return out;
 }
@@ -217,9 +240,9 @@ export function runCallersCommand(query: string, dir: string, opts: CallersCliOp
     const payload = {
       query,
       matches: results.map((r): MatchJson => {
-        const m: MatchJson = { symbol: symbolJson(r.symbol), hits: r.hits.map(hitJson) };
+        const m: MatchJson = { symbol: symbolJson(r.symbol, graph), hits: r.hits.map((h) => hitJson(h, graph)) };
         if (r.hits.length === 0) {
-          m.note = looseNoteFor(direction, r.symbol.name, matches.length);
+          m.note = looseNoteFor(direction, r.symbol.name, matches.length, graph);
         }
         return m;
       }),
@@ -233,9 +256,9 @@ export function runCallersCommand(query: string, dir: string, opts: CallersCliOp
   // One reader for the whole walk: several hits usually live in the same file.
   const read = fileReader(root);
   for (const { symbol, hits } of results) {
-    lines.push(headerOf(symbol));
-    if (hits.length === 0) lines.push(looseNoteFor(direction, symbol.name, matches.length));
-    else for (const h of hits) lines.push(hitLine(direction, h, showDepth, quoteFor(h, symbol.name, read)));
+    lines.push(headerOf(symbol, graph));
+    if (hits.length === 0) lines.push(looseNoteFor(direction, symbol.name, matches.length, graph));
+    else for (const h of hits) lines.push(hitLine(direction, h, showDepth, quoteFor(h, symbol.name, read), graph));
     lines.push("");
   }
   const body = lines.join("\n").replace(/\n+$/, "\n");

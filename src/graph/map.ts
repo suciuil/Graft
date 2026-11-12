@@ -59,7 +59,14 @@ export interface ScopeGroup {
 }
 
 export interface RepoMap {
-  totals: { files: number; symbols: number; edges: number; languages: string[] };
+  totals: {
+    files: number;
+    symbols: number;
+    edges: number;
+    languages: string[];
+    /** Files parsed with syntax errors (see `NodeV1.parse_errors`); absent when none. */
+    parse_error_files?: number;
+  };
   /** Single-scope repos: sorted by symbol count desc (ties by path asc), capped
    * at `maxDirs`. Multi-scope repos: empty — use `scopes` instead (see below). */
   dirs: DirEntry[];
@@ -268,6 +275,7 @@ export function buildRepoMap(graph: GraphV1, opts: BuildRepoMapOptions = {}): Re
 
   const allSymbols = graph.nodes.filter((n) => n.kind !== "file");
   const hotspots = topHubs(allSymbols, inDegree, hotspotsN);
+  const parseErrorFiles = fileNodes.filter((f) => f.parse_errors).length;
 
   return {
     totals: {
@@ -275,6 +283,7 @@ export function buildRepoMap(graph: GraphV1, opts: BuildRepoMapOptions = {}): Re
       symbols: allSymbols.length,
       edges: graph.edges.length,
       languages: sortedLanguages(fileNodes.map((f) => f.path)),
+      ...(parseErrorFiles ? { parse_error_files: parseErrorFiles } : {}),
     },
     dirs,
     scopes: scopeGroups,
@@ -327,6 +336,14 @@ export function formatRepoMap(map: RepoMap): string {
   const header = `repo map — ${totals.files} files · ${totals.symbols} symbols · ${totals.edges} edges · ${totals.languages.join(", ")}`;
 
   const lines: string[] = [header, ""];
+  const unread = totals.parse_error_files ?? 0;
+  if (unread) {
+    lines.splice(
+      1,
+      0,
+      `⚠ ${unread} ${unread === 1 ? "file was" : "files were"} parsed with syntax errors: symbols, calls or spans in them may be missing or incomplete (ask, skeleton, callers and grep flag each one)`,
+    );
+  }
   if (map.scopes) {
     // Multi-scope: scope label as the top-level group heading, that scope's
     // own dirs listed under it — `map.dirs` is empty here, see `buildRepoMap`.

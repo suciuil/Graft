@@ -34,7 +34,7 @@ import {
   federateSkeleton,
   readWorkspace,
 } from '../graph/workspace.js';
-import type { NodeV1 } from '../graph/types.js';
+import type { GraphV1, NodeV1 } from '../graph/types.js';
 import { recordLookup } from '../cloud/lookup-activity.js';
 import { canonicalToolName } from './tool-names.js';
 import { cmd } from '../brand.js';
@@ -195,13 +195,14 @@ function renderMatches(
   showDepth: boolean,
   matches: NodeV1[],
   hitsFor: (n: NodeV1) => EdgeHit[],
+  graph?: GraphV1 | null,
 ): string {
   return matches
     .map((m) => {
       const hits = hitsFor(m);
-      const lines = [headerOf(m)];
-      if (hits.length === 0) lines.push(looseNoteFor(direction, m.name, matches.length));
-      else for (const h of hits) lines.push(hitLine(direction, h, showDepth));
+      const lines = [headerOf(m, graph)];
+      if (hits.length === 0) lines.push(looseNoteFor(direction, m.name, matches.length, graph));
+      else for (const h of hits) lines.push(hitLine(direction, h, showDepth, undefined, graph));
       return lines.join('\n');
     })
     .join('\n\n');
@@ -468,7 +469,7 @@ async function callSingleTool(
               : 1;
         const results = matches.map((m) => ({ symbol: m, hits: edgeWalk(w, m, direction, depth) }));
         const byId = new Map(results.map((r) => [r.symbol.id, r.hits]));
-        const body = renderMatches(direction, depth > 1, matches, (m) => byId.get(m.id) ?? []);
+        const body = renderMatches(direction, depth > 1, matches, (m) => byId.get(m.id) ?? [], w);
         const text = withSavings(body, callersSavings(w, results));
         return { text, isError: false };
       }
