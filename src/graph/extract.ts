@@ -12,6 +12,7 @@ import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } 
 import { depthReady, parseDepth, type SyntaxNode } from "./depth-parser.js";
 import { grammarAvailable } from "./native.js";
 import { extractSimulink } from "./simulink.js";
+import { isTresosTemplate, tresosViews } from "./tresos.js";
 // The fork's optional grammars always parse native (depth-parser.ts backendOf), so their extractors take the full node API.
 import type Parser from "tree-sitter";
 import type { Kind, NodeV1, Relation } from "./types.js";
@@ -698,8 +699,10 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   // An optional grammar that isn't built leaves the file indexed but symbol-less,
   // rather than throwing and marking it a parse error.
   if (!depthReady(grammar)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
-  // Objective-C shares `.m`: leave it a file node without spending a MATLAB parse on it.
-  if (grammar === "matlab" && OBJC_MARKERS.test(source)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
+  // Objective-C and EB tresos macro files share `.m`: leave them file nodes
+  // without spending a MATLAB parse on them.
+  if (grammar === "matlab" && (OBJC_MARKERS.test(source) || isTresosTemplate(source)))
+    return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   if (grammar === "c" || grammar === "cpp") return extractCFamily(rel, source, grammar);
   return parseDepth(grammar, source, (root) => markParseErrors(extractTree(rel, source, grammar, root), syntaxErrors(asNative(root)).regions));
 }
@@ -732,19 +735,69 @@ interface CFamilyParse {
  * lost in an error) is added, and so are the calls the other parses saw in a function they share, so
  * calls written in a left-out branch still count. Files that parse without errors,
  * nearly all of them, are parsed once, as before.
+ *
+ * An EB tresos code template is never parsed as written: its two template views
+ * (see {@link tresosViews}) take the original's place, and the branch views are
+ * made from the better of them.
+ *
+ * A C file that has errors and `#ifdef __cplusplus` branches is also parsed as a
+ * C compiler sees it, with those branches blanked (see {@link withoutCppBranches}),
+ * and that view competes with the original for the base the branch views start from.
+ *
+ * A `.h` header whose C++ sits only in `#ifdef __cplusplus` branches is routed
+ * to C (see {@link looksLikeCpp}); when its C parse has errors and those branches
+ * hold real C++, it is parsed as C++ too, and the parse with fewer errors is kept.
+ * A file with no C punctuation at all (a list of file names that happens to end
+ * in `.h`), or saved grep output (`App.c:#include "App.h"` on every line), is
+ * not code: it stays a file node.
  */
 function extractCFamily(rel: string, source: string, grammar: Language): ExtractResult {
+  if (!/[;{}#()]/.test(source) || looksLikeGrepOutput(source)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
+  const result = extractCFamilyAs(rel, source, grammar);
+  const errors = result.nodes[0]?.parse_errors ?? 0;
+  if (grammar !== "c" || errors === 0 || !/\.h$/i.test(rel) || !grammarAvailable("cpp") || !cppInGuardedBranches(source))
+    return result;
+  const asCpp = extractCFamilyAs(rel, source, "cpp");
+  return (asCpp.nodes[0]?.parse_errors ?? 0) < errors ? asCpp : result;
+}
+
+/** Whether nearly every line starts with a file name and a colon, as grep
+ * prints its hits (`dir/App.c:#include "App.h"`, `App.c:12:int x;`). No C line
+ * starts that way: a label or `case` has no `.ext` before its colon. */
+function looksLikeGrepOutput(source: string): boolean {
+  const lines = source.split("\n").filter((l) => l.trim() !== "");
+  if (lines.length < 3) return false;
+  const hits = lines.filter((l) => /^[\w./\\-]+\.\w+:/.test(l)).length;
+  return hits >= lines.length * 0.9;
+}
+
+function extractCFamilyAs(rel: string, source: string, grammar: Language): ExtractResult {
   const parse = (text: string): CFamilyParse =>
     parseDepth(grammar, text, (root) => ({ result: extractTree(rel, text, grammar, root), ...syntaxErrors(asNative(root)) }));
-  const original = parse(source);
-  if (original.errors === 0) return original.result;
-  const views = conditionalViews(source);
-  if (views.length === 0) return markParseErrors(original.result, original.regions);
-  const parses = [original, ...views.map(parse)];
+  const texts = isTresosTemplate(source) ? tresosViews(source) : [source];
+  const firsts = texts.map(parse);
+  let base = 0;
+  for (let k = 1; k < firsts.length; k++) if (firsts[k].errors < firsts[base].errors) base = k;
+  // Read as C, a file's `#ifdef __cplusplus` branches are never compiled; one
+  // that only closes an `extern "C" {` opened in another header unbalances the
+  // braces of the whole file. Parse the file as a C compiler sees it too, unless
+  // those branches hold real C++ (classes, templates): that is parsed as C++
+  // instead (see extractCFamily), and blanking it would only lose it.
+  const cOnly = grammar === "c" && firsts[base].errors > 0 && !cppInGuardedBranches(texts[base]) ? withoutCppBranches(texts[base]) : null;
+  if (cOnly !== null) {
+    texts.push(cOnly);
+    firsts.push(parse(cOnly));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
+  const original = firsts[base];
+  if (original.errors === 0 && texts[base] === source) return original.result;
+  const views = original.errors === 0 ? [] : conditionalViews(texts[base]);
+  if (views.length === 0 && texts.length === 1) return markParseErrors(original.result, original.regions);
+  const parses = [original, ...firsts.filter((p) => p !== original), ...views.map(parse)];
   let best = original;
   for (const p of parses) if (p.errors < best.errors) best = p;
   const merged = best.result;
-  if (best !== original) {
+  if (texts[base] !== source || best !== original) {
     // The view's text has the left-out lines blanked; the file node describes
     // the file as it is.
     const file = merged.nodes[0];
@@ -2470,13 +2523,15 @@ const CPP_HEADER_SIGNS: readonly RegExp[] = [
 ];
 
 /** Whether a `.h` header is C++ (so it should be parsed as C++ rather than C):
- * `extern "C++"`, or one of {@link CPP_HEADER_SIGNS} in its code. */
+ * `extern "C++"`, an `extern "C"` outside the `#ifdef __cplusplus` branches
+ * (C has no such thing, so a header that writes it unguarded is only ever
+ * compiled as C++), or one of {@link CPP_HEADER_SIGNS} in its code. */
 function looksLikeCpp(source: string): boolean {
   if (lastCppSniff?.source === source) return lastCppSniff.cpp;
   let cpp = /\bextern\s+"C\+\+"/.test(source);
   if (!cpp) {
     const code = headerCode(source);
-    cpp = CPP_HEADER_SIGNS.some((re) => re.test(code));
+    cpp = /\bextern\s+"C"/.test(code) || CPP_HEADER_SIGNS.some((re) => re.test(code));
   }
   lastCppSniff = { source, cpp };
   return cpp;
@@ -2484,34 +2539,72 @@ function looksLikeCpp(source: string): boolean {
 /** The build labels a header and then extracts it: both ask about the same text. */
 let lastCppSniff: { source: string; cpp: boolean } | undefined;
 
-/** A header's code as {@link CPP_HEADER_SIGNS} read it; every line stays a line. */
-function headerCode(source: string): string {
+/** Whether a header's `#if(def) __cplusplus` branches, which {@link looksLikeCpp}
+ * leaves out, hold C++ code (classes, templates, `std::`), not just the
+ * `extern "C" {` wrapper. A C parse of such a header fails on those branches. */
+function cppInGuardedBranches(source: string): boolean {
+  if (!/\b__cplusplus\b/.test(source)) return false;
+  const code = headerCode(source, true);
+  return CPP_HEADER_SIGNS.some((re) => re.test(code));
+}
+
+/** A header's code as {@link CPP_HEADER_SIGNS} read it; every line stays a line.
+ * The `"C"` of a linkage spec stays, every other string is blanked.
+ * With `guarded`, only the code of its C++-only branches instead. */
+function headerCode(source: string, guarded = false): string {
   const blank = (m: string): string => m.replace(/[^\n]/g, " ");
-  const text = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, blank);
+  const text = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, (m) => (m === '"C"' ? m : blank(m)));
   const lines = text.split("\n");
+  const kinds = cppBranchLines(lines);
+  for (let i = 0; i < lines.length; i++) if (kinds[i] === "directive" || (kinds[i] === "cpp") !== guarded) lines[i] = "";
+  return lines.join("\n").replace(/\[\[[^\]\n]*\]\]/g, blank);
+}
+
+/** For each line: an `#if`/`#else`/`#endif` directive, a line of a C++-only
+ * branch (`#ifdef __cplusplus`, the `#else` of `#ifndef __cplusplus`), or code
+ * any compiler sees. Comments must already be blanked. */
+function cppBranchLines(lines: readonly string[]): ("directive" | "cpp" | "code")[] {
   // Each open #if: whether it tests __cplusplus, and whether its current branch is C++-only.
   const open: { cpp: boolean; skip: boolean }[] = [];
   const negated = (cond: string): boolean => /!\s*(?:defined\s*\(?\s*)?__cplusplus/.test(cond);
-  for (let i = 0; i < lines.length; i++) {
-    const m = /^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)/.exec(lines[i]);
-    if (m) {
-      const [, kw, cond] = m;
-      if (kw === "if" || kw === "ifdef" || kw === "ifndef") {
-        const cpp = /\b__cplusplus\b/.test(cond);
-        open.push({ cpp, skip: cpp && kw !== "ifndef" && !negated(cond) });
-      } else if (kw === "endif") open.pop();
-      else {
-        const top = open[open.length - 1];
-        if (top?.cpp) top.skip = !top.skip;
-        else if (top && kw === "elif" && /\b__cplusplus\b/.test(cond)) {
-          top.cpp = true;
-          top.skip = !negated(cond);
-        }
+  return lines.map((line) => {
+    const m = /^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)/.exec(line);
+    if (!m) return open.some((o) => o.skip) ? "cpp" : "code";
+    const [, kw, cond] = m;
+    if (kw === "if" || kw === "ifdef" || kw === "ifndef") {
+      const cpp = /\b__cplusplus\b/.test(cond);
+      open.push({ cpp, skip: cpp && kw !== "ifndef" && !negated(cond) });
+    } else if (kw === "endif") open.pop();
+    else {
+      const top = open[open.length - 1];
+      if (top?.cpp) top.skip = !top.skip;
+      else if (top && kw === "elif" && /\b__cplusplus\b/.test(cond)) {
+        top.cpp = true;
+        top.skip = !negated(cond);
       }
-      lines[i] = "";
-    } else if (open.some((o) => o.skip)) lines[i] = "";
+    }
+    return "directive";
+  });
+}
+
+/** `text` as a C compiler sees it: the lines of its C++-only branches blanked,
+ * every line, column and offset kept. Null when it has no such lines. */
+function withoutCppBranches(text: string): string | null {
+  if (!/\b__cplusplus\b/.test(text)) return null;
+  const blank = (m: string): string => m.replace(/[^\n]/g, " ");
+  // Comments blanked to find the directives, and kept in the view: a comment
+  // opened on a blanked line still closes where it did.
+  const code = text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, blank);
+  const lines = code.split("\n");
+  const kinds = cppBranchLines(lines);
+  if (!kinds.includes("cpp")) return null;
+  const out = text.split("\n");
+  for (let i = 0; i < out.length; i++) {
+    if (kinds[i] !== "cpp") continue;
+    const kept = lines[i];
+    out[i] = out[i].replace(/[^\r]/g, (ch, x: number) => (kept[x] === ch && ch !== " " && ch !== "\t" ? " " : ch));
   }
-  return lines.join("\n").replace(/\[\[[^\]\n]*\]\]/g, blank);
+  return out.join("\n");
 }
 
 /** Kotlin definition shapes. Unlike Java's, tree-sitter-kotlin exposes no `name`

@@ -551,11 +551,51 @@ test("C header: C++ words in comments, strings or __cplusplus branches keep a .h
   assert.equal(nodeById(graph, "guard.h")?.parse_errors, undefined, "the C view of guard.h reads whole");
 });
 
+// A header whose classes all sit behind `#ifdef __cplusplus` stays labelled C,
+// but its C parse fails on them: it is parsed as C++ too, and the better parse kept.
+test("C header: classes behind #ifdef __cplusplus that C cannot read are parsed as C++", { skip: grammarAvailable("c") && grammarAvailable("cpp") ? false : "c/cpp grammar not built" }, async () => {
+  const graph = await build({
+    "logger.h":
+      "#ifdef __cplusplus\n#include <string>\nclass TLog {\npublic:\n  virtual std::string Line(void) = 0;\n  virtual ~TLog() {}\n};\nclass TFile : public TLog {\npublic:\n  std::string Line(void) override;\n};\n#endif\n",
+  });
+  assert.equal(nodeById(graph, "logger.h")?.parse_errors, undefined, "logger.h reads whole as C++");
+  assert.ok(graph.nodes.some((n) => n.path === "logger.h" && n.name === "TFile"), "TFile is found");
+});
+
+// A `.h` that is a list of file names, not code, is a file node without errors.
+test("C header: a .h without any C punctuation is not parsed", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({ "files.h": "App_Int.h\nMemMap.h\nApp_Int.h\n" });
+  assert.ok(nodeById(graph, "files.h"), "files.h is indexed");
+  assert.equal(nodeById(graph, "files.h")?.parse_errors, undefined, "files.h carries no parse errors");
+});
+
+// A header that closes, behind `#ifdef __cplusplus`, an `extern "C" {` opened in
+// another header: a C compiler never sees the stray brace, and neither does the C view.
+test("C header: a stray } in an #ifdef __cplusplus branch does not break the file", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const src = "#ifndef OS_H\r\n#define OS_H\r\n/* lock */\r\nstatic int OS_Lock(int x) { return x; }\r\n#define OS_SET(a) do { (a) = 1; } while (0)\r\n#ifdef __cplusplus\r\n} /* extern \"C\"\r\n */\r\n#endif\r\n#endif\r\n";
+  const graph = await build({ "os.h": src });
+  assert.equal(nodeById(graph, "os.h")?.parse_errors, undefined, "os.h reads whole as C");
+  assert.equal(nodeById(graph, "os.h#OS_Lock")?.kind, "function");
+  assert.equal(nodeById(graph, "os.h")?.chars, src.length, "the file node describes the file, not the view");
+});
+
+// Saved grep output (`App.c:#include "App.h"` lines) is not code either.
+test("C header: a .h holding grep output is not parsed", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({
+    "hits.h": 'App.c:#include "App_Int.h"\r\nApp.c:#include "MemMap.h"\r\nsrc/Init.c:12:#include "App_Int.h",x.h,\r\n',
+    "real.h": "struct S { int a; };\nint f(void);\nint g(void);\n",
+  });
+  assert.equal(nodeById(graph, "hits.h")?.parse_errors, undefined, "hits.h carries no parse errors");
+  assert.ok(!graph.nodes.some((n) => n.path === "hits.h" && n.id !== "hits.h"), "hits.h is a file node only");
+  assert.equal(nodeById(graph, "real.h#S")?.kind, "struct", "a real header is still parsed");
+});
+
 test("C++ header: namespace, std:: or a template sends a .h to C++", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   for (const src of [
     "namespace app {\nint run();\n}\n",
     "#include <vector>\nint count(const std::vector<int> &v);\n",
     "template <typename T>\nT max_of(T a, T b);\n",
+    'extern "C" API void step(const double& dt);\n',
   ]) {
     const graph = await build({ "api.h": src });
     assert.deepEqual(graph.meta.languages, ["cpp"], src);
