@@ -13,6 +13,7 @@ import { depthReady, parseDepth, type SyntaxNode } from "./depth-parser.js";
 import { grammarAvailable } from "./native.js";
 import { extractSimulink } from "./simulink.js";
 import { isTresosTemplate, tresosViews } from "./tresos.js";
+import { erbView, isErbTemplate } from "./erb.js";
 // The fork's optional grammars always parse native (depth-parser.ts backendOf), so their extractors take the full node API.
 import type Parser from "tree-sitter";
 import type { Kind, NodeV1, Relation } from "./types.js";
@@ -773,11 +774,14 @@ interface CFamilyParse {
  *
  * An EB tresos code template is never parsed as written: its two template views
  * (see {@link tresosViews}) take the original's place, and the branch views are
- * made from the better of them.
+ * made from the better of them. An ERB template (Ruby in `<% … %>` tags and `%`
+ * lines, see {@link erbView}) is parsed as written and as its C view.
  *
  * A C file that has errors and `#ifdef __cplusplus` branches is also parsed as a
  * C compiler sees it, with those branches blanked (see {@link withoutCppBranches}),
  * and that view competes with the original for the base the branch views start from.
+ * So does a view that puts back the commas an initializer list leaves out between
+ * `#if` blocks that are never on together (see {@link withInitializerCommas}).
  *
  * A `.h` header whose C++ sits only in `#ifdef __cplusplus` branches is routed
  * to C (see {@link looksLikeCpp}); when its C parse has errors, it is parsed as
@@ -791,7 +795,7 @@ interface CFamilyParse {
  */
 function extractCFamily(rel: string, source: string, grammar: Language): ExtractResult {
   if (!/[;{}#()]/.test(source) || looksLikeGrepOutput(source)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
-  const texts = isTresosTemplate(source) ? tresosViews(source) : [source];
+  const texts = isTresosTemplate(source) ? tresosViews(source) : isErbTemplate(source) ? [source, erbView(source)] : [source];
   const asC = extractCFamilyAs(rel, source, grammar, [...texts]);
   if (grammar !== "c" || asC.errors === 0 || !/\.h$/i.test(rel) || !grammarAvailable("cpp")) return asC.result;
   // Extracting again as C++ (branch views and all) only pays when the C++
@@ -839,6 +843,14 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   if (cOnly !== null) {
     texts.push(cOnly);
     firsts.push(parse(cOnly));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
+  // Initializer elements in `#if` blocks that are never on together, each
+  // without its comma (see withInitializerCommas).
+  const commas = firsts[base].errors > 0 ? withInitializerCommas(texts[base]) : null;
+  if (commas !== null) {
+    texts.push(commas);
+    firsts.push(parse(commas));
     if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
   }
   const original = firsts[base];
@@ -958,7 +970,7 @@ const IF_ZERO = /^\s*\(?\s*0\s*\)?\s*(\/[/*].*)?$/;
  * A chain without its `#endif` is left as it is. Empty when the file has no
  * complete chain.
  */
-function conditionalViews(source: string): string[] {
+export function conditionalViews(source: string): string[] {
   const lines = source.split("\n");
   interface Branch { at: number; end: number; cond: string }
   interface Chain { branches: Branch[]; endif: number; endifEnd: number }
@@ -1037,6 +1049,103 @@ function directiveEnd(lines: string[], start: number): number {
     if (!inComment && !line.endsWith("\\")) return i;
   }
   return lines.length - 1;
+}
+
+/**
+ * An initializer list whose elements sit in `#if` blocks that are never on
+ * together, each block written as if it were the only one, so a block's last
+ * element has no comma:
+ *
+ *     #if A
+ *        &OBJ_X
+ *     #endif
+ *     #if B
+ *        &OBJ_Y
+ *     #endif
+ *
+ * The grammar sees every block at once, and the elements run together. The view
+ * returned puts a comma where the first directive line between two such
+ * elements was (the rest of that line becomes spaces), so every line, column and
+ * offset stays where it was. Null when no gap needs one.
+ */
+export function withInitializerCommas(source: string): string | null {
+  const lines = source.split("\n");
+  const code = codeOfLines(lines);
+  const directive = (i: number): boolean => CONDITIONAL_DIRECTIVE.test(lines[i].replace(/\r$/, "")) && directiveEnd(lines, i) === i;
+  const inList = initializerLines(code);
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (!inList[i] || !directive(i)) continue;
+    // The code line before this run of directive lines, and the one after it.
+    let prev = i - 1;
+    while (prev >= 0 && code[prev].trim() === "") prev--;
+    if (prev < 0 || directive(prev)) continue;
+    let next = i + 1;
+    while (next < lines.length && (code[next].trim() === "" || directive(next))) next++;
+    if (next >= lines.length) break;
+    const before = code[prev].trim();
+    const after = code[next].trim();
+    // An element ends in a name, a literal or a closing bracket; the next one
+    // starts like an expression, a designator or a nested list.
+    if (/[\w)\]}"']$/.test(before) && !before.startsWith("#") && /^[(&\w"'.{-]/.test(after) && !/^(&&|\|\|)/.test(after)) {
+      lines[i] = lines[i].replace(/[^\r]/g, " ").replace(/^ /, ",");
+      changed = true;
+    }
+    while (i + 1 < next) i++;
+  }
+  return changed ? lines.join("\n") : null;
+}
+
+/** For each line, whether it starts inside an initializer list: a `{` after
+ * `=`, or after `{` or `,` inside another list. */
+function initializerLines(code: string[]): boolean[] {
+  const stack: boolean[] = [];
+  let last = "";
+  return code.map((line) => {
+    const inside = stack.length > 0 && stack[stack.length - 1];
+    // A preprocessor line holds no braces of the code around it.
+    if (/^\s*#/.test(line)) return inside;
+    for (const ch of line) {
+      if (ch === "{") stack.push(last === "=" || ((last === "{" || last === ",") && stack.length > 0 && stack[stack.length - 1]));
+      else if (ch === "}") stack.pop();
+      if (!/\s/.test(ch)) last = ch;
+    }
+    return inside;
+  });
+}
+
+/** Each line's code: its comments and string contents become spaces. */
+function codeOfLines(lines: string[]): string[] {
+  let inComment = false;
+  return lines.map((raw) => {
+    const line = raw.replace(/\r$/, "");
+    let out = "";
+    for (let j = 0; j < line.length; j++) {
+      if (inComment) {
+        if (line.startsWith("*/", j)) {
+          inComment = false;
+          out += "  ";
+          j++;
+        } else out += " ";
+        continue;
+      }
+      if (line.startsWith("/*", j)) {
+        inComment = true;
+        out += "  ";
+        j++;
+      } else if (line.startsWith("//", j)) {
+        out += " ".repeat(line.length - j);
+        break;
+      } else if (line[j] === '"' || line[j] === "'") {
+        const quote = line[j];
+        let k = j + 1;
+        while (k < line.length && line[k] !== quote) k += line[k] === "\\" ? 2 : 1;
+        out += quote + " ".repeat(Math.max(0, Math.min(k, line.length) - j - 1)) + (k < line.length ? quote : "");
+        j = k;
+      } else out += line[j];
+    }
+    return out;
+  });
 }
 
 /**
@@ -2596,7 +2705,7 @@ let lastCppSniff: { source: string; cpp: boolean } | undefined;
 /** Whether a header's `#if(def) __cplusplus` branches, which {@link looksLikeCpp}
  * leaves out, hold C++ code (classes, templates, `std::`), not just the
  * `extern "C" {` wrapper. A C parse of such a header fails on those branches. */
-function cppInGuardedBranches(source: string): boolean {
+export function cppInGuardedBranches(source: string): boolean {
   if (!/\b__cplusplus\b/.test(source)) return false;
   const code = headerCode(source, true);
   return CPP_HEADER_SIGNS.some((re) => re.test(code));
@@ -2643,7 +2752,7 @@ function cppBranchLines(lines: readonly string[]): ("directive" | "cpp" | "code"
 
 /** `text` as a C compiler sees it: the lines of its C++-only branches blanked,
  * every line, column and offset kept. Null when it has no such lines. */
-function withoutCppBranches(text: string): string | null {
+export function withoutCppBranches(text: string): string | null {
   if (!/\b__cplusplus\b/.test(text)) return null;
   const blank = (m: string): string => m.replace(/[^\n]/g, " ");
   // Comments blanked to find the directives, and kept in the view: a comment
