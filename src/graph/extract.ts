@@ -264,6 +264,11 @@ function contentOverride(
 ): { grammar: Language; label: string } | undefined {
   if (grammar === "c" && /\.h$/i.test(path) && looksLikeCpp(source) && grammarAvailable("cpp"))
     return { grammar: "cpp", label: "cpp" };
+  // `.config` is XML for .NET (Web.config, App.config), but other tools write JSON
+  // under the same extension (pure::variants, Asgard). An XML document starts with
+  // `<` after an optional BOM and whitespace, so an object or array start is JSON.
+  if (grammar === "xml" && /\.config$/i.test(path) && /^\uFEFF?\s*[{[]/.test(source))
+    return { grammar: "json", label: "json" };
   return undefined;
 }
 
@@ -704,7 +709,37 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
   if (grammar === "matlab" && (OBJC_MARKERS.test(source) || isTresosTemplate(source)))
     return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   if (grammar === "c" || grammar === "cpp") return extractCFamily(rel, source, grammar);
+  if (isTresosTemplate(source)) return extractTresosTemplate(rel, source, grammar);
   return parseDepth(grammar, source, (root) => markParseErrors(extractTree(rel, source, grammar, root), syntaxErrors(asNative(root)).regions));
+}
+
+/**
+ * An EB tresos template in another language than C, such as a makefile or an
+ * XML file under a plugin's `generate/` folder: its `[! … !]` markup breaks the
+ * grammar as it breaks C. The file is parsed as written and, when that has
+ * errors, as its template views too (see {@link tresosViews}); the parse whose
+ * errors cover the least text is extracted. A view keeps every offset, so its
+ * spans hold for the file; the file node still describes the file as written.
+ */
+function extractTresosTemplate(rel: string, source: string, grammar: Language): ExtractResult {
+  const parse = (text: string): CFamilyParse =>
+    parseDepth(grammar, text, (root) => ({ result: extractTree(rel, text, grammar, root), ...syntaxErrors(asNative(root)) }));
+  let best = parse(source);
+  let text = source;
+  for (const view of best.errors === 0 ? [] : tresosViews(source)) {
+    const p = parse(view);
+    if (p.errors < best.errors) {
+      best = p;
+      text = view;
+    }
+  }
+  if (text !== source) {
+    const file = best.result.nodes[0];
+    file.body_hash = contentHash(source);
+    file.chars = source.length;
+    file.body_text = fileResidual(source, best.result.nodes.slice(1));
+  }
+  return markParseErrors(best.result, best.regions);
 }
 
 /** Record on the file node (`nodes[0]`) that its parse had `regions` syntax errors. */
@@ -745,20 +780,36 @@ interface CFamilyParse {
  * and that view competes with the original for the base the branch views start from.
  *
  * A `.h` header whose C++ sits only in `#ifdef __cplusplus` branches is routed
- * to C (see {@link looksLikeCpp}); when its C parse has errors and those branches
- * hold real C++, it is parsed as C++ too, and the parse with fewer errors is kept.
+ * to C (see {@link looksLikeCpp}); when its C parse has errors, it is parsed as
+ * C++ too (C++ code in those branches, or C++ that `looksLikeCpp` does not spot,
+ * such as `const T x((T) 0);`), and the parse whose errors cover less text is
+ * kept. Only when the C++ grammar reads the file as written better than C does
+ * is it extracted, with its branch views, as C++.
  * A file with no C punctuation at all (a list of file names that happens to end
  * in `.h`), or saved grep output (`App.c:#include "App.h"` on every line), is
  * not code: it stays a file node.
  */
 function extractCFamily(rel: string, source: string, grammar: Language): ExtractResult {
   if (!/[;{}#()]/.test(source) || looksLikeGrepOutput(source)) return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
-  const result = extractCFamilyAs(rel, source, grammar);
-  const errors = result.nodes[0]?.parse_errors ?? 0;
-  if (grammar !== "c" || errors === 0 || !/\.h$/i.test(rel) || !grammarAvailable("cpp") || !cppInGuardedBranches(source))
-    return result;
-  const asCpp = extractCFamilyAs(rel, source, "cpp");
-  return (asCpp.nodes[0]?.parse_errors ?? 0) < errors ? asCpp : result;
+  const texts = isTresosTemplate(source) ? tresosViews(source) : [source];
+  const asC = extractCFamilyAs(rel, source, grammar, [...texts]);
+  if (grammar !== "c" || asC.errors === 0 || !/\.h$/i.test(rel) || !grammarAvailable("cpp")) return asC.result;
+  // Extracting again as C++ (branch views and all) only pays when the C++
+  // grammar already reads the file better as written; most headers with C
+  // errors have C the C++ grammar cannot read either.
+  const cppFirst = Math.min(...texts.map((t) => parseDepth("cpp", t, (root) => syntaxErrors(asNative(root)).errors)));
+  if (cppFirst >= asC.first) return asC.result;
+  const asCpp = extractCFamilyAs(rel, source, "cpp", texts);
+  return asCpp.errors < asC.errors ? asCpp.result : asC.result;
+}
+
+/** What {@link extractCFamilyAs} extracted, and how much of the text the syntax
+ * errors cover (see {@link syntaxErrors}): in the parse the symbols came from,
+ * and in the best parse of the file as written, before any branch view. */
+interface CFamilyOutcome {
+  result: ExtractResult;
+  errors: number;
+  first: number;
 }
 
 /** Whether nearly every line starts with a file name and a colon, as grep
@@ -771,10 +822,11 @@ function looksLikeGrepOutput(source: string): boolean {
   return hits >= lines.length * 0.9;
 }
 
-function extractCFamilyAs(rel: string, source: string, grammar: Language): ExtractResult {
+/** `texts` are the file's own text, or its tresos template views; the array is
+ * extended with the C-only view. */
+function extractCFamilyAs(rel: string, source: string, grammar: Language, texts: string[]): CFamilyOutcome {
   const parse = (text: string): CFamilyParse =>
     parseDepth(grammar, text, (root) => ({ result: extractTree(rel, text, grammar, root), ...syntaxErrors(asNative(root)) }));
-  const texts = isTresosTemplate(source) ? tresosViews(source) : [source];
   const firsts = texts.map(parse);
   let base = 0;
   for (let k = 1; k < firsts.length; k++) if (firsts[k].errors < firsts[base].errors) base = k;
@@ -790,9 +842,11 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language): Extra
     if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
   }
   const original = firsts[base];
-  if (original.errors === 0 && texts[base] === source) return original.result;
+  const first = original.errors;
+  if (original.errors === 0 && texts[base] === source) return { result: original.result, errors: 0, first };
   const views = original.errors === 0 ? [] : conditionalViews(texts[base]);
-  if (views.length === 0 && texts.length === 1) return markParseErrors(original.result, original.regions);
+  if (views.length === 0 && texts.length === 1)
+    return { result: markParseErrors(original.result, original.regions), errors: original.errors, first };
   const parses = [original, ...firsts.filter((p) => p !== original), ...views.map(parse)];
   let best = original;
   for (const p of parses) if (p.errors < best.errors) best = p;
@@ -808,7 +862,7 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language): Extra
   merged.nodes[0].body_text = fileResidual(source, merged.nodes.slice(1));
   // The parse the symbols came from still has errors: say so on the file. Symbols
   // merged in from the other views may fill some of its gaps, not all of them.
-  return markParseErrors(merged, best.regions);
+  return { result: markParseErrors(merged, best.regions), errors: best.errors, first };
 }
 
 /**

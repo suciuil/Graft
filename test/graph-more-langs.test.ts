@@ -562,6 +562,14 @@ test("C header: classes behind #ifdef __cplusplus that C cannot read are parsed 
   assert.ok(graph.nodes.some((n) => n.path === "logger.h" && n.name === "TFile"), "TFile is found");
 });
 
+// C++ that no keyword gives away (direct initialization) is tried as C++ too.
+test("C header: C++ without C++ keywords that C cannot read is parsed as C++", { skip: grammarAvailable("c") && grammarAvailable("cpp") ? false : "c/cpp grammar not built" }, async () => {
+  const graph = await build({
+    "masks.h": "#include \"types.h\"\nconst uint64 Init_mask    ((uint64) 0x1000000000000009);\nconst uint64 Neutral_mask ((uint64) 0x1000000000000001);\n",
+  });
+  assert.equal(nodeById(graph, "masks.h")?.parse_errors, undefined, "masks.h reads whole as C++");
+});
+
 // A `.h` that is a list of file names, not code, is a file node without errors.
 test("C header: a .h without any C punctuation is not parsed", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
   const graph = await build({ "files.h": "App_Int.h\nMemMap.h\nApp_Int.h\n" });

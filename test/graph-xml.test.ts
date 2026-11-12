@@ -149,3 +149,20 @@ test("XML: Web.config / App.config / packages.config are all indexed as xml", { 
   assert.equal(nodeById(graph, "packages.config#configuration.appSettings.K")?.kind, "element");
 });
 
+test("XML: a .config file holding JSON is parsed as json, not as broken xml", async () => {
+  const json = '\uFEFF{\r\n    "asgard": "D:\\\\tools\\\\asgard.exe",\r\n    "module": { "name": "x" }\r\n}\r\n';
+  const graph = await build({ "Asgard.config": json });
+  assert.equal(nodeById(graph, "Asgard.config#asgard")?.kind, "variable");
+  assert.equal(nodeById(graph, "Asgard.config#module.name")?.kind, "variable");
+  assert.ok(!nodeById(graph, "Asgard.config")?.parse_errors, "no parse errors");
+});
+
+test("XML: processing instructions parse in CRLF files and before markup on the same line", { skip }, async () => {
+  // The scanner used to demand a "\n" right after "?>", so every <?target ...?>
+  // in a Windows file (or followed by markup) became a parse error.
+  const doc = '<?xml version="1.0"?>\r\n<?eclipse version="3.2"?>\r\n<plugin><?a b?><ext id="e"/></plugin><?c d?>';
+  const graph = await build({ "plugin.xml": doc });
+  assert.ok(!nodeById(graph, "plugin.xml")?.parse_errors, "no parse errors");
+  assert.equal(nodeById(graph, "plugin.xml#plugin")?.kind, "element");
+});
+
