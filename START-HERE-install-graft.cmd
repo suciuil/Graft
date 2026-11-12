@@ -11,7 +11,8 @@ rem download of LiteLLM's model price list with "graft prices update" after graf
 rem the savings report); add -NoSavingsReport to keep the savings report off.
 rem Answers are remembered (%USERPROFILE%\.graft\installer-choices.json, no keys or passwords): an upgrade asks only
 rem about new items and about LLM settings that fail their check. "START-HERE-install-graft.cmd -Ask" asks everything again,
-rem except the price list download once it was answered with yes.
+rem except the price list download and the savings report once they were answered with yes. The savings report
+rem question is asked again only while the report is off (answered no, turned off since, or never asked).
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-graft-helper.ps1" %*
 set "RC=%ERRORLEVEL%"
 echo.

@@ -3,7 +3,8 @@
 # -Yes: agree up front (unattended runs); without it the user is asked before anything is changed.
 #   -Yes also takes the default answer of every question, which turns on the savings report.
 # -Ask: ignore the answers remembered from earlier runs and ask every question again, as on a first install (except
-#       the price list download: once answered 'yes', it is not asked again)
+#       the price list download and the savings report: once answered 'yes', they are not asked again)
+# The savings report question is asked only while the report is off: never asked, answered 'no', or turned off since
 # -NoSavingsReport: do not turn on the savings report (graft savings-report disable), with or without -Yes
 # Answers are remembered in $ChoicesFile, so an upgrade asks only about what is new since the last run or what fails
 param([switch]$Yes, [switch]$Ask, [switch]$NoSavingsReport)
@@ -1159,6 +1160,27 @@ function Add-EarlierInstallerChoices($Choices, $Items) {
     return $true
 }
 
+# graft's own record of the savings report switch (ReportingState in src/reporting/store.ts, at statePath()), so
+# the question is not asked again once it was answered 'yes' (here or with 'graft savings-report enable'), even by an
+# installer from before answers were remembered. Returns @{ On; Date } (Date may be empty), or $null when the report
+# is not on: never chosen, answered 'no', turned off with 'graft savings-report disable' or by the database's kill
+# switch, or the file cannot be read.
+function Get-SavingsReportState {
+    $root = $env:GRAFT_REPORTING_HOME
+    if (-not ($root -and $root.Trim())) { $root = $env:USERPROFILE }
+    $file = Join-Path $root '.graft\savings-report-state.json'
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
+    try {
+        $s = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return $null
+    }
+    if ($s.enabled -ne $true) { return $null }
+    $date = ''
+    if ($s.changedAt) { try { $date = ([datetime]$s.changedAt).ToString('yyyy-MM-dd') } catch { $date = '' } }
+    return @{ On = $true; Date = $date }
+}
+
 # What the price list download does and does not send, shown before asking about it
 function Show-PricesNotice {
     Write-Host "graft can download LiteLLM's latest public model price list ('graft prices update') to price its savings for"
@@ -1278,19 +1300,31 @@ Write-Host ''
 
 # 0b. The savings report: asked now, applied once graft is installed (step 5a). Keep the list of what a row
 # holds in line with ReportEvent (src/reporting/store.ts) and WHAT_IS_SENT (src/reporting/command.ts).
-Write-Host "graft can report the cost savings it achieves to the company's central database, for analytics."
-Write-Host 'Each entry holds a random install id (not your Windows user name), the date and time, the AI model,'
-Write-Host 'the tokens and dollars saved or billed, and which graft command recorded it. No user name, project or'
-Write-Host 'folder name, path, file name, code or query text is sent.'
-Write-Host 'You can turn it off at any time with:  graft savings-report disable'
-if ($NoSavingsReport) {
-    $SavingsReport = $false
-    Write-Host 'Savings report: off (-NoSavingsReport was given).'
-} elseif ($Yes) {
+# Asked again only when it was answered 'no' (or turned off since) or never asked: once it is on, later runs (also
+# with -Ask) leave it on without asking, and step 5a does not touch it.
+$SavingsReportBefore = Get-SavingsReportState
+$SavingsReportApply = $true
+if ($SavingsReportBefore -and -not $NoSavingsReport) {
     $SavingsReport = $true
-    Write-Host "Savings report: on (-Yes was given; add -NoSavingsReport to keep it off)."
+    $SavingsReportApply = $false
+    $since = if ($SavingsReportBefore.Date) { " since $($SavingsReportBefore.Date)" } else { '' }
+    Write-Host "Savings report: on$since, as you chose earlier; not asked again."
+    Write-Host 'You can turn it off at any time with:  graft savings-report disable'
 } else {
-    $SavingsReport = (Read-Line 'Report graft cost savings to the central database? (recommended) [Y/n]') -notmatch '^(n|no)$'
+    Write-Host "graft can report the cost savings it achieves to the company's central database, for analytics."
+    Write-Host 'Each entry holds a random install id (not your Windows user name), the date and time, the AI model,'
+    Write-Host 'the tokens and dollars saved or billed, and which graft command recorded it. No user name, project or'
+    Write-Host 'folder name, path, file name, code or query text is sent.'
+    Write-Host 'You can turn it off at any time with:  graft savings-report disable'
+    if ($NoSavingsReport) {
+        $SavingsReport = $false
+        Write-Host 'Savings report: off (-NoSavingsReport was given).'
+    } elseif ($Yes) {
+        $SavingsReport = $true
+        Write-Host "Savings report: on (-Yes was given; add -NoSavingsReport to keep it off)."
+    } else {
+        $SavingsReport = (Read-Line 'Report graft cost savings to the central database? (recommended) [Y/n]') -notmatch '^(n|no)$'
+    }
 }
 Write-Host ''
 
@@ -1422,11 +1456,15 @@ if (-not (Test-Path $GraftCmd)) { $GraftCmd = 'graft' }
 # (problems here never fail the install)
 $GraftPackageDir = Join-Path $NpmGlobal 'node_modules\@nanonets\graft'
 $reportCmd = if ($SavingsReport) { 'enable' } else { 'disable' }
-try {
-    & $GraftCmd savings-report $reportCmd
-    if ($LASTEXITCODE -ne 0) { Write-Warning "'graft savings-report $reportCmd' failed (exit code $LASTEXITCODE); run it again later." }
-} catch {
-    Write-Warning "Could not run 'graft savings-report $reportCmd': $($_.Exception.Message)"
+if ($SavingsReportApply) {
+    try {
+        & $GraftCmd savings-report $reportCmd
+        if ($LASTEXITCODE -ne 0) { Write-Warning "'graft savings-report $reportCmd' failed (exit code $LASTEXITCODE); run it again later." }
+    } catch {
+        Write-Warning "Could not run 'graft savings-report $reportCmd': $($_.Exception.Message)"
+    }
+} else {
+    Write-Host 'Savings report: still on, as chosen earlier (graft savings-report status shows it).'
 }
 try {
     $odp = Test-SavingsReportDriver $GraftPackageDir
