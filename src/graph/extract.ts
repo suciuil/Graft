@@ -856,7 +856,13 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   const original = firsts[base];
   const first = original.errors;
   if (original.errors === 0 && texts[base] === source) return { result: original.result, errors: 0, first };
-  const views = original.errors === 0 ? [] : conditionalViews(texts[base]);
+  // The `#if` views of the text with the fewest errors, and of the C-only text
+  // too: in a header whose `#ifdef __cplusplus` opens an `extern "C" {` it never
+  // closes, the C-only text can lose to the file by a few characters of errors
+  // in another branch (assembler in `#if OS_ASM`), while only its views close
+  // nothing they did not open.
+  const viewed = cOnly !== null && texts[base] !== cOnly ? [texts[base], cOnly] : [texts[base]];
+  const views = original.errors === 0 ? [] : viewed.flatMap(conditionalViews);
   if (views.length === 0 && texts.length === 1)
     return { result: markParseErrors(original.result, original.regions), errors: original.errors, first };
   const parses = [original, ...firsts.filter((p) => p !== original), ...views.map(parse)];

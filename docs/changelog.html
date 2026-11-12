@@ -68,11 +68,11 @@
 
 <div class="stats">
 <!-- stats:start -->
-  <div class="stat feature"><b>53</b><span>New features</span></div>
-  <div class="stat improvement"><b>52</b><span>Improvements</span></div>
+  <div class="stat feature"><b>54</b><span>New features</span></div>
+  <div class="stat improvement"><b>54</b><span>Improvements</span></div>
   <div class="stat fix"><b>32</b><span>Bug fixes</span></div>
   <div class="stat change"><b>18</b><span>Change requests</span></div>
-  <div class="stat"><b>155</b><span>Items in total</span></div>
+  <div class="stat"><b>158</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -82,14 +82,14 @@
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
 <!-- counts:start -->
-      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>11</td><td>7</td><td>14</td><td>2</td><td>34</td></tr>
+      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>12</td><td>7</td><td>15</td><td>2</td><td>36</td></tr>
       <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>5</td><td>8</td><td>5</td><td>28</td></tr>
       <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>10</td><td>12</td><td>13</td><td>3</td><td>38</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>1</td><td>11</td></tr>
-      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>13</td><td>3</td><td>8</td><td>0</td><td>24</td></tr>
+      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>13</td><td>3</td><td>9</td><td>0</td><td>25</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>3</td><td>5</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>9</td><td>1</td><td>6</td><td>6</td><td>22</td></tr>
-      <tr class="total"><td>Total</td><td>53</td><td>32</td><td>52</td><td>18</td><td>155</td></tr>
+      <tr class="total"><td>Total</td><td>54</td><td>32</td><td>54</td><td>18</td><td>158</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
@@ -132,6 +132,7 @@
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <ul>
+    <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>C and C++ code templates that contain embedded Ruby (ERB tags such as &lt;%= ... %&gt; and lines starting with %), such as generated AUTOSAR crypto configuration files, are now indexed correctly. Their functions, variables and references show up in queries instead of the file failing to parse.</span></li>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The opt-in savings report now also records which AI assistant and which editor or terminal ran graft, with their versions (for example Kilo Code 7.8.18 in Visual Studio Code 1.144.0).</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>EB tresos Studio templates written as makefiles, XML or other non-C files (with [! ... !] markup) are now read as the output they generate. Their targets, variables and elements show up in the graph instead of parse errors.</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>EB tresos Studio code templates (AUTOSAR generator files in C, C++ and .m that contain [! ... !] markup) are now read as the C code they generate, so their functions, types and calls show up in the graph and no longer fill the index with parse errors. EB tresos .m macro files are no longer mistaken for MATLAB code.</span></li>
@@ -144,6 +145,8 @@
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A repository too big for one map no longer fails. The build lists the parts it can be split into and, in a terminal, lets you pick which ones to build. The new "--all-parts" option builds each part into its own map, and queries, callers, grep, map and file overviews run from the top folder search all parts together.</span></li>
     <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The fork changelog opened by "graft about fork" (and shipped with the package and the offline installer kit) is now built automatically from the fork's commit messages.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A new "changelog" command regenerates the fork changelog on demand, with a check mode that reports whether the page is up to date.</span></li>
+    <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>C files with initializer lists whose items sit in separate #if blocks, each written without a trailing comma, now parse cleanly. The symbols in those files are no longer lost or garbled.</span></li>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled Windows x64 C and C++ language parsers were updated to newer builds.</span></li>
     <li data-type="improvement" data-area="savings packaging"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span><span class="area">Packaging &amp; installer</span>Once the savings report has been turned on, the Windows installer no longer asks about it again on later runs, even with "-Ask". It shows that the report is on and since when, and leaves it on. The question comes back only while the report is off: it was never answered, was answered "no", or was turned off later.</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The built-in model price list is updated. It adds a price for Gemini 4 Carbon and corrects the prices for Claude Fable 5.2 and Nemotron 3.5 Lightning, so savings for these models are priced more accurately.</span></li>
     <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled Windows x64 language parsers for C, C++, HTML, JSON, Makefile, Perl and XML were rebuilt and repackaged.</span></li>

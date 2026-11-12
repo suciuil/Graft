@@ -1,7 +1,8 @@
 /**
  * Extra C views the extractor parses next to a file as written: the C view of
- * an ERB template, and the view that puts back the commas an initializer list
- * leaves out between `#if` blocks that are never on together.
+ * an ERB template, the view that puts back the commas an initializer list
+ * leaves out between `#if` blocks that are never on together, and the `#if`
+ * views of the text a C compiler sees.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -95,4 +96,32 @@ test("initializer commas: functions after such a list are extracted", { skip: !g
   const { nodes } = extractFile("Valves.c", VALVES, "c");
   assert.equal(nodes[0].parse_errors ?? 0, 0);
   assert.ok(nodes.some((n) => n.name === "Valves_Run"));
+});
+
+// Assembler in `#if OS_ASM`, and in the `#else` an `extern "C" {` the header
+// never closes. Blanking the `#ifdef __cplusplus` branch leaves the file's
+// errors as they were, so only the `#else` view of that C-only text is clean.
+const OS_TOOL = [
+  "#ifndef OS_TOOL_H",
+  "#define OS_TOOL_H",
+  "#if (defined OS_ASM)",
+  "\t.macro\t_mtcr\tcreg,reg",
+  "\t\tdsync",
+  "\t\tmtcr\tcreg,reg",
+  "\t\tisync",
+  "\t.endm",
+  "#else",
+  "#ifdef __cplusplus",
+  'extern "C" {',
+  "#endif",
+  "#define OS_MFCR(id) _mfcr(id)",
+  "extern void Os_Init(void);",
+  "#endif",
+  "#endif",
+  "",
+].join("\n");
+
+test("conditional views: the C-only text gets its #if views too", { skip: !grammarAvailable("c") }, () => {
+  const { nodes } = extractFile("Os_tool.h", OS_TOOL, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
 });
