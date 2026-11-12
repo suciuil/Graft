@@ -9,7 +9,8 @@ rem next to this file).
 rem It asks for agreement before changing anything; "START-HERE-install-graft.cmd -Yes" agrees up front (including the
 rem download of LiteLLM's model price list with "graft prices update" after graft is installed).
 rem Answers are remembered (%USERPROFILE%\.graft\installer-choices.json, no keys or passwords): an upgrade asks only
-rem about new items and about LLM settings that fail their check. "START-HERE-install-graft.cmd -Ask" asks everything again.
+rem about new items and about LLM settings that fail their check. "START-HERE-install-graft.cmd -Ask" asks everything again,
+rem except the price list download once it was answered with yes.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-graft-helper.ps1" %*
 set "RC=%ERRORLEVEL%"
 echo.

@@ -1,7 +1,8 @@
 # Helper of START-HERE-install-graft.cmd: double-click that launcher instead of running this file directly (it keeps
 # the window open and reports the result). Pass -Yes to the launcher to agree up front.
 # -Yes: agree up front (unattended runs); without it the user is asked before anything is changed
-# -Ask: ignore the answers remembered from earlier runs and ask every question again, as on a first install
+# -Ask: ignore the answers remembered from earlier runs and ask every question again, as on a first install (except
+#       the price list download: once answered 'yes', it is not asked again)
 # Answers are remembered in $ChoicesFile, so an upgrade asks only about what is new since the last run or what fails
 param([switch]$Yes, [switch]$Ask)
 
@@ -1182,13 +1183,17 @@ else { "download the latest Node.js LTS from nodejs.org" }
 # about even on PCs where an installer from before answers were remembered already ran.
 $ConsentItems = @(
     [pscustomobject]@{ Id = 'node-install'; Legacy = $true; Text = "$nodeSource into $NodeHome, if no suitable Node.js is found" }
-    [pscustomobject]@{ Id = 'user-path'; Legacy = $true; Text = "add $NodeHome and $NpmGlobal to your user PATH and set the npm prefix" }
     [pscustomobject]@{ Id = 'graft-install'; Legacy = $true; Text = "install graft globally with npm from $graftSource" }
     [pscustomobject]@{ Id = 'execution-policy'; Legacy = $true; Text = 'set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell' }
     [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings" }
     [pscustomobject]@{ Id = 'llm-check'; Legacy = $true; Text = 'check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL' }
 )
 $Choices = Read-InstallerChoices -Ignore:$Ask
+if ($Ask) {
+    # A 'yes' to the price list question is never asked again, not even with -Ask (a new download address still is)
+    $pricesKept = (Read-InstallerChoices).Answers[$PricesAnswerId]
+    if ($pricesKept -and $pricesKept.Value -eq 'yes') { $Choices.Answers[$PricesAnswerId] = $pricesKept }
+}
 $fromEarlierInstall = (-not $Ask) -and (Add-EarlierInstallerChoices $Choices $ConsentItems)
 $newItems = @($ConsentItems | Where-Object { -not $Choices.Agreed.ContainsKey($_.Id) })
 $agreedBefore = $newItems.Count -lt $ConsentItems.Count
@@ -1392,7 +1397,7 @@ if ($Yes) {
     }
 } elseif (Test-CanPrompt) {
     Show-PricesNotice
-    $getPrices = (Read-Line 'Download the latest model prices from LiteLLM now? [Y/n]') -notmatch '^(n|no)$'
+    $getPrices = (Read-Line 'Download the latest model prices now? [Y/n]') -notmatch '^(n|no)$'
     if (-not $getPrices) { Write-Host "Skipped. Run 'graft prices update' later to download them." }
 } else {
     Write-Host "No interactive console to ask about downloading LiteLLM's public model price list; skipped. Run 'graft prices update'"
