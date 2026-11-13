@@ -963,6 +963,7 @@ function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: numbe
       continue;
     }
     if (node.isMissing) {
+      if (endifAtEnd(node)) continue;
       errors++;
       regions++;
       rows.push(node.startPosition.row);
@@ -973,6 +974,17 @@ function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: numbe
     for (const child of node.children) if (child.hasError || child.isMissing) stack.push(child);
   }
   return { errors, regions, rows: rows.sort((a, b) => a - b), hints: [...hints].sort((a, b) => a - b) };
+}
+
+/** Whether `node` is a missing `#endif` with nothing after it but comments and
+ * other missing `#endif`s: a file whose last `#if` (often its include guard) is
+ * never closed. Everything in it was read, so it is not counted as an error. */
+function endifAtEnd(node: Parser.SyntaxNode): boolean {
+  if (node.type !== "#endif") return false;
+  for (let n: Parser.SyntaxNode | null = node; n !== null; n = n.parent)
+    for (let s = n.nextSibling; s !== null; s = s.nextSibling)
+      if (s.type !== "comment" && !(s.isMissing && s.type === "#endif")) return false;
+  return true;
 }
 
 /** The line of the innermost `#if`/`#ifdef` around `node`, or null. */
@@ -1532,6 +1544,43 @@ export function withMacroSemicolons(source: string): string | null {
     lines[i] = lines[i].slice(0, close + 1) + ";" + lines[i].slice(close + 1);
     changed = true;
   }
+  // Outside any braces, the same macros written over several lines, as
+  // generated AUTOSAR code declares its wrappers:
+  //   E2EPW_DEFFUNC1
+  //   (
+  //      In, Type, Port
+  //   )
+  // The name stands alone on its line, the `(` starts the next code line, and
+  // nothing follows the `)` that closes it. The code line before ends a
+  // declaration, a block or another such call, and the one after starts a new
+  // name: never `{`, which makes the call the head of a function.
+  for (let i = 0; i < lines.length; i++) {
+    if (depth[i] !== 0 || directive[i] || !/^[A-Za-z_]\w*\s*$/.test(code[i]) || NOT_A_MACRO.has(code[i].trim())) continue;
+    const paren = codeLine(i, 1);
+    if (paren < 0 || !/^\s*\(/.test(code[paren])) continue;
+    let open = 0;
+    let closeLine = -1;
+    let close = -1;
+    for (let k = paren; k < lines.length && closeLine < 0; k++) {
+      if (directive[k]) continue;
+      for (let j = 0; j < code[k].length; j++) {
+        if (code[k][j] === "(") open++;
+        else if (code[k][j] === ")" && --open === 0) {
+          closeLine = k;
+          close = j;
+          break;
+        }
+      }
+    }
+    if (closeLine < 0 || code[closeLine].slice(close + 1).trim() !== "") continue;
+    const prev = codeLine(i, -1);
+    const next = codeLine(closeLine, 1);
+    if (next < 0 || !/^\s*[A-Za-z_]/.test(code[next])) continue;
+    if (prev >= 0 && !/[;})]$/.test(code[prev].trimEnd())) continue;
+    lines[closeLine] = lines[closeLine].slice(0, close + 1) + ";" + lines[closeLine].slice(close + 1);
+    changed = true;
+    i = closeLine;
+  }
   return changed ? lines.join("\n") : null;
 }
 
@@ -2050,7 +2099,26 @@ function walk(node: SyntaxNode, ctx: WalkCtx, out: NodeV1[], edges: RawEdge[], m
     }
   }
 
-  for (const child of node.namedChildren) walk(child, ctx, out, edges, minted);
+  // A long chain of one operator (`a | b | c | …` over thousands of `#if`
+  // blocks in a generated fragment) nests as deep as it is long, and walking it
+  // by recursion runs out of stack. Its left spine is walked in a loop instead,
+  // visiting every child in the order recursion would.
+  const spine = [node];
+  for (;;) {
+    const first = spine[spine.length - 1].namedChildren[0];
+    if (first === undefined || first.type !== "binary_expression" || callTypes.has(first.type)) break;
+    if (isImport(first, ctx.lang) || describe(first, ctx) !== null) break;
+    spine.push(first);
+  }
+  if (spine.length === 1) {
+    for (const child of node.namedChildren) walk(child, ctx, out, edges, minted);
+    return;
+  }
+  for (const child of spine[spine.length - 1].namedChildren) walk(child, ctx, out, edges, minted);
+  for (let k = spine.length - 2; k >= 0; k--) {
+    const children = spine[k].namedChildren;
+    for (let c = 1; c < children.length; c++) walk(children[c], ctx, out, edges, minted);
+  }
 }
 
 /**

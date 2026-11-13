@@ -300,6 +300,69 @@ test("macro semicolons: the function around such macros is extracted whole", { s
   for (const name of ["osChainTask", "osTaskEnd"]) assert.ok(nodes.some((n) => n.name === name), name);
 });
 
+// Generated AUTOSAR E2E wrappers: macros outside any function, each call over
+// several lines and without its semicolon. Several in a row read as one long
+// declaration, and the function after them is lost.
+const wrapper = (port: string): string[] => [
+  "/** \\brief Declare Prototype of generic Rte wrapper function */",
+  "E2EPW_DEFFUNC1",
+  "(",
+  `   ComALOut_${port},`,
+  `   ${port}_Type,`,
+  `   ${port},`,
+  "   E2EPW_SC_WR,",
+  "   E2EPW_CX_IR",
+  ")",
+  "",
+];
+const E2E_WRAPPERS = [
+  "#define E2EPW_START_SEC_CODE",
+  "#include <MemMap.h>",
+  "",
+  ...wrapper("SG_ABS3"),
+  ...wrapper("SG_ESP1"),
+  ...wrapper("SG_ESP2"),
+  ...wrapper("SG_EPB1"),
+  "static FUNC(uint8, E2EPW_CODE) E2EPW_Pack",
+  "(",
+  "   CONSTP2CONST(void, AUTOMATIC, E2EPW_APPL_DATA) E2EPW_SrcPtr,",
+  "   CONSTP2VAR(void, AUTOMATIC, E2EPW_APPL_DATA) E2EPW_DstPtr",
+  ")",
+  "{",
+  "   return 0U;",
+  "}",
+  "",
+].join("\n");
+
+test("macro semicolons: a macro call over several lines outside any function gets a ; after its )", () => {
+  const view = withMacroSemicolons(E2E_WRAPPERS);
+  assert.ok(view !== null);
+  const lines = view.split("\n");
+  const source = E2E_WRAPPERS.split("\n");
+  assert.equal(lines.length, source.length);
+  const head = source.findIndex((line) => line.startsWith("static FUNC"));
+  source.forEach((line, i) => assert.equal(lines[i], line === ")" && i < head ? ");" : line, `line ${i + 1}`));
+  // A function head written the same way is followed by its body, and a
+  // prototype already has its `;`: both are left alone.
+  assert.equal(withMacroSemicolons("FUNC(void, APP_CODE)\nApp_Init\n(\n   void\n)\n{\n}\n"), null);
+  assert.equal(withMacroSemicolons("FUNC(void, APP_CODE)\nApp_Init\n(\n   void\n);\nint x;\n"), null);
+});
+
+test("a chain of one operator thousands of terms long is extracted without running out of stack", { skip: !grammarAvailable("c") }, () => {
+  // Generated fragments OR together one flag per `#if` block, over thousands of lines.
+  const terms = Array.from({ length: 20000 }, (_, k) => `Flag_${k}`);
+  const source = `unsigned int Mask(void)\n{\n   return ${terms.join(" |\n      ")};\n}\n`;
+  const { nodes } = extractFile("degr_reason_gen.c", source, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  assert.ok(nodes.some((n) => n.name === "Mask"));
+});
+
+test("macro semicolons: the function after such wrappers is extracted", { skip: !grammarAvailable("c") }, () => {
+  const { nodes } = extractFile("E2EPW_ComAL.c", E2E_WRAPPERS, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  assert.ok(nodes.some((n) => n.name === "E2EPW_Pack"));
+});
+
 // A branch no build turns on that opens a brace it never closes, far from both
 // ends of the file: the parser gives up on the whole file, so the error rows
 // say nothing about where the branch is. The braces of the view do.

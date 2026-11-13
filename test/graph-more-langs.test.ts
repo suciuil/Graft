@@ -598,6 +598,20 @@ test("C header: a .h holding grep output is not parsed", { skip: grammarAvailabl
   assert.equal(nodeById(graph, "real.h#S")?.kind, "struct", "a real header is still parsed");
 });
 
+// A header whose last `#if` is never closed is still read whole: the `#endif`
+// missing at the end of the file is not counted as a syntax error.
+test("C header: a missing #endif at the end of the file is not flagged", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({
+    "guard.h": "#ifndef GUARD_H\n#define GUARD_H\nint f(void) { return 1; }\n#if (A)\nint g(void);\n#endif\n/* end of file */\n",
+    "branch.h": "#ifdef X\nint h(void);\n#else\nint k(void);\n#endif\n#ifdef USED_AS_HEADER\nint m(void);\n#else\nint n(void);\n/* GUARD */\n",
+    "bad.h": "#ifndef BAD_H\nint broken(void) { return 1 +; }\n",
+  });
+  assert.equal(nodeById(graph, "guard.h")?.parse_errors, undefined, "guard.h carries no flag");
+  assert.equal(nodeById(graph, "guard.h#f")?.kind, "function");
+  assert.equal(nodeById(graph, "branch.h")?.parse_errors, undefined, "an #else never closed carries no flag");
+  assert.ok((nodeById(graph, "bad.h")?.parse_errors ?? 0) >= 1, "other errors in such a file are still flagged");
+});
+
 test("C++ header: namespace, std:: or a template sends a .h to C++", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   for (const src of [
     "namespace app {\nint run();\n}\n",
