@@ -711,7 +711,12 @@ export function extractFile(rel: string, source: string, lang: Language): Extrac
     return { nodes: [fileNodeOf(rel, source)], rawEdges: [] };
   if (grammar === "c" || grammar === "cpp") return extractCFamily(rel, source, grammar);
   if (isTresosTemplate(source)) return extractTresosTemplate(rel, source, grammar);
-  return parseDepth(grammar, source, (root) => markParseErrors(extractTree(rel, source, grammar, root), syntaxErrors(asNative(root)).regions));
+  // A blank file holds no syntax to get wrong, even where the grammar demands a
+  // root (an empty `.xml` has no element), so it is not flagged as a parse error.
+  const blank = source.trim() === "";
+  return parseDepth(grammar, source, (root) =>
+    markParseErrors(extractTree(rel, source, grammar, root), blank ? 0 : syntaxErrors(asNative(root)).regions),
+  );
 }
 
 /**

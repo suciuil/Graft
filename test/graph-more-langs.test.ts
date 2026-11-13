@@ -650,3 +650,22 @@ test("C depth: a file with syntax errors is flagged parse_errors", { skip: gramm
   }
 });
 
+// An empty XML file has no root element, which the grammar reads as an error;
+// a blank file has nothing to get wrong, so it carries no flag.
+test("XML depth: a blank file is not flagged parse_errors", { skip: grammarAvailable("xml") ? false : "xml grammar not built" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "graft-lang-"));
+  try {
+    writeFileSync(join(dir, "main.py"), "def main():\n    return 1\n");
+    writeFileSync(join(dir, "empty.xml"), "");
+    writeFileSync(join(dir, "blank.xml"), "  \r\n\n");
+    writeFileSync(join(dir, "broken.xml"), '<?xml version="1.0"?>\n<a>\n  <b>\n</a>\n');
+    await buildGraph(dir);
+    const graph = readGraph(wiringPath(join(dir, "graft")))!;
+    assert.equal(nodeById(graph, "empty.xml")?.parse_errors, undefined, "empty.xml carries no flag");
+    assert.equal(nodeById(graph, "blank.xml")?.parse_errors, undefined, "blank.xml carries no flag");
+    assert.ok((nodeById(graph, "broken.xml")?.parse_errors ?? 0) >= 1, "an unclosed element is still flagged");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
