@@ -1,13 +1,14 @@
 /**
  * Extra C views the extractor parses next to a file as written: the C view of
  * an ERB template, the view that puts back the commas an initializer list
- * leaves out between `#if` blocks that are never on together, and the `#if`
- * views of the text a C compiler sees.
+ * leaves out between `#if` blocks that are never on together, the view that
+ * gives statement macros their semicolon, and the `#if` views of the text a C
+ * compiler sees.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { erbView, isErbTemplate } from "../src/graph/erb.js";
-import { extractFile, grammarAvailable, withInitializerCommas } from "../src/graph/extract.js";
+import { extractFile, grammarAvailable, withInitializerCommas, withMacroSemicolons } from "../src/graph/extract.js";
 import { warmDepthGrammars } from "../src/graph/depth-parser.js";
 
 await warmDepthGrammars(["c"]);
@@ -243,4 +244,126 @@ test("conditional views: #warning lines are blanked, and branches with code that
   const { nodes } = extractFile("Mon.c", BROKEN_BRANCHES, "c");
   assert.equal(nodes[0].parse_errors ?? 0, 0);
   for (const name of ["Mon_Run", "Mon_Init"]) assert.ok(nodes.some((n) => n.name === name), name);
+});
+
+// Generated OS code: statement macros without their semicolon, whose
+// definitions bring it (or an `else { … }`) along. After a declaration, four
+// such lines in a row can also start a declaration, and the parser loses the
+// reading that has them as statements.
+const OS_TASK = [
+  "StatusType osChainTask(TaskType taskIndex)",
+  "{",
+  "   if(osConfigBlock.ProcessToCore[taskIndex] != osSysGetCoreID())",
+  "   {",
+  "      osbool startDispatcher = osConfigBlock.CcbAddress[osConfigBlock.ProcessToCore[taskIndex]]->LockIsNeeded.ossStartDispatcher;",
+  "      COVER(0x0374)",
+  "      osReleaseInternalLock(osConfigBlock.ProcessToCore[taskIndex])",
+  "      osReleaseInternalLock(OS_NESTING_LOCK)",
+  "      IF2ANDCOVER(osdTRUE == startDispatcher, osdFALSE == startDispatcherBeforeInsert,0x03A3,0x03A4,0x03A5)",
+  "      if((osdTRUE == startDispatcher) && (osdFALSE == startDispatcherBeforeInsert))",
+  "      {",
+  "         COVER(0x0375)",
+  "         /* KB begin osekHWosTriggerDispatcherOnRemoteCore (default) */",
+  "         osTriggerRemote(osConfigBlock.ProcessToCore[taskIndex])",
+  "         /* KB end osekHWosTriggerDispatcherOnRemoteCore */",
+  "      }",
+  "      ELSEWITHCOVER(0x0376)",
+  "   }",
+  "   ELSEWITHCOVER(0x0377)",
+  "   return E_OK;",
+  "}",
+  "const Entry Table[] = {",
+  "   ENTRY(1)",
+  "   ENTRY(2)",
+  "};",
+  "DeclareTask(Idle)",
+  "void osTaskEnd(void) { }",
+  "",
+].join("\n");
+
+test("macro semicolons: a statement macro on a line of its own gets a ; after its call", () => {
+  const view = withMacroSemicolons(OS_TASK);
+  assert.ok(view !== null);
+  const lines = view.split("\n");
+  const source = OS_TASK.split("\n");
+  assert.equal(lines.length, source.length);
+  for (const i of [5, 6, 7, 8, 11, 13, 16, 18]) assert.equal(lines[i], source[i].replace(/\)$/, ");"), `line ${i + 1}`);
+  // `if` heads, statements that have their `;`, initializer elements and
+  // macros outside any function are left alone.
+  for (const i of [2, 4, 9, 19, 22, 23, 25]) assert.equal(lines[i], source[i], `line ${i + 1}`);
+  assert.equal(withMacroSemicolons("void f(void)\n{\n   x = \n      g(a)\n      + 1;\n}\n"), null);
+});
+
+test("macro semicolons: the function around such macros is extracted whole", { skip: !grammarAvailable("c") }, () => {
+  const { nodes } = extractFile("osektask.c", OS_TASK, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  for (const name of ["osChainTask", "osTaskEnd"]) assert.ok(nodes.some((n) => n.name === name), name);
+});
+
+// A branch no build turns on that opens a brace it never closes, far from both
+// ends of the file: the parser gives up on the whole file, so the error rows
+// say nothing about where the branch is. The braces of the view do.
+const filler = (from: number, count: number): string[] =>
+  Array.from({ length: count }, (_, k) => [`int Fill_${from + k}(int x)`, "{", `   return x + ${k};`, "}"]).flat();
+const UNCLOSED = [
+  ...filler(0, 150),
+  "void Wheel_Run(void)",
+  "{",
+  "#if (F_WHEEL)",
+  "   if (Wheel_Ready())",
+  "   {",
+  "      Wheel_Start();",
+  "#endif",
+  "   Wheel_Done();",
+  "}",
+  ...filler(150, 150),
+  "",
+].join("\n");
+
+test("conditional views: a branch that leaves a brace open is found by the view's braces", { skip: !grammarAvailable("c") }, () => {
+  const { nodes } = extractFile("Wheel.c", UNCLOSED, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  for (const name of ["Fill_0", "Wheel_Run", "Fill_299"]) assert.ok(nodes.some((n) => n.name === name), name);
+});
+
+// Directives in code commented out with them: they are no directives, and
+// blanking the `#endif*\/` line would cut off the comment's end. The broken
+// `#if` branch below makes the extractor parse views at all.
+const COMMENTED = [
+  "boolean PUT_StopLamp(void)",
+  "{",
+  "   boolean ret_val = False;",
+  "   if ( False",
+  "   #if (CFG_BLI > 0u)",
+  "   || ( GET_BRAKE_LIGHT_REQUEST(Brake_light_on) == True )",
+  "   #else",
+  "   || (Get_safe_braking() >= Bsd_asil_qm )",
+  "   #endif",
+  "   /*#if (CFG_DMM)",
+  "   || (Get_cms1_brakelight() == ADA_brakelight_on)",
+  "   #endif",
+  "   #if (CFG_DMM)",
+  "   || (Get_acc1_brakelight() == ADA_brakelight_on)",
+  "   #endif*/",
+  "   )",
+  "   {",
+  "      ret_val = True;",
+  "   }",
+  "   return (ret_val);",
+  "}",
+  "void PUT_Init(void)",
+  "{",
+  "#if (OLD_API)",
+  "   Init(1));",
+  "#else",
+  "   Init(2);",
+  "#endif",
+  "}",
+  "",
+].join("\n");
+
+test("conditional views: directives inside a block comment are left as they are", { skip: !grammarAvailable("c") }, () => {
+  const { nodes } = extractFile("Put.c", COMMENTED, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  for (const name of ["PUT_StopLamp", "PUT_Init"]) assert.ok(nodes.some((n) => n.name === name), name);
 });

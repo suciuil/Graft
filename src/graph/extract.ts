@@ -756,6 +756,7 @@ interface CFamilyParse {
   errors: number;
   regions: number;
   rows: number[];
+  hints: number[];
 }
 
 /**
@@ -850,6 +851,14 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
     firsts.push(parse(cOnly));
     if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
   }
+  // Statement macros on lines of their own, without their semicolon (see
+  // withMacroSemicolons).
+  const semis = firsts[base].errors > 0 ? withMacroSemicolons(texts[base]) : null;
+  if (semis !== null) {
+    texts.push(semis);
+    firsts.push(parse(semis));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
   // Initializer elements in `#if` blocks that are never on together, each
   // without its comma (see withInitializerCommas).
   const commaOrigin = texts[base];
@@ -921,12 +930,20 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
  * `regions` is how many places the parser could not read: those ERROR and
  * MISSING nodes, counted once each. `rows` are the 0-based lines they start
  * on (an ERROR's last line too), in order.
+ *
+ * `hints` are lines that say better where the trouble began, in order: for a
+ * MISSING node (a `#endif`, a `}`, a `)`), the line of the `#if` or `#ifdef` it
+ * sits in, which is often the branch that opened what was never closed; and for
+ * an ERROR spanning several lines (when the parser gives up, the whole file),
+ * the same for the ERROR and MISSING nodes inside it, whose lines `rows` does
+ * not see. They are not counted in `errors` or `regions`.
  */
-function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: number; rows: number[] } {
-  if (!root.hasError) return { errors: 0, regions: 0, rows: [] };
+function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: number; rows: number[]; hints: number[] } {
+  if (!root.hasError) return { errors: 0, regions: 0, rows: [], hints: [] };
   let errors = 0;
   let regions = 0;
   const rows: number[] = [];
+  const hints = new Set<number>();
   const stack: Parser.SyntaxNode[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
@@ -934,18 +951,46 @@ function syntaxErrors(root: Parser.SyntaxNode): { errors: number; regions: numbe
       errors += Math.max(1, node.endIndex - node.startIndex);
       regions++;
       rows.push(node.startPosition.row);
-      if (node.endPosition.row !== node.startPosition.row) rows.push(node.endPosition.row);
+      if (node.endPosition.row !== node.startPosition.row) {
+        rows.push(node.endPosition.row);
+        hintsInside(node, hints);
+      }
       continue;
     }
     if (node.isMissing) {
       errors++;
       regions++;
       rows.push(node.startPosition.row);
+      const opener = enclosingConditional(node);
+      if (opener !== null) hints.add(opener);
       continue;
     }
     for (const child of node.children) if (child.hasError || child.isMissing) stack.push(child);
   }
-  return { errors, regions, rows: rows.sort((a, b) => a - b) };
+  return { errors, regions, rows: rows.sort((a, b) => a - b), hints: [...hints].sort((a, b) => a - b) };
+}
+
+/** The line of the innermost `#if`/`#ifdef` around `node`, or null. */
+function enclosingConditional(node: Parser.SyntaxNode): number | null {
+  for (let p = node.parent; p !== null; p = p.parent)
+    if (p.type === "preproc_if" || p.type === "preproc_ifdef") return p.startPosition.row;
+  return null;
+}
+
+/** Add to `hints` the lines of the ERROR and MISSING nodes inside the ERROR
+ * `outer` (see {@link syntaxErrors}): for a MISSING node, the line of the
+ * `#if` it sits in when there is one. */
+function hintsInside(outer: Parser.SyntaxNode, hints: Set<number>): void {
+  const stack: Parser.SyntaxNode[] = [...outer.children];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.isMissing) {
+      hints.add(enclosingConditional(node) ?? node.startPosition.row);
+      continue;
+    }
+    if (node.type === "ERROR") hints.add(node.startPosition.row);
+    for (const child of node.children) if (child.hasError || child.isMissing || child.type === "ERROR") stack.push(child);
+  }
 }
 
 const symbolKey = (n: NodeV1): string => `${n.kind}:${n.name}@${n.span.slice(0, n.span.indexOf("-"))}`;
@@ -1022,13 +1067,18 @@ interface ConditionalChain {
  * view turns into a comma (see {@link initializerCommaLines}). */
 interface ConditionalSet { lines: string[]; chains: ConditionalChain[]; commas?: number[] }
 
-/** The `#if` chains of a text, or null when none of them is complete. */
+/** The `#if` chains of a text, or null when none of them is complete. A
+ * directive inside a block comment (code commented out with its `#if` and
+ * `#endif*\/`) is no directive: blanking it in a view would cut the comment's
+ * end away. */
 function conditionalChains(source: string): ConditionalSet | null {
   const lines = source.split("\n");
+  const commented: boolean[] = [];
+  codeOfLines(lines, commented);
   const chains: ConditionalChain[] = [];
   const open: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = CONDITIONAL_DIRECTIVE.exec(lines[i].replace(/\r$/, ""));
+    const m = commented[i] ? null : CONDITIONAL_DIRECTIVE.exec(lines[i].replace(/\r$/, ""));
     let end = i;
     if (m) end = directiveEnd(lines, i);
     else while (end < lines.length - 1 && /\\\r?$/.test(lines[end])) end++;
@@ -1118,23 +1168,71 @@ const FLIP_WINDOW = 400;
 const FLIP_BUDGET = 16;
 
 /**
+ * When the view `keep` opens more braces than it closes (or closes more than it
+ * opens), the chains whose kept branch is unbalanced the same way, ranked
+ * before any other candidate (scores below -2): those whose branch alone
+ * accounts for the whole difference first, the smaller chain on a tie. A brace
+ * opened in a branch and closed after its `#endif` is fine as long as the view
+ * stays balanced, so a balanced view has no suspects. A branch no build turns
+ * on that leaves out a `}` (`if (a) {` … `}` with the last `}` missing, as
+ * nothing compiles it) makes the parser give up on the whole file, and the
+ * errors it leaves point nowhere near that branch.
+ */
+function braceSuspects(set: ConditionalSet, keep: number[]): Map<number, number> {
+  const rank = new Map<number, number>();
+  const code = codeOfLines(renderConditionalView(set, keep).text.split("\n"));
+  const sums = new Int32Array(code.length + 1);
+  let directive = false;
+  code.forEach((line, i) => {
+    // A preprocessor line (a `#define` and its continuation lines) holds no
+    // braces of the code around it.
+    const skip = directive || /^\s*#/.test(line);
+    directive = skip && /\\\s*$/.test(line);
+    let d = 0;
+    if (!skip) for (const ch of line) d += ch === "{" ? 1 : ch === "}" ? -1 : 0;
+    sums[i + 1] = sums[i] + d;
+  });
+  const total = sums[code.length];
+  if (total === 0) return rank;
+  set.chains.forEach((chain, c) => {
+    const k = keep[c];
+    if (chain.endif < 0 || k < 0 || chain.branches.some((b) => /\b__cplusplus\b/.test(b.cond))) return;
+    if (!chainActive(set, keep, c)) return;
+    const b = chain.branches[k];
+    const to = k + 1 < chain.branches.length ? chain.branches[k + 1].at : chain.endif;
+    const delta = sums[Math.max(b.end + 1, to)] - sums[b.end + 1];
+    if (delta === 0 || Math.sign(delta) !== Math.sign(total)) return;
+    const miss = Math.abs(total - delta) / (Math.abs(total) + Math.abs(delta));
+    const size = (chain.endifEnd - chain.branches[0].at) / (set.lines.length + 1);
+    rank.set(c, -3 + miss / 2 + size / 2);
+  });
+  return rank;
+}
+
+/**
  * Other branch choices for the chains next to the first errors of a view: those
  * the error sits in (innermost first), then those that end shortly before it
- * (nearest first). Each chain may keep another of its branches, or none when it
- * has no `#else`. A `__cplusplus` chain is left as it is: its branch is code a
- * C++ compiler builds, which the C-only view and the C++ parse of a header
- * already deal with (see {@link extractCFamily}).
+ * (nearest first). Chains around the first `hints` (see {@link syntaxErrors})
+ * come before all of them, innermost first: when the parser gave up on the whole
+ * file, its errors start on the first line and end on the last, and only the
+ * hints still point at the branch to blame. Before those still come the chains
+ * whose branch leaves the braces of the view unbalanced (see
+ * {@link braceSuspects}). Each chain may keep another of its
+ * branches, or none when it has no `#else`. A `__cplusplus` chain is left as it
+ * is: its branch is code a C++ compiler builds, which the C-only view and the C++
+ * parse of a header already deal with (see {@link extractCFamily}).
  */
-function flipCandidates(set: ConditionalSet, keep: number[], rows: number[]): Array<{ chain: number; branch: number }> {
-  const rank = new Map<number, number>();
-  for (const row of rows.slice(0, 3)) {
+function flipCandidates(set: ConditionalSet, keep: number[], rows: number[], hints: number[] = []): Array<{ chain: number; branch: number }> {
+  const rank = braceSuspects(set, keep);
+  const marks = [...hints.slice(0, 3).map((row) => ({ row, hint: true })), ...rows.slice(0, 3).map((row) => ({ row, hint: false }))];
+  for (const { row, hint } of marks) {
     set.chains.forEach((chain, c) => {
       if (chain.endif < 0 || chain.branches.some((b) => /\b__cplusplus\b/.test(b.cond))) return;
       const from = chain.branches[0].at;
       const to = chain.endifEnd;
       let score: number;
-      if (from <= row && row <= to) score = (to - from) / (set.lines.length + 1);
-      else if (to < row && row - to <= FLIP_WINDOW) score = row - to;
+      if (from <= row && row <= to) score = (to - from) / (set.lines.length + 1) - (hint ? 1 : 0);
+      else if (!hint && to < row && row - to <= FLIP_WINDOW) score = row - to;
       else return;
       if (!chainActive(set, keep, c)) return;
       const known = rank.get(c);
@@ -1162,16 +1260,16 @@ function flipCandidates(set: ConditionalSet, keep: number[], rows: number[]): Ar
 function refineConditionalView(
   set: ConditionalSet,
   keep: number[],
-  start: { errors: number; rows: number[] },
-  countErrors: (text: string) => { errors: number; rows: number[] },
+  start: { errors: number; rows: number[]; hints: number[] },
+  countErrors: (text: string) => { errors: number; rows: number[]; hints: number[] },
 ): { text: string; keep: number[] } | null {
   let current = start;
   let currentKeep = keep;
   let text: string | null = null;
   let budget = FLIP_BUDGET;
   while (current.errors > 0 && budget > 0) {
-    let found: { errors: number; rows: number[]; keep: number[]; text: string; blanked: number } | null = null;
-    for (const { chain, branch } of flipCandidates(set, currentKeep, current.rows)) {
+    let found: { errors: number; rows: number[]; hints: number[]; keep: number[]; text: string; blanked: number } | null = null;
+    for (const { chain, branch } of flipCandidates(set, currentKeep, current.rows, current.hints)) {
       if (budget-- <= 0) break;
       const trial = currentKeep.slice();
       trial[chain] = branch;
@@ -1319,10 +1417,13 @@ function initializerLines(code: string[]): boolean[] {
   });
 }
 
-/** Each line's code: its comments and string contents become spaces. */
-function codeOfLines(lines: string[]): string[] {
+/** Each line's code: its comments and string contents become spaces. When
+ * `startsInComment` is given, it is filled with whether each line starts inside
+ * a block comment. */
+function codeOfLines(lines: string[], startsInComment?: boolean[]): string[] {
   let inComment = false;
   return lines.map((raw) => {
+    startsInComment?.push(inComment);
     const line = raw.replace(/\r$/, "");
     let out = "";
     for (let j = 0; j < line.length; j++) {
@@ -1351,6 +1452,82 @@ function codeOfLines(lines: string[]): string[] {
     }
     return out;
   });
+}
+
+/** Words that look like a call on a line of their own but are not one. */
+const NOT_A_MACRO = new Set(["if", "while", "for", "switch", "return", "sizeof", "do", "else", "case", "goto", "_Generic", "defined", "__asm", "__asm__", "asm"]);
+
+/**
+ * Statement macros written without their semicolon, one per line, as in
+ * generated OS code (`COVER(0x0374)`, `osReleaseInternalLock(x)`,
+ * `ELSEWITHCOVER(0x0376)`), whose definitions bring the `;` or the
+ * `else { … }` along. The grammar reads such lines as macro statements, but
+ * where several of them follow each other they can also start a declaration
+ * (`M1(a) M2(b) type name;`); with enough alternatives open at once the parser
+ * drops the right one, and an `if` after them breaks the whole function, or
+ * the whole file. The view returned has a `;` right after each such call: a
+ * line that is a single call of a name (nothing before it, a comment at most
+ * after it) inside braces but not in an initializer list, after a line that
+ * ends a statement or a block, and before one that starts a new statement.
+ * Every line stays where it was. Null when no line needs one.
+ */
+export function withMacroSemicolons(source: string): string | null {
+  const lines = source.split("\n");
+  const code = codeOfLines(lines);
+  const inList = initializerLines(code);
+  // Brace depth at each line's start, and which lines are preprocessor lines
+  // (with their continuation lines).
+  const depth = new Int32Array(lines.length);
+  const directive = new Uint8Array(lines.length);
+  let level = 0;
+  let continued = false;
+  code.forEach((line, i) => {
+    depth[i] = level;
+    const isDirective = continued || /^\s*#/.test(line);
+    continued = isDirective && /\\\s*$/.test(line);
+    if (isDirective) {
+      directive[i] = 1;
+      return;
+    }
+    for (const ch of line) level += ch === "{" ? 1 : ch === "}" ? -1 : 0;
+    if (level < 0) level = 0;
+  });
+  const codeLine = (i: number, step: number): number => {
+    for (let k = i + step; k >= 0 && k < lines.length; k += step) if (!directive[k] && code[k].trim() !== "") return k;
+    return -1;
+  };
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (depth[i] === 0 || inList[i] || directive[i]) continue;
+    const m = /^(\s*)([A-Za-z_]\w*)\s*\(/.exec(code[i]);
+    if (m === null || NOT_A_MACRO.has(m[2])) continue;
+    // The call's parentheses close at the end of the line.
+    let open = 0;
+    let close = -1;
+    for (let j = m[0].length - 1; j < code[i].length; j++) {
+      if (code[i][j] === "(") open++;
+      else if (code[i][j] === ")" && --open === 0) {
+        close = j;
+        break;
+      }
+    }
+    if (close < 0 || code[i].slice(close + 1).trim() !== "") continue;
+    const prev = codeLine(i, -1);
+    const next = codeLine(i, 1);
+    if (prev < 0 || next < 0) continue;
+    const before = code[prev].trimEnd();
+    const after = code[next].trimStart();
+    // The line before ends a statement, opens or closes a block, or is a label.
+    if (!/[;{}):]$/.test(before)) continue;
+    // One ending in `)` must be a call of the same kind, or the head of an
+    // `if`, `for` or `while` whose body this line is: not an expression going on.
+    if (before.endsWith(")") && !/^\s*(\}\s*)?(else\s+)?([A-Za-z_]\w*\s*\()/.test(code[prev])) continue;
+    // The line after starts a statement or closes the block.
+    if (!/^([A-Za-z_}(*]|\+\+|--)/.test(after)) continue;
+    lines[i] = lines[i].slice(0, close + 1) + ";" + lines[i].slice(close + 1);
+    changed = true;
+  }
+  return changed ? lines.join("\n") : null;
 }
 
 /**
