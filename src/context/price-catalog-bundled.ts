@@ -11,7 +11,7 @@ export const BUNDLED_PRICE_CATALOG: PriceCatalog = {
   version: 1,
   source: 'LiteLLM',
   url: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-  fetchedAt: "2026-11-13T06:37:35.240Z",
+  fetchedAt: "2026-11-13T09:00:43.327Z",
   models: {
     "abliterated-model": {"input":1,"cacheRead":0.1},
     "abliterated-model-large": {"input":3,"cacheRead":0.3},
@@ -264,7 +264,6 @@ export const BUNDLED_PRICE_CATALOG: PriceCatalog = {
     "dbrx-instruct": {"input":1.2},
     "decisions": {"input":0.05},
     "deep-research-max-preview-04-2026": {"input":2},
-    "deep-research-preview-04-2026": {"input":2},
     "deep-research-pro-preview-12-2025": {"input":2,"cacheRead":0.2},
     "deepseek-chat": {"input":0.28,"cacheRead":0.028},
     "deepseek-coder": {"input":0.14,"cacheRead":0.014},

@@ -68,11 +68,11 @@
 
 <div class="stats">
 <!-- stats:start -->
-  <div class="stat feature"><b>54</b><span>New features</span></div>
-  <div class="stat improvement"><b>58</b><span>Improvements</span></div>
-  <div class="stat fix"><b>36</b><span>Bug fixes</span></div>
+  <div class="stat feature"><b>56</b><span>New features</span></div>
+  <div class="stat improvement"><b>63</b><span>Improvements</span></div>
+  <div class="stat fix"><b>41</b><span>Bug fixes</span></div>
   <div class="stat change"><b>22</b><span>Change requests</span></div>
-  <div class="stat"><b>170</b><span>Items in total</span></div>
+  <div class="stat"><b>182</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -82,14 +82,14 @@
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
 <!-- counts:start -->
-      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>12</td><td>9</td><td>19</td><td>2</td><td>42</td></tr>
-      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>10</td><td>5</td><td>8</td><td>5</td><td>28</td></tr>
-      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>10</td><td>12</td><td>13</td><td>3</td><td>38</td></tr>
-      <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>4</td><td>2</td><td>12</td></tr>
-      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>13</td><td>5</td><td>9</td><td>1</td><td>28</td></tr>
+      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>12</td><td>12</td><td>20</td><td>2</td><td>46</td></tr>
+      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>5</td><td>9</td><td>5</td><td>30</td></tr>
+      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>10</td><td>13</td><td>13</td><td>3</td><td>39</td></tr>
+      <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>6</td><td>2</td><td>14</td></tr>
+      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>14</td><td>6</td><td>10</td><td>1</td><td>31</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>5</td><td>7</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>9</td><td>1</td><td>6</td><td>6</td><td>22</td></tr>
-      <tr class="total"><td>Total</td><td>54</td><td>36</td><td>58</td><td>22</td><td>170</td></tr>
+      <tr class="total"><td>Total</td><td>56</td><td>41</td><td>63</td><td>22</td><td>182</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
@@ -132,6 +132,8 @@
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <ul>
+    <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span>Optional automatic deep build ("auto-deep", off by default, per repo or for all repos). When it is on and enough summaries are out of date, the first query starts the deep build in the background and the "run build --deep" reminder is no longer shown.</span></li>
+    <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>When init or build fails, a final line now points to this fork's issue tracker and lists what to include in the report (the command, its full output, the version and the operating system).</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>C and C++ code templates that contain embedded Ruby (ERB tags such as &lt;%= ... %&gt; and lines starting with %), such as generated AUTOSAR crypto configuration files, are now indexed correctly. Their functions, variables and references show up in queries instead of the file failing to parse.</span></li>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The opt-in savings report now also records which AI assistant and which editor or terminal ran graft, with their versions (for example Kilo Code 7.8.18 in Visual Studio Code 1.144.0).</span></li>
     <li data-type="feature" data-area="lang"><span class="tag">Feature</span><span><span class="area">Languages</span>EB tresos Studio templates written as makefiles, XML or other non-C files (with [! ... !] markup) are now read as the output they generate. Their targets, variables and elements show up in the graph instead of parse errors.</span></li>
@@ -145,6 +147,11 @@
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A repository too big for one map no longer fails. The build lists the parts it can be split into and, in a terminal, lets you pick which ones to build. The new "--all-parts" option builds each part into its own map, and queries, callers, grep, map and file overviews run from the top folder search all parts together.</span></li>
     <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The fork changelog opened by "graft about fork" (and shipped with the package and the offline installer kit) is now built automatically from the fork's commit messages.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A new "changelog" command regenerates the fork changelog on demand, with a check mode that reports whether the page is up to date.</span></li>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>C and C++ files with statement macros written without a semicolon, one per line (generated OS code such as "COVER(0x0374)" or "osReleaseInternalLock(x)" before an if), no longer lose the whole function or file to parse errors.</span></li>
+    <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>The "about" command now shows this fork's issue tracker, and "about" is listed among the common commands in the help.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The agent instructions and skill written by init now tell AI agents to suggest reporting init or build failures at the fork's issue tracker, with all the details.</span></li>
+    <li data-type="improvement" data-area="agents"><span class="tag">Improvement</span><span><span class="area">Agent integrations</span>Setting up GitHub Copilot now also registers graft's tool server for VS Code. Copilot's agent and its subagents can then use the graft tools directly, not only the command line.</span></li>
+    <li data-type="improvement" data-area="agents"><span class="tag">Improvement</span><span><span class="area">Agent integrations</span>The Claude Code setup now allows all of graft's tools without permission prompts, including for subagents and in modes that refuse calls needing a prompt. Your own rules for single tools are kept.</span></li>
     <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>More C and C++ files parse without errors. An #include line with stray characters after the file name, a declaration with only a storage class and a name (old C "implicit int"), a macro call whose argument is a whole statement, an AUTOSAR function declaration with a storage class and a macro keyword in front (extern STATIC FUNC(...) f(P2CONST(...) p)), a comma expression inside decltype, and an OSEK "TASK(name) __attribute__((weak));" declaration no longer cause parse errors, so the symbols around them are no longer lost.</span></li>
     <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>C and C++ files with many #if/#else blocks are read more completely. Graft now tries other branch combinations when code in an inactive branch cannot compile, ignores #error and #warning lines, and handles enum entries split across #if blocks, so fewer functions and types are lost to parse errors.</span></li>
     <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled Windows x64 C and C++ language parsers were rebuilt and repackaged.</span></li>
@@ -175,6 +182,11 @@
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The built-in model price list was updated with newly released models and corrected rates.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>The fork changelog now lists past changes that were missing before, including older work grouped by commit date.</span></li>
     <li data-type="improvement" data-area="packaging"><span class="tag">Improvement</span><span><span class="area">Packaging &amp; installer</span>Building the offline installer package now records each build with its date and kit version, regenerates the changelog for it, warns when uncommitted work would ship without being listed, and says which files to commit afterwards.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>In C and C++ files, macros that stand for leading parameters or arguments (for example "CanHL_ReInit(CAN_HW_CHANNEL_CANTYPE_FIRST uint8 doRamCheck)"), several macros before a pointer star or a function pointer typedef, and test macros that take several words, statements or loops as arguments, also inside another macro call (for example "COU_FOR(200, COU_CALL(Step(); MAIN(), "run"))"), no longer cause parse errors.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>Perl files with Windows line endings (CRLF) and here-documents are now read in full instead of failing as a whole.</span></li>
+    <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Perl subroutine prototypes with a dollar sign (sub usage ($)), scalar names starting with an underscore ($_abc), elements of dereferenced arrays and hashes (${$ref}{key}, $$ref{key}) and switch/case blocks from the Switch module now parse without errors.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>C and C++ files with an #if branch no build turns on that leaves a brace open (or closes one too many) are now read without that branch, even when the branch is far from both ends of the file, instead of the whole file failing to parse.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>#if and #endif lines inside a block comment (code commented out together with its #if lines, ending in "#endif*/") are no longer treated as directives, so the code after the comment no longer fails to parse.</span></li>
     <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>In C and C++ files, an #if or #endif line inside an expression or statement that is followed by a block comment running over several lines (for example "#endif /* X */ /* PRQA S 2053" closed a few lines below) no longer breaks the rest of the function.</span></li>
     <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>AUTOSAR declarations in C++ files with a macro keyword in front of the compiler abstraction type (for example "extern STATIC FUNC(Std_ReturnType, X_CODE) X_Check(uint8 Ptr, uint16 Size);") now parse without errors, as they already did in C files.</span></li>
     <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C files with several macro lines without semicolons before a function (FuncGen_X(Ev1) …) parse without errors again, and linker-section macros after array variables are read correctly.</span></li>
