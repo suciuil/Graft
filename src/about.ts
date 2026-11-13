@@ -2,6 +2,7 @@
  * `graft about`: where to read about this tool. Two sources: the upstream
  * project's homepage, and the changelog of what this fork changes
  * (`docs/changelog.html`, shipped in the npm package and the offline kit).
+ * It also lists the fork's issue tracker, where bugs in this fork are reported.
  *
  * Nothing is sent: the command prints addresses and, when asked, opens one
  * in the local browser.
@@ -13,6 +14,9 @@ import { pathToFileURL } from "node:url";
 
 /** The upstream project's homepage. */
 export const PROJECT_URL = "https://github.com/trailhq/Trail-Code";
+
+/** Where users of this fork report bugs and request features (`graft issues`, listed by `graft about`). */
+export const ISSUES_URL = "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues";
 
 /** The fork changelog, relative to the package (or repo) root. */
 export const CHANGELOG_RELATIVE = join("docs", "changelog.html");
@@ -61,9 +65,13 @@ export function formatAbout(name: string, version: string, changelog: string | n
   else lines.push(`  not found in this installation (expected ${CHANGELOG_RELATIVE} next to package.json)`);
   lines.push(
     "",
+    "Report issues with this fork (bugs, feature requests):",
+    `  ${ISSUES_URL}`,
+    "",
     "Open one in your browser:",
     `  ${name} about home    the project homepage`,
     `  ${name} about fork    the fork changelog`,
+    `  ${name} issues        the fork's issue tracker`,
     "",
     "Nothing is sent: these commands only open a page in your browser.",
   );

@@ -112,7 +112,7 @@ test("graft --help ends with the common commands, then how to get more help on o
     .map((l) => l.trim().split(/\s{2,}/));
   assert.deepEqual(
     listed.map(([term]) => term),
-    ["find-command", "model", "build", "deep-threshold", "staleness", "config", "savings", "files location"].map((c) => `graft ${c}`),
+    ["find-command", "model", "build", "deep-threshold", "staleness", "config", "savings", "files location", "about"].map((c) => `graft ${c}`),
   );
   for (const [term, desc] of listed) assert.ok(desc && desc.length <= 60, `${term} has a very short description`);
   assert.match(tail, /\n\nMore about any command: `graft <command> --help` \(or `graft help <command>`\)\.\n$/, "the last line");
@@ -158,15 +158,17 @@ test("graft find-command lists the commands whose name or description holds the 
   const [list, ...entries] = r.stdout.split("\n\n");
   const found = list!.split("\n").slice(1).map((l) => l.trim().split(/\s{2,}/));
   const names = found.map(([path]) => path);
-  assert.equal(names[0], "deep-threshold", "a name match comes first");
-  assert.deepEqual(found[0], ["deep-threshold", "name, description"]);
+  assert.deepEqual(names.slice(0, 2), ["auto-deep", "deep-threshold"], "name matches come first");
+  assert.deepEqual(found[0], ["auto-deep", "name, description"]);
+  assert.deepEqual(found[1], ["deep-threshold", "name, description"]);
   for (const c of ["build", "staleness"]) assert.ok(names.includes(c), c);
   assert.deepEqual(found.find(([p]) => p === "build"), ["build", "description"]);
   assert.ok(!names.includes("upgrade"), "a command without the keyword is left out");
 
   // Each entry is exactly what `graft <command> --help` prints.
   assert.equal(entries.length, names.length);
-  assert.equal(entries[0]!.trimEnd(), runCli(["deep-threshold", "--help"]).stdout.trimEnd());
+  assert.equal(entries[0]!.trimEnd(), runCli(["auto-deep", "--help"]).stdout.trimEnd());
+  assert.equal(entries[1]!.trimEnd(), runCli(["deep-threshold", "--help"]).stdout.trimEnd());
   const build = entries.find((e) => e.startsWith("  graft build "));
   assert.equal(build?.trimEnd(), runCli(["help", "build"]).stdout.trimEnd());
 

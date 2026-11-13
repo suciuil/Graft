@@ -58,12 +58,19 @@ const FOOTER = 'graft/[\\w./-]+\\.md';
 // the other two cover a repo working on graft itself (or any consumer running it
 // from a checkout), where the binary is not on PATH under that name. A retrieval
 // call that raises a permission prompt loses to grep, which never does.
+// The two `mcp__<server>` rules allow every tool of the graft (or trail) MCP
+// server that `.mcp.json` / `~/.claude.json` register. Subagents inherit the main
+// conversation's permission rules, so with these an Explore or background
+// subagent calls `graft_find_code` without a prompt — and in `dontAsk` mode,
+// where a call that would prompt is refused, at all.
 const ALLOW_ENTRIES = [
   'Bash(trail:*)',
   'Bash(graft:*)',
   'Bash(npx graft:*)',
   'Bash(graft-dev:*)',
   'Bash(node dist/cli.js:*)',
+  'mcp__graft',
+  'mcp__trail',
 ];
 
 /**
@@ -163,10 +170,15 @@ function hookBlocks(command: (arg: string) => string): Record<string, Json[]> {
  * Scoped to the forms graft is actually invoked as — NOT any rule mentioning
  * "graft". A user who allowlists their own `Bash(graft-mytool:*)` keeps it; only
  * graft's own set is replaced, which is what lets a renamed entry disappear on
- * upgrade instead of accumulating beside its replacement.
+ * upgrade instead of accumulating beside its replacement. The same goes for the
+ * MCP rules: only the whole-server forms graft writes (`mcp__graft`, and its
+ * `mcp__graft__*` spelling) are graft's; a user's rule for one tool
+ * (`mcp__graft__graft_find_code`) stays.
  */
 export function isGraftAllowEntry(entry: unknown): boolean {
-  return /^Bash\((?:trail|graft|npx graft|graft-dev|node dist\/cli\.js)(?::|\))/.test(String(entry));
+  const s = String(entry);
+  return /^Bash\((?:trail|graft|npx graft|graft-dev|node dist\/cli\.js)(?::|\))/.test(s)
+    || /^mcp__(?:graft|trail)(?:__\*)?$/.test(s);
 }
 
 /** Is this footer regex graft's? It points at the card tree, which is graft's alone. */

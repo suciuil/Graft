@@ -527,6 +527,23 @@ export function deepDueFor(
   root: string,
   opts: { contextDir?: string; children?: string[]; home?: string } = {},
 ): { note: string; reason: string } | null {
+  const st = deepStalenessFor(root, opts);
+  if (!st) return null;
+  const note = deepRebuildNote(st.staleness, st.threshold);
+  return note ? { note, reason: deepDueReason(st.staleness) } : null;
+}
+
+/**
+ * The summary staleness {@link deepDueFor} judges — `root`'s graph, or a
+ * workspace's child graphs added up — with `root`'s threshold. Null when it is
+ * not worth reading (maps too big to hold together) or could not be read. Never
+ * throws. Shared with the automatic deep build (`./auto-deep.ts`), so the nudge
+ * and the automatic run judge the same numbers.
+ */
+export function deepStalenessFor(
+  root: string,
+  opts: { contextDir?: string; children?: string[]; home?: string } = {},
+): { staleness: SummaryStaleness; threshold: number } | null {
   try {
     // Same dir rule as `ensureFreshChildren`: a child's graph lives in its own
     // `<child>/graft`, never under the parent's `--dir`.
@@ -539,8 +556,7 @@ export function deepDueFor(
     if (dirs.length > 1 && tooBigToKeep(dirs)) return null;
     const sum: SummaryStaleness = { stale: 0, unsummarized: 0, total: 0, summarized: 0 };
     for (const d of dirs) addStaleness(sum, summaryStaleness(loadGraphCached(d)));
-    const note = deepRebuildNote(sum, readDeepStaleThreshold(resolve(root), opts.home));
-    return note ? { note, reason: deepDueReason(sum) } : null;
+    return { staleness: sum, threshold: readDeepStaleThreshold(resolve(root), opts.home) };
   } catch {
     return null;
   }

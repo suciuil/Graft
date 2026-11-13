@@ -138,6 +138,12 @@ export interface BuildConfig {
    * {@link GlobalSettings.deepStaleThreshold}, then to
    * {@link DEFAULT_DEEP_STALE_THRESHOLD}. */
   deepStaleThreshold?: number;
+  /** Run `graft build --deep` by itself, in the background, once the share of
+   * out-of-date summaries reaches {@link deepStaleThreshold} (`graft auto-deep
+   * on|off`). Off unless set: every automatic run is an LLM pass that spends AI
+   * tokens without asking. Absent falls through to
+   * {@link GlobalSettings.autoDeep}, then to off. */
+  autoDeep?: boolean;
   /** The VS Code `.code-workspace` file (relative to this folder) whose folders
    * `graft init` wired here, so `graft build` builds the same ones; `false` = this folder itself. */
   codeWorkspace?: string | false;
@@ -196,8 +202,9 @@ function ensureBuildConfigIgnored(d: string): void {
  * `deepStaleThreshold` is the one exclusion: a repo value overrides the global
  * one (`~/.graft/settings.json`), so scaffolding the default into every repo
  * would make `graft deep-threshold --global` a no-op everywhere `init` ran.
+ * `autoDeep` is left out for the same reason (`graft auto-deep on --global`).
  */
-const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold' | 'codeWorkspace'>> = {
+const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold' | 'autoDeep' | 'codeWorkspace'>> = {
   includeDirs: [],
   excludeDirs: [],
   followSubmodules: false,
@@ -312,6 +319,8 @@ export function isValidDeepStaleThreshold(v: unknown): v is number {
  * a repo, that path would be the repo config too. */
 export interface GlobalSettings {
   deepStaleThreshold?: number;
+  /** The machine-wide `graft auto-deep` default; a repo's own value wins. */
+  autoDeep?: boolean;
   /** Where repos that have no map or settings inside them yet keep them: absent
    * or `true` → `~/.graft/repos` (the default), an absolute folder → there,
    * `false` → in the repo as before. Read by context/profile-store.ts;
@@ -351,6 +360,22 @@ export function resolveDeepStaleThreshold(
 
 export function readDeepStaleThreshold(d: string, home?: string): number {
   return resolveDeepStaleThreshold(d, home).value;
+}
+
+/** Whether `graft build --deep` runs automatically for repo `d`, and where that
+ * came from: this repo's config, else the global settings, else the default
+ * (off). Only a real boolean counts, so a hand-edited `"yes"` never turns on
+ * automatic spending. */
+export function resolveAutoDeep(d: string, home?: string): { value: boolean; source: DeepStaleThresholdSource } {
+  const repo = readBuildConfig(d)?.autoDeep;
+  if (typeof repo === 'boolean') return { value: repo, source: 'repo' };
+  const global = readGlobalSettings(home)?.autoDeep;
+  if (typeof global === 'boolean') return { value: global, source: 'global' };
+  return { value: false, source: 'default' };
+}
+
+export function readAutoDeep(d: string, home?: string): boolean {
+  return resolveAutoDeep(d, home).value;
 }
 
 // Best-effort read-modify-write; not atomic across concurrent processes, but acceptable

@@ -129,7 +129,7 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "at the next build, or the refresh before the next query.\n" +
       "Settings: excludeDirs (directories left out of the graph), includeDirs (built-in skipped directories indexed " +
       "anyway), followSubmodules (index Git submodules), followNestedRepos (index nested Git clones), and " +
-      "deepStaleThreshold (set with `graft deep-threshold`).",
+      "deepStaleThreshold (set with `graft deep-threshold`) and autoDeep (set with `graft auto-deep`).",
     examples: ["graft config list", "graft config exclude-dirs --help"],
   },
   "config list": {
@@ -246,6 +246,18 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "above which queries suggest it. Per repo, or for every repo with --global. Default 10; 0 = as soon as anything " +
       "is out of date, 100 = never.",
     examples: ["graft deep-threshold", "graft deep-threshold 25", "graft deep-threshold 50 --global"],
+    globals: ["dir"],
+  },
+  "auto-deep": {
+    description:
+      "Show or set whether `graft build --deep` runs by itself. On, a graft query that finds the share of out-of-date " +
+      "summaries at or above the deep-threshold (`graft deep-threshold`) starts a deep build in the background, and the " +
+      "\"run graft build --deep\" recommendation is no longer shown. Every run is an LLM pass that spends AI tokens without " +
+      "asking, so turning it on prints a cost warning and asks to confirm (--yes confirms without a terminal). One run at a " +
+      "time; a failed run is reported on every query and not retried until a manual `graft build --deep` succeeds or " +
+      "auto-deep is turned on again. Per repo, or for every repo with --global. Default off. With no state, shows the " +
+      "setting and how the last automatic run went.",
+    examples: ["graft auto-deep", "graft auto-deep on", "graft auto-deep off", "graft auto-deep on --global --yes"],
     globals: ["dir"],
   },
   effort: {
@@ -662,6 +674,7 @@ export const COMMON_COMMANDS: [string, string][] = [
   ["config", "show or change this repo's settings"],
   ["savings", "show the tokens (and dollars) graft saved"],
   ["files location", "show or move the folder generated files are kept in"],
+  ["about", "show the homepage, fork changelog and issue tracker"],
 ];
 
 /**

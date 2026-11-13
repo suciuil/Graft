@@ -57,7 +57,7 @@ import { openBrowser } from "./util/browser.js";
 import { committedAtBase, learningsAtBase, teammateEdits, withBaseLearnings } from "./check/learning-edits.js";
 import { CACHE_DIR, contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
-import { combinedStaleness, deepDueFor, deepRebuildDue, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, initDeepSuggestion, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
+import { combinedStaleness, deepRebuildDue, deepStalenessFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, initDeepSuggestion, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
 import { federateSkeleton, isPartsWorkspace, isWorkspaceBuildRoot, readWorkspace, removeWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
@@ -104,7 +104,8 @@ import { installBrainsServer, installCursorBrainsServer, removeBrainsServer, rem
 import { upsertCodexToml } from "./hosts/mcp-config.js";
 import { homedir } from "node:os";
 import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, resolvePackageJsonPath, runUpgrade } from "./cli-meta.js";
-import { ABOUT_TARGETS, PROJECT_URL, fileUri, findChangelog, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
+import { ABOUT_TARGETS, ISSUES_URL, PROJECT_URL, fileUri, findChangelog, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
+import { armReportHint, noteFailureForReport, reportHintApplies } from "./report-hint.js";
 import { nativeFallbackNotice } from "./graph/native.js";
 import {
   DEFAULT_DEEP_STALE_THRESHOLD,
@@ -117,11 +118,22 @@ import {
   patchBuildConfig,
   patchGlobalSettings,
   readBuildConfig,
+  readAutoDeep,
   readDeepStaleThreshold,
   readGlobalSettings,
+  resolveAutoDeep,
   resolveDeepStaleThreshold,
   type BuildConfig,
 } from "./util/state.js";
+import {
+  AUTO_DEEP_CHILD_ENV,
+  autoDeepDue,
+  autoDeepLockHeld,
+  autoDeepPaths,
+  clearAutoDeepFailure,
+  deepNoticeFor,
+  readAutoDeepStatus,
+} from "./graph/auto-deep.js";
 import { normalizePathPrefix } from "./util/paths.js";
 import { isOutside } from "./context/profile-store.js";
 import {
@@ -234,9 +246,6 @@ const GROUP = {
   cloud: "Workspace · your team's view, across repos:",
   ci: "CI:",
 } as const;
-
-/** Where users of this fork report bugs and request features (`graft issues`). */
-const ISSUES_URL = "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues";
 
 /** Put a command in a help group, under trail only. */
 function grouped(c: Command, heading: string): Command {
@@ -484,7 +493,9 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
     : await ensureFreshGraph(root, { contextDir: globalDir, disabled });
   const note = refreshNote(r);
   if (note) console.error(note);
-  const deep = deepDueFor(root, { contextDir: globalDir, children: ws?.children });
+  // The manual `graft build --deep` nudge, or with auto-deep on the automatic
+  // run's state (started, running, failed) — see graph/auto-deep.ts.
+  const deep = deepNoticeFor(root, { contextDir: globalDir, children: ws?.children, mayStart: !disabled });
   if (deep) console.error(deep.note);
   setDeepDue(deep?.reason ?? null);
   setInitDue(initDueReason(root, { children: ws?.children }));
@@ -534,6 +545,8 @@ program.hook("preAction", (_parent, action) => {
   // host's .mcp.json args prices every tool call the server goes on to serve.
   setAgentModel(program.opts<GlobalOpts>().agentModel);
   runningCommand = action.name();
+  // A failed `init` / `build` ends with where to report it (this fork's issue tracker).
+  if (action.parent === program && reportHintApplies(action.name(), action.opts<{ check?: boolean }>())) armReportHint();
   if (UPKEEP_SKIP.has(action.name())) return;
   // Someone typing graft by hand learns its new name, once a day. Agents,
   // hooks, CI and pipes never see it (see graftNotice).
@@ -748,7 +761,7 @@ grouped(program.command("issues"), GROUP.setup)
 
 grouped(program.command("about"), GROUP.setup)
   .alias("info")
-  .description(`Where to read about ${brand()}: the project homepage, or the changelog of the changes in this fork`)
+  .description(`Where to read about ${brand()}: the project homepage, the changelog of the changes in this fork, and where to report issues with this fork`)
   .argument("[target]", `open one in your browser: ${ABOUT_TARGETS.join(" or ")}`)
   .action((raw: string | undefined) => {
     const changelog = findChangelog(resolvePackageJsonPath(import.meta.url));
@@ -1117,6 +1130,14 @@ grouped(program.command("build"), GROUP.setup)
         "⚠ using OPENROUTER_API_KEY (deprecated): prefer GRAFT_API_KEY + GRAFT_BASE_URL.",
       );
     }
+    // An automatic run (graph/auto-deep.ts) exists only to write the summaries: a
+    // structural build in its place would be reported as a success that changed
+    // nothing. It fails instead, and the reason above reaches the user.
+    if (opts.deep && !deep && process.env[AUTO_DEEP_CHILD_ENV]) {
+      console.error("✗ the automatic deep build stopped: it can't write summaries until the cause above is fixed.");
+      process.exitCode = 1;
+      return;
+    }
 
     const buildGlobalDir = program.opts<GlobalOpts>().dir;
     const label = (target: string) => relative(buildRoot, target).split("\\").join("/") || ".";
@@ -1474,6 +1495,11 @@ grouped(program.command("build"), GROUP.setup)
       if (codeWs) console.error(`\n— ${label(target)}/`);
       await buildOne(target, overrideFor(target));
     }
+    // A deep build run by hand that went through fixes what a failed automatic
+    // one reported: automatic runs may start again (graph/auto-deep.ts).
+    if (deep && !process.exitCode && !process.env[AUTO_DEEP_CHILD_ENV] && clearAutoDeepFailure(buildRoot, buildGlobalDir)) {
+      console.error(`· auto-deep: the earlier automatic run failed; this build fixed that, so automatic runs start again when due`);
+    }
   });
 
 /**
@@ -1678,6 +1704,9 @@ program
           ? "shown whenever any node summary is out of date (changed or new code)"
           : `shown when more than ${threshold}% of node summaries are out of date (changed or new code)`;
     console.log(`the \`graft build --deep\` recommendation is ${when}`);
+    if (readAutoDeep(dir) && threshold < 100) {
+      console.log(`auto-deep is on: \`graft build --deep\` runs by itself instead, once ${threshold}% or more are out of date (\`graft auto-deep\`)`);
+    }
     const graph = loadGraphCached(contextDirFor(dir, program.opts<GlobalOpts>().dir));
     const s = summaryStaleness(graph);
     if (s.total > 0 && s.summarized === 0) {
@@ -1688,6 +1717,136 @@ program
       console.log(
         `now: ${outdated} of ${s.total} node summaries out of date (${pct}%) — ${s.stale} changed, ${s.unsummarized} new`,
       );
+    }
+  });
+
+/** What turning auto-deep on means, printed before it is turned on: it spends
+ * money without asking, every time the threshold is reached. */
+function autoDeepWarning(threshold: number, now: { outdated: number; total: number } | null): string[] {
+  const lines = [
+    "⚠ auto-deep runs `graft build --deep` by itself, in the background, with no further prompt:",
+    `  every time ${threshold}% or more of the node summaries are out of date (the deep-threshold), a graft query starts one.`,
+    "  Each run is an LLM pass over the changed code, sent to the AI endpoint you configured: it spends AI tokens,",
+    "  which costs money on a paid key, and on a big repo or after big changes it can cost a lot.",
+    "  A failed run is reported on every query and not retried by itself; `graft auto-deep off` stops future runs.",
+  ];
+  if (threshold >= 100) lines.push("  note: the deep-threshold is 100 (never), so nothing will run until you lower it with `graft deep-threshold <percent>`.");
+  else if (threshold === 0) lines.push("  note: the deep-threshold is 0, so any out-of-date summary starts a run — after nearly every change.");
+  if (now && now.total > 0) {
+    const pct = Math.round((now.outdated / now.total) * 100);
+    lines.push(
+      `  now: ${now.outdated} of ${now.total} node summaries (${pct}%) are out of date` +
+        (pct >= threshold && threshold < 100 && now.outdated > 0 ? ", so the next graft query starts a run." : "."),
+    );
+  }
+  return lines;
+}
+
+program
+  .command("auto-deep")
+  .description(
+    "Show or set whether `graft build --deep` runs by itself, in the background, once out-of-date node summaries reach the deep-threshold " +
+      "(`graft deep-threshold`) — per repo, or for every repo with --global (default off). On, it spends AI tokens without asking",
+  )
+  .argument("[state]", "on or off (omit to show the current setting and the last automatic run)")
+  .argument(...DIR_ARG)
+  .option("-g, --global", "set/reset the default for every repo (~/.graft/settings.json); a repo's own value still wins")
+  .option("--reset", "remove the value: a repo's falls back to the global one, the global one to off")
+  .option("-y, --yes", "turn it on without the confirmation prompt (the cost warning is still printed)")
+  .action(async (stateArg: string | undefined, dirArg: string | undefined, opts: { reset?: boolean; global?: boolean; yes?: boolean }) => {
+    const states: Record<string, boolean> = { on: true, off: false, true: true, false: false, enable: true, disable: false };
+    let state = stateArg;
+    // `graft auto-deep <dir>` shows that repo's setting.
+    if (dirArg === undefined && state !== undefined && !(state.toLowerCase() in states)) {
+      if (existsSync(state) && statSync(state).isDirectory()) [dirArg, state] = [state, undefined];
+    }
+    const dir = queryRoot(dirArg);
+    const globalDir = program.opts<GlobalOpts>().dir;
+    if (opts.reset && state !== undefined) {
+      console.error("graft auto-deep: pass on, off or --reset, not more than one");
+      process.exit(1);
+    }
+    let value: boolean | undefined;
+    if (state !== undefined) {
+      const key = state.trim().toLowerCase();
+      if (!(key in states)) {
+        console.error(`graft auto-deep: "${state}" is not on or off`);
+        process.exit(1);
+      }
+      value = states[key];
+    }
+
+    const st = deepStalenessFor(dir, { contextDir: globalDir, children: readWorkspace(dir, globalDir)?.children });
+    const threshold = readDeepStaleThreshold(dir);
+    const now = st ? { outdated: st.staleness.stale + st.staleness.unsummarized, total: st.staleness.total } : null;
+    if (opts.reset || value !== undefined) {
+      const before = resolveAutoDeep(dir).value;
+      // What it will be after the change, to know whether this turns spending on.
+      const repoAfter = opts.global ? readBuildConfig(dir)?.autoDeep : value;
+      const globalAfter = opts.global ? value : readGlobalSettings()?.autoDeep;
+      const after = typeof repoAfter === "boolean" ? repoAfter : typeof globalAfter === "boolean" ? globalAfter : false;
+      const turningOn = value === true && (!before || opts.global);
+      if (turningOn) {
+        for (const l of autoDeepWarning(threshold, now)) console.error(l);
+        if (opts.global) console.error("  --global: this applies to every repo on this machine that has no auto-deep setting of its own.");
+        applySavedSettings();
+        if (!resolveConfig(cliConfig()).apiKey) {
+          console.error("  note: no API key is set, so every run will fail until you set one (`graft api key`).");
+        }
+        if (!opts.yes) {
+          if (!isInteractive()) {
+            console.error("✗ auto-deep was not turned on: confirm with `graft auto-deep on --yes` (no terminal to ask in).");
+            process.exit(1);
+          }
+          let answer = "";
+          try {
+            answer = (await terminalPrompter().ask("Turn auto-deep on? [y/N] ")).trim().toLowerCase();
+          } catch {
+            answer = "";
+          }
+          if (answer !== "y" && answer !== "yes") {
+            console.log("Not changed — auto-deep stays as it was.");
+            process.exit(1);
+          }
+        }
+      }
+      if (opts.global) patchGlobalSettings({ autoDeep: value });
+      else patchBuildConfig(dir, { autoDeep: value });
+      // Turning it on again is how a failed run is retried.
+      if (after && clearAutoDeepFailure(dir, globalDir)) console.log("the failed automatic run was cleared: the next graft query starts a new one when due");
+    }
+
+    const { value: on, source } = resolveAutoDeep(dir);
+    const from = { repo: `this repo, ${buildConfigPath(dir)}`, global: `global, ${globalSettingsPath()}`, default: "default" }[source];
+    const shown = (v: unknown) => (v === true ? "on" : v === false ? "off" : "not set");
+    console.log(`auto-deep: ${on ? "on" : "off"} (${from})`);
+    console.log(`  this repo: ${shown(readBuildConfig(dir)?.autoDeep)}`);
+    console.log(`  global:    ${shown(readGlobalSettings()?.autoDeep)}`);
+    console.log(`  default:   off`);
+    if (opts.global && source === "repo") {
+      console.log(`note: this repo keeps its own setting (${on ? "on" : "off"}) — \`graft auto-deep --reset\` here to use the global one`);
+    }
+    if (on) {
+      console.log(
+        threshold >= 100
+          ? "the deep-threshold is 100 (never), so nothing runs automatically until you lower it (`graft deep-threshold <percent>`)"
+          : `\`graft build --deep\` starts by itself in the background once ${threshold === 0 ? "any" : `${threshold}% or more`} of the node summaries are out of date (\`graft deep-threshold\`)`,
+      );
+    }
+    if (now && now.total > 0) {
+      console.log(`now: ${now.outdated} of ${now.total} node summaries out of date (${Math.round((now.outdated / now.total) * 100)}%)`);
+    }
+    const p = autoDeepPaths(dir, globalDir);
+    const last = readAutoDeepStatus(p);
+    if (last) {
+      const at = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "?");
+      if (last.state === "running" && autoDeepLockHeld(p)) console.log(`last automatic run: running since ${at(last.startedAt)}`);
+      else if (last.state === "succeeded") console.log(`last automatic run: succeeded, ${at(last.startedAt)} – ${at(last.finishedAt)}`);
+      else {
+        console.log(`last automatic run: FAILED (started ${at(last.startedAt)}): ${last.error ?? "it ended without reporting a result"}`);
+        console.log(`  automatic runs are paused: fix the cause, then \`graft build --deep\` once or \`graft auto-deep on\` to retry`);
+      }
+      console.log(`  output: ${last.log}`);
     }
   });
 
@@ -3235,6 +3394,8 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
             : res.timedOut
             ? `⚠ the graph build ${res.reason}${where}: run ${cmd("graft build")} to finish it`
             : `⚠ the graph build failed${where}${res.reason ? ` (${res.reason})` : ""}: run ${cmd("graft build")} to see why`;
+          // init still exits 0 for this, so the closing issue-tracker line has to be asked for.
+          if (!res.tooLarge && !res.timedOut) noteFailureForReport();
         } else if (existing) {
           graphLine = `✓ graph ready · ${fmt(existing.meta.nodeCount)} nodes, ${fmt(existing.meta.edgeCount)} edges${where}`;
         } else if (hasGraftIndex(root)) {
@@ -3400,18 +3561,26 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
     // run here yet, or the summaries are out of date past the repo's threshold.
     const staleness = combinedStaleness(graphs);
     const deepThreshold = readDeepStaleThreshold(repo);
+    // With auto-deep on, the next query starts the deep build by itself: no step to suggest.
+    const autoDeep = readAutoDeep(repo) && autoDeepDue(staleness, deepThreshold);
     if (verbose) console.error(
       "\n" +
         formatInitEpilogue({
           graphBuilt: graphs.length > 0,
           nodes: graphs.reduce((n, g) => n + g.meta.nodeCount, 0),
           edges: graphs.reduce((n, g) => n + g.meta.edgeCount, 0),
-          deepDue: deepRebuildDue(staleness, deepThreshold),
+          deepDue: !autoDeep && deepRebuildDue(staleness, deepThreshold),
         }),
     );
     else {
-      const deepLine = initDeepSuggestion(staleness, deepThreshold, { agent: !process.stderr.isTTY });
+      const deepLine = autoDeep ? null : initDeepSuggestion(staleness, deepThreshold, { agent: !process.stderr.isTTY });
       if (deepLine) console.error(deepLine);
+    }
+    if (autoDeep) {
+      console.error(
+        `· auto-deep is on: the next graft query starts \`${cmd("graft build --deep")}\` in the background to write the prose summaries ` +
+          `(an LLM pass that costs tokens; \`${cmd("graft auto-deep off")}\` stops it)`,
+      );
     }
     // Hand what was found to the review page, and leave a child waiting for
     // the person to connect and review there.

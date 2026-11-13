@@ -323,6 +323,13 @@ the same way, so the user learns to re-run `trail init` and get the latest
 instructions. Don't run it yourself unless asked: it rewrites files the user
 commits.
 
+If `trail init` or `trail build` (including `trail build --deep`) fails with an
+error, suggest the user report it at the issue tracker of this trail fork,
+https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues,
+with all the details: the exact command, the full error output, the trail
+version (`trail --version`), the operating system, and what was being done
+when it failed.
+
 Pass `--agent-model <your own model id>` on your trail calls when you know it
 (e.g. `trail ask "..." --source --agent-model claude-opus-5`). Trail prices the
 tokens it saves at YOUR model's rate and cannot see which model you are, and it

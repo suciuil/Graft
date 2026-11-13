@@ -170,6 +170,12 @@ same way; do not run `graft init` yourself unless asked — it rewrites files
 the user commits.
 After big code changes, refresh the graph with `graft build` (deterministic,
 no API key, $0).
+If `graft init` or `graft build` (including `graft build --deep`) fails with an
+error, suggest the user report it at the issue tracker of this graft fork,
+https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues,
+with all the details: the exact command, the full error output, the graft
+version (`graft --version`), the operating system, and what was being done
+when it failed.
 
 ### Reporting what graft saved (Kilo Code)
 

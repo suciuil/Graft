@@ -129,7 +129,7 @@ test('graft settings fragments are removed and the user\'s own settings kept', (
       Stop: [{ hooks: [{ type: 'command', command: 'node graft-hooks.cjs stop' }] }],
     },
     footerLinksRegexes: ['graft/[\\w./-]+\\.md', 'docs/.*'],
-    permissions: { allow: ['Bash(graft:*)', 'Bash(ls:*)'] },
+    permissions: { allow: ['Bash(graft:*)', 'mcp__graft', 'mcp__trail__*', 'Bash(ls:*)', 'mcp__graft__graft_find_code'] },
     model: 'opus',
   }));
   runRetract(d, { apply: true, global: false });
@@ -140,7 +140,7 @@ test('graft settings fragments are removed and the user\'s own settings kept', (
   assert.equal(root.hooks.PostToolUse.length, 1);
   assert.equal(root.hooks.PostToolUse[0].hooks[0].command, 'my-own-hook.sh', 'foreign hook kept');
   assert.deepEqual(root.footerLinksRegexes, ['docs/.*']);
-  assert.deepEqual(root.permissions.allow, ['Bash(ls:*)']);
+  assert.deepEqual(root.permissions.allow, ['Bash(ls:*)', 'mcp__graft__graft_find_code'], 'whole-server MCP rules go; a per-tool rule is the user\'s');
   assert.equal(root.model, 'opus', 'unrelated settings untouched');
 });
 
@@ -272,6 +272,21 @@ test('emptied directories are pruned, not left hollow', () => {
   runRetract(d, { apply: true, global: false });
   assert.ok(!existsSync(join(d, '.claude', 'skills', 'graft')), 'graft/ skill dir pruned');
   assert.ok(!existsSync(join(d, '.claude', 'skills')), 'now-empty skills/ pruned too');
+});
+
+test('the Copilot .vscode/mcp.json registration is removed; other servers keep the file', () => {
+  const d = fresh();
+  const cfg = write(d, join('.vscode', 'mcp.json'), JSON.stringify({ servers: { other: { type: 'http', url: 'x' } } }));
+  registerMcpConfigs(d, ['copilot'], { home: d });
+  assert.ok(JSON.parse(readFileSync(cfg, 'utf8')).servers.graft, 'registered first');
+  runRetract(d, { apply: true, global: false });
+  assert.deepEqual(JSON.parse(readFileSync(cfg, 'utf8')), { servers: { other: { type: 'http', url: 'x' } } });
+
+  const solo = fresh();
+  const only = join(solo, '.vscode', 'mcp.json');
+  registerMcpConfigs(solo, ['copilot'], { home: solo });
+  runRetract(solo, { apply: true, global: false });
+  assert.equal(existsSync(only), false, 'a file holding only graft\'s server goes');
 });
 
 // --------------------------------------------------------------------------

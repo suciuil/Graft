@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeGraftSettings, repoShimCmd } from '../src/claude/settings-merge.js';
+import { isGraftAllowEntry, mergeGraftSettings, repoShimCmd } from '../src/claude/settings-merge.js';
 
 const SL = repoShimCmd('graft-statusline.cjs');
 
@@ -117,43 +117,54 @@ test('re-running is idempotent (no duplicate Graft entries or footer)', () => {
 test('foreign top-level keys survive', () => {
   const { merged } = mergeGraftSettings({ model: 'claude-sonnet-5', permissions: { allow: ['Bash(ls)'] } });
   assert.equal(merged.model, 'claude-sonnet-5');
-  assert.deepEqual(merged.permissions.allow, ['Bash(ls)', 'Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(ls)', 'Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('fresh init adds the graft CLI allowlist', () => {
   const { merged } = mergeGraftSettings({});
-  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('re-init does not duplicate allowlist entries', () => {
   const once = mergeGraftSettings({}).merged;
   const twice = mergeGraftSettings(once).merged;
-  assert.deepEqual(twice.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(twice.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('pre-existing unrelated allow entries are preserved and ours appended', () => {
   const existing = { permissions: { allow: ['Bash(ls)', 'Bash(git:*)'] } };
   const { merged } = mergeGraftSettings(existing);
-  assert.deepEqual(merged.permissions.allow, ['Bash(ls)', 'Bash(git:*)', 'Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(ls)', 'Bash(git:*)', 'Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('a partially-present allowlist gains only what it lacks, in order', () => {
   const existing = { permissions: { allow: ['Bash(graft:*)'] } };
   const { merged } = mergeGraftSettings(existing);
-  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('pre-existing allow entries are kept and only the missing ones appended', () => {
   const existing = { permissions: { allow: ['Bash(graft:*)', 'Bash(npx graft:*)'] } };
   const { merged } = mergeGraftSettings(existing);
-  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
+});
+
+test('the MCP whole-server rules are graft\'s; per-tool and foreign MCP rules are not', () => {
+  for (const e of ['mcp__graft', 'mcp__trail', 'mcp__graft__*', 'mcp__trail__*']) assert.ok(isGraftAllowEntry(e), e);
+  for (const e of ['mcp__graft__graft_find_code', 'mcp__graftish', 'mcp__github', 'mcp__graft__']) assert.ok(!isGraftAllowEntry(e), e);
+});
+
+test('re-init replaces an older mcp__graft__* spelling instead of stacking beside it', () => {
+  const existing = { permissions: { allow: ['mcp__graft__*', 'mcp__graft__graft_find_code'] } };
+  const { merged } = mergeGraftSettings(existing);
+  assert.deepEqual(merged.permissions.allow, ['mcp__graft__graft_find_code', 'Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 test('permissions object with no allow key gets one added; other keys preserved', () => {
   const existing = { permissions: { deny: ['Bash(rm:*)'] } };
   const { merged } = mergeGraftSettings(existing);
   assert.deepEqual(merged.permissions.deny, ['Bash(rm:*)']);
-  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)']);
+  assert.deepEqual(merged.permissions.allow, ['Bash(trail:*)', 'Bash(graft:*)', 'Bash(npx graft:*)', 'Bash(graft-dev:*)', 'Bash(node dist/cli.js:*)', 'mcp__graft', 'mcp__trail']);
 });
 
 /* ---- PostToolUseFailure: a failed Bash call (design 0.2, D34) ---- */

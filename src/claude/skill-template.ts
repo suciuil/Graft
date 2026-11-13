@@ -1,4 +1,5 @@
 import { cmd, type Brand } from "../brand.js";
+import { ISSUES_URL } from "../about.js";
 // The graft Claude Code skill, bundled as a string so `graft init` can write it into a
 // consumer repo's .claude/skills/graft/SKILL.md (no network fetch, version-locked to the
 // installed graft). This is the single source of truth for the skill text; graft's own
@@ -14,6 +15,20 @@ export const SKILL_TEMPLATE_UPDATE_LINE = 'Trail may ask you to run `trail skill
 export function skillTemplate(brand: Brand = "graft"): string {
   return brand === "trail" ? trailSkill(graftSkill()) : graftSkill();
 }
+
+/**
+ * Where an agent sends the user when `graft init` or `graft build` fails: this
+ * fork's issue tracker (`ISSUES_URL`, also opened by `graft issues`). Shared by
+ * the skill and every host's instruction file so they all say the same thing.
+ * The address survives `trailSpelling`: in `graft-issues` the word is followed
+ * by `-`, which the rename leaves alone.
+ */
+export const REPORT_FAILURES = `If \`graft init\` or \`graft build\` (including \`graft build --deep\`) fails with an
+error, suggest the user report it at the issue tracker of this graft fork,
+${ISSUES_URL},
+with all the details: the exact command, the full error output, the graft
+version (\`graft --version\`), the operating system, and what was being done
+when it failed.`;
 
 /**
  * What to do when the agent cannot run commands: a chat mode with no terminal
@@ -472,6 +487,8 @@ tally also gets a \`⚠️ Run the 'graft init' command: recommended (…)\` lin
 the same way, so the user learns to re-run \`graft init\` and get the latest
 instructions. Don't run it yourself unless asked: it rewrites files the user
 commits.
+
+${REPORT_FAILURES}
 
 Pass \`--agent-model <your own model id>\` on your graft calls when you know it
 (e.g. \`graft ask "..." --source --agent-model claude-opus-5\`). Graft prices the

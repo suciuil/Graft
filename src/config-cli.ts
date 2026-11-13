@@ -14,6 +14,7 @@ import {
   buildConfigPath,
   patchBuildConfig,
   readBuildConfig,
+  resolveAutoDeep,
   resolveDeepStaleThreshold,
 } from "./util/state.js";
 
@@ -174,5 +175,15 @@ export function formatConfigList(repo: string, home?: string): string {
       `0 = as soon as anything is out of date, 100 = never; default ${DEFAULT_DEEP_STALE_THRESHOLD}.`,
   );
   lines.push(`  change: ${cmd("graft deep-threshold")} <percent> [--global]`);
+  lines.push("");
+
+  const a = resolveAutoDeep(repo, home);
+  const aFrom = { repo: "", global: " (from the global setting)", default: " (default)" }[a.source];
+  lines.push(`autoDeep: ${a.value ? "on" : "off"}${aFrom}`);
+  lines.push(
+    `  Run \`${cmd("graft build --deep")}\` by itself, in the background, once out-of-date summaries reach deepStaleThreshold. ` +
+      `Each run spends AI tokens without asking.`,
+  );
+  lines.push(`  change: ${cmd("graft auto-deep")} on|off [--global]`);
   return lines.join("\n");
 }

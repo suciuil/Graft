@@ -224,6 +224,14 @@ export function mcpTargets(
       case 'kiro':
         out.push(json(id, id, join(repo, '.kiro', 'settings', 'mcp.json'), 'mcpServers', entry));
         break;
+      case 'copilot':
+        // GitHub Copilot in VS Code reads workspace servers from `.vscode/mcp.json`,
+        // keyed `servers` (not `mcpServers`), with an explicit transport `type`.
+        // Without it Copilot's agent and its subagents have only the `graft` CLI.
+        // Tool approval is not file-based there: the user ticks the graft server
+        // once in "Chat: Manage Tool Approval".
+        out.push(json(id, id, join(repo, '.vscode', 'mcp.json'), 'servers', { type: 'stdio', ...entry }));
+        break;
       case 'grok':
         // Grok reads MCP from repo-level `.grok/config.toml` (`[mcp_servers.<name>]`),
         // the same TOML shape Codex uses at ~/.codex/config.toml.
@@ -248,7 +256,7 @@ export function mcpTargets(
       default:
         // 'kilo' is absent on purpose: its server lives in the same
         // kilo.jsonc as its instruction registration, written by hosts/kilo.ts.
-        break; // copilot / windsurf / adal: no MCP target in this phase
+        break; // windsurf / adal: no MCP target in this phase
     }
   }
   return out;

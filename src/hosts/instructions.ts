@@ -7,7 +7,7 @@
  * with only `trail` installed is never told to run `graft`.
  */
 import type { Brand } from '../brand.js';
-import { NO_TERMINAL_FALLBACK, trailSpelling } from '../claude/skill-template.js';
+import { NO_TERMINAL_FALLBACK, REPORT_FAILURES, trailSpelling } from '../claude/skill-template.js';
 
 function inName(text: string, name: Brand): string {
   return name === 'trail' ? trailSpelling(text) : text;
@@ -153,7 +153,8 @@ also gets a "⚠️ Run the 'graft init' command — recommended (…)" line. Ke
 same way; do not run \`graft init\` yourself unless asked — it rewrites files
 the user commits.
 After big code changes, refresh the graph with \`graft build\` (deterministic,
-no API key, $0).`;
+no API key, $0).
+${REPORT_FAILURES}`;
 }
 
 export function copilotInstructions(name: Brand = 'graft'): string {

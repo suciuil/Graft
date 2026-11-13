@@ -7,7 +7,8 @@ import { formatAsk, formatAskWithSaved, skeleton, formatSkeleton } from '../ask/
 import { formatCheckReport } from '../context/check.js';
 import { formatGraphCheckReport } from '../graph/check.js';
 import { loadGraphCached } from '../graph/load.js';
-import { deepDueFor, ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
+import { ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
+import { deepNoticeFor } from '../graph/auto-deep.js';
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
 import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traverse-cli.js';
@@ -361,7 +362,8 @@ async function callToolScoped(
       note = refreshNote(r);
       // Read after the refresh, which is what marks changed nodes' summaries stale.
       // Skipped for graft_check_freshness, whose report already names them.
-      const due = deepDueFor(root, { contextDir: dirOverride, children: ws?.children });
+      // With auto-deep on: the automatic run's state instead of the manual nudge.
+      const due = deepNoticeFor(root, { contextDir: dirOverride, children: ws?.children });
       deep = due?.note ?? null;
       // Before the tool runs: its savings line's example tally carries this.
       setDeepDue(due?.reason ?? null);

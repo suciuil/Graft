@@ -13,6 +13,7 @@ export { ignoreInTrailDir };
 import { hasGraftIndex } from '../graph/root.js';
 import type { PlannedWrite } from '../hosts/plan.js';
 import { repoWiredForTrail, type Brand } from '../brand.js';
+import { noteChildBuildFailure } from '../report-hint.js';
 
 /** trail's committed hook, inside `.trail/` where a `.claude/*` ignore rule can't drop it. */
 export const TRAIL_HOOK = join('.trail', 'hook.cjs');
@@ -99,7 +100,10 @@ export function buildGraphIfMissing(dir: string, opts: { build?: boolean; cliPat
     // from source), so the child can run a .ts entry point too.
     execFileSync(process.execPath, [...process.execArgv, opts.cliPath, 'build', '.', '--no-workspace'], { cwd: dir, stdio: 'inherit', timeout: 300000, windowsHide: true });
     return true;
-  } catch {
+  } catch (e) {
+    // init still exits 0 for a failed build, so ask for the closing issue-tracker
+    // line here (not for a timeout, an interrupt, or a repository too big for one map).
+    noteChildBuildFailure((e as { status?: number | null }).status);
     return false;
   }
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { PROJECT_URL, fileUri, findChangelog, formatAbout, parseAboutTarget } from "../src/about.js";
+import { ISSUES_URL, PROJECT_URL, fileUri, findChangelog, formatAbout, parseAboutTarget } from "../src/about.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "..", "..");
 
@@ -39,6 +39,15 @@ test("formatAbout names the homepage, the changelog path and its file URI, and h
   assert.match(text, /graft about home/);
   assert.match(text, /graft about fork/);
   assert.match(text, /Nothing is sent/);
+});
+
+test("formatAbout lists the fork's issue tracker and how to open it", () => {
+  for (const changelog of [join(repoRoot, "docs", "changelog.html"), null]) {
+    const text = formatAbout("graft", "1.2.3", changelog);
+    assert.ok(text.includes(ISSUES_URL));
+    assert.match(text, /graft issues/);
+  }
+  assert.equal(ISSUES_URL, "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues");
 });
 
 test("formatAbout says when the report is missing instead of printing a dead path", () => {

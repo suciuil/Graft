@@ -234,6 +234,13 @@ the same way, so the user learns to re-run `graft init` and get the latest
 instructions. Don't run it yourself unless asked: it rewrites files the user
 commits.
 
+If `graft init` or `graft build` (including `graft build --deep`) fails with an
+error, suggest the user report it at the issue tracker of this graft fork,
+https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues,
+with all the details: the exact command, the full error output, the graft
+version (`graft --version`), the operating system, and what was being done
+when it failed.
+
 Pass `--agent-model <your own model id>` on your graft calls when you know it
 (e.g. `graft ask "..." --source --agent-model claude-opus-5`). Graft prices the
 tokens it saves at YOUR model's rate and cannot see which model you are, and it

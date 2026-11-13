@@ -80,6 +80,20 @@ test('grok gets a repo-local TOML MCP section', () => {
   assert.deepEqual(again.map((x) => x.action), ['unchanged']);
 });
 
+test('copilot gets .vscode/mcp.json under `servers`, with a stdio type; foreign servers and inputs kept', () => {
+  const repo = fresh(); const home = fresh();
+  mkdirSync(join(repo, '.vscode'), { recursive: true });
+  writeFileSync(join(repo, '.vscode', 'mcp.json'), JSON.stringify({ inputs: [{ id: 'k' }], servers: { other: { type: 'http', url: 'x' } } }));
+  const w = registerMcpConfigs(repo, ['copilot'], { home });
+  assert.deepEqual(w.map((x) => [x.id, x.action]), [['copilot', 'updated']]);
+  const cfg = JSON.parse(readFileSync(join(repo, '.vscode', 'mcp.json'), 'utf8'));
+  assert.deepEqual(cfg.servers.graft, { type: 'stdio', command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] });
+  assert.ok(cfg.servers.other, 'foreign server preserved');
+  assert.deepEqual(cfg.inputs, [{ id: 'k' }], 'other top-level keys preserved');
+  assert.equal(cfg.mcpServers, undefined, 'VS Code keys servers under `servers`, not `mcpServers`');
+  assert.deepEqual(registerMcpConfigs(repo, ['copilot'], { home }).map((x) => x.action), ['unchanged']);
+});
+
 test('JSON with non-object mcpServers value is skipped', () => {
   const repo = fresh(); const home = fresh();
   mkdirSync(join(repo, '.cursor'), { recursive: true });
