@@ -113,6 +113,28 @@ test("C depth: #if branches that only parse one at a time", { skip: grammarAvail
   assert.ok(hasEdge(graph, "calls", "branches.c#Br_Run~2", "branches.c#Br_Old"), "call in the last branch");
 });
 
+// Code for builds that are never on together, each in a #if of its own: two
+// loop heads for one closing brace, in two functions, and a call missing its `)`
+// in two branches no build compiles. The file only parses once every such #if
+// is changed at the same time, which changing one #if at a time never finds.
+test("C depth: several #if chains that only balance the braces together", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const loop = (name: string, a: string, b: string, head: string) =>
+    `void ${name}(int a)\n{\n#if (${a} == 1)\n  ${head.replace("N", "2")} {\n#endif\n#if (${b} == 1)\n  ${head.replace("N", "3")} {\n#endif\n    Ba_Helper(a);\n  }\n}\n`;
+  const call = (cond: string, arg: string) => `#if (${cond} == 1)\n  Ba_Helper(${arg}\n#else\n  Ba_Helper(${arg});\n#endif\n`;
+  const graph = await build({
+    "balance.c": `void Ba_Helper(int a) { }\n`
+      + loop("Ba_One", "BA_X", "BA_Y", "for (a = 0; a < N; a++)")
+      + loop("Ba_Two", "BA_P", "BA_Q", "while (a > N)")
+      + `void Ba_Three(int a)\n{\n${call("BA_R", "a")}${call("BA_S", "a + 1")}}\n`
+      + `void Ba_After(void) { Ba_One(1); Ba_Two(2); Ba_Three(3); }\n`,
+  });
+  assert.equal(nodeById(graph, "balance.c")?.parse_errors, undefined, "no syntax errors left");
+  for (const name of ["Ba_One", "Ba_Two", "Ba_Three"]) {
+    assert.ok(hasEdge(graph, "calls", `balance.c#${name}`, "balance.c#Ba_Helper"), `${name}() → Ba_Helper()`);
+    assert.ok(hasEdge(graph, "calls", "balance.c#Ba_After", `balance.c#${name}`), `Ba_After() → ${name}()`);
+  }
+});
+
 test("C++ depth: classes, out-of-line methods, inheritance, calls", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   const graph = await build({
     "app.cpp": `namespace app {\nclass Base {};\nclass Repo : public Base {\npublic:\n  int Save(int x);\n};\nint helper(int x){ return x+1; }\nint Repo::Save(int x){ return helper(x); }\n}\n`,

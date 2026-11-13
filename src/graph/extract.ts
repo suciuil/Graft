@@ -1197,20 +1197,35 @@ const FLIP_BUDGET = 16;
  */
 function braceSuspects(set: ConditionalSet, keep: number[]): Map<number, number> {
   const rank = new Map<number, number>();
-  const code = codeOfLines(renderConditionalView(set, keep).text.split("\n"));
+  for (const { chain, rank: r } of unbalancedBranches(set, keep).suspects) rank.set(chain, r);
+  return rank;
+}
+
+/** Running brace counts of `lines`: entry `i` is the braces opened and not yet
+ * closed before line `i`. A preprocessor line (a `#define` and its continuation
+ * lines) holds no braces of the code around it. */
+function braceSums(lines: string[], open = "{", close = "}"): Int32Array {
+  const code = codeOfLines(lines);
   const sums = new Int32Array(code.length + 1);
   let directive = false;
   code.forEach((line, i) => {
-    // A preprocessor line (a `#define` and its continuation lines) holds no
-    // braces of the code around it.
     const skip = directive || /^\s*#/.test(line);
     directive = skip && /\\\s*$/.test(line);
     let d = 0;
-    if (!skip) for (const ch of line) d += ch === "{" ? 1 : ch === "}" ? -1 : 0;
+    if (!skip) for (const ch of line) d += ch === open ? 1 : ch === close ? -1 : 0;
     sums[i + 1] = sums[i] + d;
   });
-  const total = sums[code.length];
-  if (total === 0) return rank;
+  return sums;
+}
+
+/** The braces the view `keep` leaves open (`total`, negative when it closes
+ * more than it opens), and the chains whose kept branch is unbalanced the same
+ * way, each with its branch's own count and its rank (see {@link braceSuspects}). */
+function unbalancedBranches(set: ConditionalSet, keep: number[]): { total: number; suspects: Array<{ chain: number; delta: number; rank: number }> } {
+  const sums = braceSums(renderConditionalView(set, keep).text.split("\n"));
+  const total = sums[sums.length - 1];
+  const suspects: Array<{ chain: number; delta: number; rank: number }> = [];
+  if (total === 0) return { total, suspects };
   set.chains.forEach((chain, c) => {
     const k = keep[c];
     if (chain.endif < 0 || k < 0 || chain.branches.some((b) => /\b__cplusplus\b/.test(b.cond))) return;
@@ -1221,9 +1236,80 @@ function braceSuspects(set: ConditionalSet, keep: number[]): Map<number, number>
     if (delta === 0 || Math.sign(delta) !== Math.sign(total)) return;
     const miss = Math.abs(total - delta) / (Math.abs(total) + Math.abs(delta));
     const size = (chain.endifEnd - chain.branches[0].at) / (set.lines.length + 1);
-    rank.set(c, -3 + miss / 2 + size / 2);
+    suspects.push({ chain: c, delta, rank: -3 + miss / 2 + size / 2 });
   });
-  return rank;
+  return { total, suspects };
+}
+
+/**
+ * A view that changes several chains of the view `keep` at once, to even out
+ * the braces and the parentheses of each top-level block (the lines up to a
+ * `}` in the first column, or to the end of the file). In a block that opens
+ * more than it closes, or the other way round, each chain inside it whose kept
+ * branch is unbalanced the same way (nearest to the shortfall and smallest
+ * first) keeps instead a branch of its chain that is balanced, or none when the
+ * chain has no `#else`, until the block comes out even; a block that cannot is
+ * left as it is. Null when fewer than two chains change (single changes are
+ * tried anyway). Code written for two builds that are never on together, each
+ * in a `#if` of its own, opens the same braces twice and closes them once
+ * (`#if A` `for (…) {` `#endif` `#if B` `for (…) {` `#endif` … `}`), and a
+ * branch no build compiles may lack a `)`; when that happens in several places
+ * of a file, the parser gives up on the whole file until all are fixed, so
+ * changing one chain at a time never lowers the errors.
+ */
+function balancingKeep(set: ConditionalSet, keep: number[]): number[] | null {
+  const lines = renderConditionalView(set, keep).text.split("\n");
+  const code = codeOfLines(lines);
+  const span = (c: number, k: number): [number, number] => {
+    const { branches, endif } = set.chains[c];
+    const b = branches[k];
+    return [b.end + 1, Math.max(b.end + 1, k + 1 < branches.length ? branches[k + 1].at : endif)];
+  };
+  const blocks: Array<[number, number]> = [];
+  for (let i = 0, from = 0; i < lines.length; i++) {
+    if (i < lines.length - 1 && !/^\}\s*;?\s*$/.test(code[i])) continue;
+    blocks.push([from, i + 1]);
+    from = i + 1;
+  }
+  const trial = keep.slice();
+  const flipped = new Set<number>();
+  for (const [open, close] of [["{", "}"], ["(", ")"]]) {
+    const sums = braceSums(lines, open, close);
+    const raw = braceSums(set.lines, open, close);
+    for (const [from, to] of blocks) {
+      const need = sums[to] - sums[from];
+      if (need === 0) continue;
+      const suspects: Array<{ chain: number; delta: number; rank: number }> = [];
+      set.chains.forEach((chain, c) => {
+        const k = keep[c];
+        if (chain.endif < 0 || k < 0 || flipped.has(c) || chain.branches.some((b) => /\b__cplusplus\b/.test(b.cond)) || !chainActive(set, keep, c)) return;
+        const [s, e] = span(c, k);
+        if (s < from || e > to) return;
+        const delta = sums[e] - sums[s];
+        if (delta === 0 || Math.sign(delta) !== Math.sign(need)) return;
+        const miss = Math.abs(need - delta) / (Math.abs(need) + Math.abs(delta));
+        suspects.push({ chain: c, delta, rank: miss + (chain.endifEnd - chain.branches[0].at) / (to - from + 1) });
+      });
+      const picks: Array<[number, number]> = [];
+      let left = need;
+      for (const { chain: c, delta } of suspects.sort((a, b) => a.rank - b.rank)) {
+        if (Math.abs(delta) > Math.abs(left)) continue;
+        const { branches } = set.chains[c];
+        const balanced = branches.findIndex((_, k) => {
+          if (k === keep[c]) return false;
+          const [s, e] = span(c, k);
+          return raw[e] - raw[s] === 0;
+        });
+        const instead = balanced >= 0 ? balanced : branches[branches.length - 1].kw !== "else" ? -1 : null;
+        if (instead === null) continue;
+        picks.push([c, instead]);
+        left -= delta;
+        if (left === 0) break;
+      }
+      if (left === 0) for (const [c, instead] of picks) (trial[c] = instead), flipped.add(c);
+    }
+  }
+  return flipped.size > 1 ? trial : null;
 }
 
 /**
@@ -1284,6 +1370,18 @@ function refineConditionalView(
   let currentKeep = keep;
   let text: string | null = null;
   let budget = FLIP_BUDGET;
+  // Several chains that only balance the braces together (see balancingKeep).
+  const together = balancingKeep(set, keep);
+  if (together !== null) {
+    budget--;
+    const view = renderConditionalView(set, together);
+    const counted = countErrors(view.text);
+    if (counted.errors < current.errors) {
+      current = counted;
+      currentKeep = together;
+      text = view.text;
+    }
+  }
   while (current.errors > 0 && budget > 0) {
     let found: { errors: number; rows: number[]; hints: number[]; keep: number[]; text: string; blanked: number } | null = null;
     for (const { chain, branch } of flipCandidates(set, currentKeep, current.rows, current.hints)) {
