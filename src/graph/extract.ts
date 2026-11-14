@@ -874,6 +874,25 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
     firsts.push(parse(semis));
     if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
   }
+  // Blocks opened in this file and closed in the one that includes it, or the
+  // other way round (see withBalancedBraces).
+  const unbalanced = texts[base];
+  const balancing = firsts[base].errors > 0 ? balanceBraces(unbalanced) : null;
+  const balanced = balancing?.text ?? null;
+  if (balanced !== null) {
+    texts.push(balanced);
+    firsts.push(parse(balanced));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
+  // Element macros that bring their own comma, one per line (see
+  // withMacroElementCommas). Before the commas on directive lines, which then
+  // see the element before a directive end in a comma.
+  const elements = firsts[base].errors > 0 ? withMacroElementCommas(texts[base]) : null;
+  if (elements !== null) {
+    texts.push(elements);
+    firsts.push(parse(elements));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
   // Initializer elements in `#if` blocks that are never on together, each
   // without its comma (see withInitializerCommas).
   const commaOrigin = texts[base];
@@ -892,7 +911,17 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   // closes, the C-only text can lose to the file by a few characters of errors
   // in another branch (assembler in `#if OS_ASM`), while only its views close
   // nothing they did not open.
-  const viewed = cOnly !== null && texts[base] !== cOnly ? [texts[base], cOnly] : [texts[base]];
+  // The views of the text before its braces were balanced are tried as well,
+  // and those of the balanced text when it lost but closed a function where its
+  // `}` was forgotten: that text can still lose to the file read with every
+  // `#if` branch on at once, while only its views read whole. Braces merely
+  // added at the end can nest every function after a block left open in one
+  // branch, which the grammar reads without an error, so those views are not
+  // tried.
+  const viewed = [texts[base]];
+  if (cOnly !== null && !viewed.includes(cOnly)) viewed.push(cOnly);
+  if (balanced !== null && (texts[base] === balanced || commaOrigin === balanced) && !viewed.includes(unbalanced)) viewed.push(unbalanced);
+  if (balanced !== null && balancing?.closedBodies && !viewed.includes(balanced)) viewed.push(balanced);
   const chainsOf = (text: string): ConditionalSet | null => {
     if (text !== commas) return conditionalChains(text);
     const set = conditionalChains(commaOrigin);
@@ -1075,8 +1104,8 @@ function mergeCFamilyParse(into: ExtractResult, other: ExtractResult, rel: strin
 const CONDITIONAL_DIRECTIVE = /^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$/;
 const IF_ZERO = /^\s*\(?\s*0\s*\)?\s*(\/[/*].*)?$/;
 
-/** `#error` and `#warning`: a message for the compiler, no code. */
-const DIAGNOSTIC_DIRECTIVE = /^[ \t]*#[ \t]*(error|warning)\b/;
+/** `#error`, `#warning` and its short form `#warn`: a message for the compiler, no code. */
+const DIAGNOSTIC_DIRECTIVE = /^[ \t]*#[ \t]*(error|warning|warn)\b/;
 
 interface ConditionalBranch { at: number; end: number; cond: string; kw: string }
 /** One `#if` chain: its branches (each opened by the directive at `at`, which
@@ -1131,7 +1160,7 @@ function conditionalChains(source: string): ConditionalSet | null {
 
 /** The branch each chain keeps in the first view of a C/C++ file (its first
  * branch, the second for `#if 0`) or the last (its last branch, the `#else`
- * when there is one). A chain without its `#endif` is left as it is (see
+ * when there is one). A chain without its `#endif` keeps all its branches (see
  * {@link renderConditionalView}). */
 function pickBranches(set: ConditionalSet, pick: "first" | "last"): number[] {
   return set.chains.map(({ branches }) => {
@@ -1144,7 +1173,8 @@ function pickBranches(set: ConditionalSet, pick: "first" | "last"): number[] {
 
 /**
  * The view of `set` that keeps branch `keep[c]` of each complete chain `c` (none
- * for -1): directive lines and left-out branches are blanked with spaces, and so
+ * for -1) and every branch of a chain the file never closes: directive lines
+ * and left-out branches are blanked with spaces, and so
  * are `#error` and `#warning` lines, which hold no code but break the grammar
  * where they sit inside an expression (`f(a` `#warning "todo"` `+ b);`).
  * `blanked` counts the lines of code the view leaves out. A comma line in a
@@ -1156,8 +1186,15 @@ function renderConditionalView(set: ConditionalSet, keep: number[]): { text: str
   const dropped = new Uint8Array(lines.length);
   let blanked = 0;
   chains.forEach((chain, c) => {
-    if (chain.endif < 0) return;
     const { branches } = chain;
+    // A chain the file never closes keeps the code of all its branches, without
+    // its directives: left in, an `#ifdef` whose `#endif` was forgotten inside a
+    // function body takes the function's `}` and every function after it into
+    // one error over the whole file.
+    if (chain.endif < 0) {
+      for (const b of branches) blank.fill(1, b.at, b.end + 1);
+      return;
+    }
     for (const b of branches) blank.fill(1, b.at, b.end + 1);
     blank.fill(1, chain.endif, chain.endifEnd + 1);
     branches.forEach((b, k) => {
@@ -1506,6 +1543,45 @@ export function withInitializerCommas(source: string): string | null {
   return withCommaLines(source, initializerCommaLines(source.split("\n")));
 }
 
+/**
+ * Initializer elements that come from macros whose expansion brings its own
+ * trailing comma, one name per line, as in generated tables:
+ *
+ *     {200, C2tsSyncPoint0ms, …, NULL,
+ *     VALVE_TASK_TRANSFER_0
+ *     SLN_TRANSFER_LB_0
+ *     },
+ *
+ * The grammar reads the names as two elements without a comma between them.
+ * The view returned has a comma right after each such name: a line inside an
+ * initializer list that holds a single name (a comment at most after it),
+ * followed by a line that starts another element. Every line stays where it
+ * was. Null when no line needs one.
+ */
+export function withMacroElementCommas(source: string): string | null {
+  const lines = source.split("\n");
+  const code = codeOfLines(lines);
+  const inList = initializerLines(code);
+  const directive = (i: number): boolean => /^\s*#/.test(code[i]);
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (!inList[i] || directive(i)) continue;
+    const name = /^(\s*)([A-Za-z_]\w*)\s*$/.exec(code[i]);
+    if (name === null || NOT_A_MACRO.has(name[2])) continue;
+    let next = i + 1;
+    while (next < lines.length && (code[next].trim() === "" || directive(next))) next++;
+    if (next >= lines.length || !/^\s*[A-Za-z_{&(]/.test(code[next])) continue;
+    let prev = i - 1;
+    while (prev >= 0 && (code[prev].trim() === "" || directive(prev))) prev--;
+    // The name continues an expression from the line before (`a |` then `B`).
+    if (prev >= 0 && !/[,{]\s*$/.test(code[prev]) && !/^\s*[A-Za-z_]\w*\s*$/.test(code[prev])) continue;
+    const end = name[1].length + name[2].length;
+    lines[i] = lines[i].slice(0, end) + "," + lines[i].slice(end);
+    changed = true;
+  }
+  return changed ? lines.join("\n") : null;
+}
+
 /** `source` with lines `at` turned into commas, or null when there are none. */
 function withCommaLines(source: string, at: number[]): string | null {
   if (at.length === 0) return null;
@@ -1644,6 +1720,102 @@ export function withSplicedTokens(source: string): string | null {
     changed = true;
   }
   return changed ? lines.join("\n") : null;
+}
+
+/**
+ * A file `#include`d into the middle of a block can leave that block open at
+ * its end (a test-data `.c` file whose last function is closed by the `}`
+ * after the `#include` in the test that includes it), and the file that
+ * includes it then closes a block it never opened. Either way the parser gives
+ * up: on the whole file in the first case, on the stray `}` in the second. The
+ * view returned closes the blocks still open at the end, after the last line,
+ * and blanks each `}` that closes one the file never opened; every other
+ * character keeps its offset. Braces in comments, strings and preprocessor
+ * lines do not count, nor do those of the `#if` branches a build leaves out
+ * (they are counted in the first branch of each chain, as in its first view):
+ * `#if A` `void f(int a) {` `#else` `void f(void) {` `#endif` opens one block,
+ * not two.
+ *
+ * A function whose last `}` was forgotten takes every function after it into
+ * one error over the rest of the file. When a function head starts at the
+ * first column (`void g(void)`, then `{`) while the body of a function is still
+ * open, the view closes that body on a blank line before the head.
+ *
+ * Null when the braces are balanced.
+ */
+export function withBalancedBraces(source: string): string | null {
+  return balanceBraces(source)?.text ?? null;
+}
+
+/**
+ * The view of withBalancedBraces, and whether it closed a function body before
+ * the head of the next function (`closedBodies`).
+ */
+function balanceBraces(source: string): { text: string; closedBodies: boolean } | null {
+  const lines = source.split("\n");
+  const set = conditionalChains(source);
+  const inComment: boolean[] = [];
+  codeOfLines(lines, inComment);
+  const code = codeOfLines(set === null ? lines : renderConditionalView(set, pickBranches(set, "first")).text.split("\n"));
+  let depth = 0;
+  let changed = false;
+  let closedBodies = false;
+  let directive = false;
+  // Whether the outermost open block is the body of a function, and the last
+  // line of code before the current one.
+  let body = false;
+  let previous = "";
+  const nextCode = (i: number): string => {
+    for (let k = i + 1; k < code.length; k++) if (code[k].trim() !== "") return code[k];
+    return "";
+  };
+  code.forEach((line, i) => {
+    const skip = directive || /^\s*#/.test(line);
+    directive = skip && /\\\s*$/.test(line);
+    if (skip) return;
+    if (depth > 0 && body && functionHead(line, nextCode(i))) {
+      for (let k = i - 1; k >= 0 && code[k].trim() === ""; k--) {
+        const raw = lines[k].replace(/\r$/, "");
+        if (raw.trim() !== "" || inComment[k]) continue;
+        lines[k] = "}".repeat(depth) + raw.slice(depth) + (lines[k].endsWith("\r") ? "\r" : "");
+        depth = 0;
+        changed = true;
+        closedBodies = true;
+        break;
+      }
+    }
+    for (let j = 0; j < line.length; j++) {
+      if (line[j] === "{") {
+        if (depth++ === 0) {
+          const before = line.slice(0, j).trim() || previous;
+          body = /\)\s*$/.test(before) && !/^\s*(if|while|for|switch|else)\b/.test(before);
+        }
+      } else if (line[j] === "}" && --depth < 0) {
+        lines[i] = lines[i].slice(0, j) + " " + lines[i].slice(j + 1);
+        depth = 0;
+        changed = true;
+      }
+    }
+    if (line.trim() !== "") previous = line.trim();
+  });
+  if (!changed && depth === 0) return null;
+  const text = lines.join("\n");
+  return { text: depth === 0 ? text : `${text}${text.endsWith("\n") ? "" : "\n"}${"}".repeat(depth)}\n`, closedBodies };
+}
+
+/** Words that start a statement, or a type that is no function's. */
+const NOT_A_FUNCTION_HEAD = /^(if|else|while|for|switch|return|do|case|default|goto|typedef|struct|union|enum|sizeof)\b/;
+
+/**
+ * Whether a line of code is the head of a function definition at the first
+ * column: a type and a name, then its parameters, closed on the line and
+ * followed by the body's `{` on that line or as the next line of code `next`.
+ */
+function functionHead(line: string, next: string): boolean {
+  const head = line.trimEnd();
+  if (!/^[A-Za-z_]/.test(head) || /[;=]/.test(head) || NOT_A_FUNCTION_HEAD.test(head)) return false;
+  if (!/^[A-Za-z_]\w*(\s*\([^()]*\))?([\s*]+[A-Za-z_]\w*(\s*\([^()]*\))?)*[\s*]+[A-Za-z_]\w*\s*\(.*\)\s*\{?$/.test(head)) return false;
+  return head.endsWith("{") || /^\{/.test(next);
 }
 
 /** Words that look like a call on a line of their own but are not one. */

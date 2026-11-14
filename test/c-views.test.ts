@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { erbView, isErbTemplate } from "../src/graph/erb.js";
-import { extractFile, grammarAvailable, withInitializerCommas, withMacroSemicolons, withSplicedTokens } from "../src/graph/extract.js";
+import { extractFile, grammarAvailable, withBalancedBraces, withInitializerCommas, withMacroElementCommas, withMacroSemicolons, withSplicedTokens } from "../src/graph/extract.js";
 import { warmDepthGrammars } from "../src/graph/depth-parser.js";
 
 await warmDepthGrammars(["c"]);
@@ -101,6 +101,133 @@ test("spliced tokens: the second half of a broken token moves up, offsets stay",
   assert.deepEqual(view.split("\n"), ["int t[] = {0x01,0x02\\\r", ",0x03,0x04\\\r", "};", "#define M(a) a + \\", "  1", ""]);
   // A continuation between tokens needs nothing.
   assert.equal(withSplicedTokens("#define M(a) a + \\\n  1\n"), null);
+});
+
+test("balanced braces: blocks open at the end are closed, stray closes blanked", () => {
+  const open = "void f(void)\n{\n   g(); /* } */\n   if (a) { h(\"}\"); }\n";
+  assert.equal(withBalancedBraces(open), `${open}}\n`);
+  const stray = '#include "data.c"\n}\n#define M { \\\n }\nvoid k(void) { }\n';
+  const view = withBalancedBraces(stray);
+  assert.ok(view !== null);
+  assert.equal(view.length, stray.length);
+  assert.equal(view.split("\n")[1], " ");
+  assert.equal(withBalancedBraces("void f(void) { }\n#define M {\n"), null);
+});
+
+test("balanced braces: a file closed by the one that includes it is read", { skip: !grammarAvailable("c") }, () => {
+  const data = [
+    "void Set_controls(int abs, int ebd)",
+    "{",
+    "   SET(port[0], abs, \"Set ABS\");",
+    "#if (FEAT_EBD)",
+    "   SET(port[1], ebd, \"Set EBD\");",
+    "#endif",
+    "   if (abs)",
+    "   {",
+    "      CALL(start(1), \"ABS on\");",
+    "   }",
+    "/* EOF */",
+    "",
+  ].join("\n");
+  const included = extractFile("test_data.c", data, "c").nodes;
+  assert.equal(included[0].parse_errors ?? 0, 0);
+  assert.ok(included.some((n) => n.kind === "function" && n.name === "Set_controls"));
+  const test = ['#include "test_data.c"', "}", "", "void Test_case(void)", "{", "   Set_controls(1, 0);", "}", ""].join("\n");
+  const includer = extractFile("test.c", test, "c").nodes;
+  assert.equal(includer[0].parse_errors ?? 0, 0);
+  assert.ok(includer.some((n) => n.kind === "function" && n.name === "Test_case"));
+});
+
+test("balanced braces: a function whose } was forgotten is closed before the next head", () => {
+  const forgot = "void f(void)\n{\n   if (a)\n   {\n      g();\n   }\n\nvoid h(void)\n{\n   g();\n}\n";
+  const view = withBalancedBraces(forgot);
+  assert.ok(view !== null);
+  assert.deepEqual(view.split("\n").slice(5, 8), ["   }", "}", "void h(void)"]);
+  // A head inside a block that is no function's body is left alone, and so are
+  // statements at the first column.
+  assert.equal(withBalancedBraces('extern "C"\n{\n\nvoid h(void)\n{\n}\n}\n'), null);
+  assert.equal(withBalancedBraces("void f(void)\n{\n\nif (a)\n{\n}\n}\n"), null);
+  // The braces of the branches a build leaves out do not count.
+  assert.equal(withBalancedBraces("#if (A)\nvoid f(int a) {\n#else\nvoid f(void) {\n#endif\n   g();\n}\n"), null);
+});
+
+test("balanced braces: the functions after one whose } was forgotten are read", { skip: !grammarAvailable("c") }, () => {
+  const src = [
+    "void Task_Body(void)",
+    "{",
+    "#if (CFG_MEASURE)",
+    "   Measure(0);",
+    "#endif",
+    "   if (count == 0)",
+    "   {",
+    "      Measure(1);",
+    "   }",
+    "",
+    "void Task_Other(void)",
+    "{",
+    "#if (CFG_A > 1U)",
+    "   for (; i < CFG_A; i++)",
+    "#endif",
+    "   {",
+    "      Run(i);",
+    "   }",
+    "}",
+    "",
+  ].join("\n");
+  const nodes = extractFile("task.c", src, "c").nodes;
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  for (const name of ["Task_Body", "Task_Other"]) assert.ok(nodes.some((n) => n.kind === "function" && n.name === name), name);
+});
+
+test("conditional views: an #ifdef never closed in a function keeps its branches", { skip: !grammarAvailable("c") }, () => {
+  const src = [
+    "void Check_A(void)",
+    "{",
+    "   #ifdef FRAME_A",
+    "   Set_A(1);",
+    "   #else",
+    "   Set_A(0);",
+    "}",
+    "",
+    "void Check_B(void)",
+    "{",
+    "   #ifdef FRAME_B",
+    "   Set_B(1);",
+    "   #else",
+    "   Set_B(0);",
+    "   #endif",
+    "}",
+    "",
+    "void Check_All(void)",
+    "{",
+    "   Check_A();",
+    "   Check_B();",
+    "}",
+    "",
+  ].join("\n");
+  const nodes = extractFile("check.c", src, "c").nodes;
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  for (const name of ["Check_A", "Check_B", "Check_All"]) assert.ok(nodes.some((n) => n.kind === "function" && n.name === name), name);
+});
+
+test("element macros: a name on a line of its own in a list gets a comma after it", () => {
+  const table = "const T t[] =\n{\n   {200, NULL},\n   TRANSFER_0\n   TRANSFER_LB_0\n#if (A)\n   {750, NULL},\n#endif\n   TRANSFER_E\n};\n";
+  const view = withMacroElementCommas(table);
+  assert.ok(view !== null);
+  const lines = view.split("\n");
+  assert.equal(lines.length, table.split("\n").length);
+  assert.equal(lines[3], "   TRANSFER_0,");
+  assert.equal(lines[4], "   TRANSFER_LB_0,");
+  assert.equal(lines[8], "   TRANSFER_E");
+  // Outside a list, or continuing an expression, a name gets none.
+  assert.equal(withMacroElementCommas("void f(void)\n{\n   BEGIN\n   g();\n}\nint x = a |\n   B\n   ;\n"), null);
+});
+
+test("element macros: a table of such elements is read without errors", { skip: !grammarAvailable("c") }, () => {
+  const table = ["const T t[] =", "{", "   {200, NULL},", "   TRANSFER_0", "   TRANSFER_LB_0", "   {201, NULL},", "};", "", "void f(void) { }", ""].join("\n");
+  const { nodes } = extractFile("tables.c", table, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  assert.ok(nodes.some((n) => n.kind === "function" && n.name === "f"));
 });
 
 test("initializer commas: functions after such a list are extracted", { skip: !grammarAvailable("c") }, () => {
@@ -254,6 +381,32 @@ test("conditional views: #warning lines are blanked, and branches with code that
   const { nodes } = extractFile("Mon.c", BROKEN_BRANCHES, "c");
   assert.equal(nodes[0].parse_errors ?? 0, 0);
   for (const name of ["Mon_Run", "Mon_Init"]) assert.ok(nodes.some((n) => n.name === name), name);
+});
+
+test("conditional views: #warn, the short form of #warning, is blanked too", { skip: !grammarAvailable("c") }, () => {
+  const src = [
+    "boolean Reset_Needed(void)",
+    "{",
+    "   if (",
+    "      (",
+    "#if (FEAT_RESET)",
+    "         (Get_Flag() != False)",
+    "#endif",
+    "#if (FEAT_AURIX)",
+    '      #warn "workaround for AURIX"',
+    "#endif",
+    "      )",
+    "   )",
+    "   {",
+    "      return True;",
+    "   }",
+    "   return False;",
+    "}",
+    "",
+  ].join("\n");
+  const { nodes } = extractFile("reset.c", src, "c");
+  assert.equal(nodes[0].parse_errors ?? 0, 0);
+  assert.ok(nodes.some((n) => n.kind === "function" && n.name === "Reset_Needed"));
 });
 
 // Generated OS code: statement macros without their semicolon, whose
