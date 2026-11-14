@@ -69,10 +69,10 @@
 <div class="stats">
 <!-- stats:start -->
   <div class="stat feature"><b>60</b><span>New features</span></div>
-  <div class="stat improvement"><b>67</b><span>Improvements</span></div>
-  <div class="stat fix"><b>49</b><span>Bug fixes</span></div>
+  <div class="stat improvement"><b>68</b><span>Improvements</span></div>
+  <div class="stat fix"><b>61</b><span>Bug fixes</span></div>
   <div class="stat change"><b>22</b><span>Change requests</span></div>
-  <div class="stat"><b>198</b><span>Items in total</span></div>
+  <div class="stat"><b>211</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -82,14 +82,14 @@
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
 <!-- counts:start -->
-      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>15</td><td>16</td><td>22</td><td>2</td><td>55</td></tr>
+      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>15</td><td>20</td><td>23</td><td>2</td><td>60</td></tr>
       <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>5</td><td>9</td><td>5</td><td>30</td></tr>
       <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>10</td><td>13</td><td>15</td><td>3</td><td>41</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>4</td><td>6</td><td>2</td><td>14</td></tr>
-      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>15</td><td>10</td><td>10</td><td>1</td><td>36</td></tr>
+      <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>15</td><td>18</td><td>10</td><td>1</td><td>44</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>5</td><td>7</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>9</td><td>1</td><td>6</td><td>6</td><td>22</td></tr>
-      <tr class="total"><td>Total</td><td>60</td><td>49</td><td>67</td><td>22</td><td>198</td></tr>
+      <tr class="total"><td>Total</td><td>60</td><td>61</td><td>68</td><td>22</td><td>211</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
@@ -151,6 +151,7 @@
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A repository too big for one map no longer fails. The build lists the parts it can be split into and, in a terminal, lets you pick which ones to build. The new "--all-parts" option builds each part into its own map, and queries, callers, grep, map and file overviews run from the top folder search all parts together.</span></li>
     <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The fork changelog opened by "graft about fork" (and shipped with the package and the offline installer kit) is now built automatically from the fork's commit messages.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>A new "changelog" command regenerates the fork changelog on demand, with a check mode that reports whether the page is up to date.</span></li>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled Windows x64 C, C++, Makefile and Groovy language parsers were rebuilt and repackaged.</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The fork changelog opened by "graft about fork" now lists the latest changes: parsing fixes for C and C++ files (unclosed #if blocks, a bare "#" before a comment, casts to type qualifiers alone, memory, export and wrapper macros), empty files and Makefile "$(info )" no longer reported as parse errors, very long operator chains no longer crashing the build, a rebuilt Windows HTML parser and a refreshed model price list.</span></li>
     <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The bundled Windows x64 HTML language parser was rebuilt and repackaged.</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The built-in model price list was refreshed. "Deep Research Preview 04-2026" was dropped because it no longer has a published price.</span></li>
@@ -190,6 +191,18 @@
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The built-in model price list was updated with newly released models and corrected rates.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>The fork changelog now lists past changes that were missing before, including older work grouped by commit date.</span></li>
     <li data-type="improvement" data-area="packaging"><span class="tag">Improvement</span><span><span class="area">Packaging &amp; installer</span>Building the offline installer package now records each build with its date and kit version, regenerates the changelog for it, warns when uncommitted work would ship without being listed, and says which files to commit afterwards.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C files that are #included into the middle of a function and leave its block open (test-data files closed by the "}" after the #include), and the files that include them and close a block they never opened, are now indexed without syntax errors, so their functions and calls appear in the graph.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>A C function whose closing "}" was forgotten no longer swallows every function after it into one syntax error: the body is taken to end before the next function head at the start of a line, so the functions after it are found.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>An "#ifdef" whose "#endif" was forgotten inside a C function no longer turns the rest of the file into one syntax error: the code of all its branches is kept, so the functions after it are found.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C tables whose elements are macros that bring their own comma, one per line (for example "VALVE_TASK_TRANSFER_0" then "SLN_TRANSFER_LB_0"), are now indexed without syntax errors.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>"#warn", the short form of "#warning", inside an expression no longer causes a syntax error in C and C++ files.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>A switch on a macro that expands to the parenthesized value, such as "switch Get_mode(n)", no longer causes a parse error in C and C++ files.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>A C file that holds the elements of an initializer and ends in a number without a comma (for example "0/*closing element*/") no longer causes a parse error.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>"delete[] ((T *) p)" in C++ is read as an array delete instead of a lambda, so it no longer causes a parse error.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>A Makefile variable value with a ")" that closes nothing, such as "P += $(ROOT))/../out", is kept as text, as make does, instead of causing a parse error.</span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>Java-style array creation with initial elements in Groovy, such as "new byte[] { (byte)(v &amp; 0xFF), 2 }", no longer causes a parse error.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C source files with long data tables where a line-continuation backslash splits a number or name in two (for example "0x\" followed by "3D") are now indexed without syntax errors, so the functions and calls after such tables appear in the graph, and their line numbers are unchanged.</span></li>
+    <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C test files with many tests, each in its own "#if defined(...)" block and each broken the same way (for example a declaration missing its semicolon), now index cleanly: those blocks are all left out together, so the rest of the file's functions and calls are found, and blocks without errors are kept.</span></li>
     <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>C declarations with a storage class but no type in front of an array ("extern suites_c_file[];") or a bare struct ("extern struct PduInfoType_s;") no longer cause a parse error.</span></li>
     <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>A name followed by a minus and a number inside macro arguments (for example "COU_CALL_FOR(timeout-2, ...)") is read as a subtraction, so unit-test files using it no longer report syntax errors.</span></li>
     <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>A file with an expression that chains one operator thousands of times (for example a generated header that ORs together one flag per #if block) no longer fails with "Maximum call stack size exceeded" and is now in the graph.</span></li>
