@@ -135,6 +135,32 @@ test("C depth: several #if chains that only balance the braces together", { skip
   }
 });
 
+// A test file whose tests each sit in an #if of their own, each after a
+// declaration missing its `;`: no build turns those blocks on, and there are
+// more of them than changing one #if at a time can leave out.
+test("C depth: many #if blocks broken the same way are left out at once", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const blocks = Array.from({ length: 24 }, (_, i) =>
+    `#if (defined (CDL_TEST_${i}))\nextern Dr_Case_${i}(a, b)\nCOU_TEST(Dr_Test_${i}, "case ${i}")\n{\n  Dr_Helper(${i});\n}\n#endif\n`,
+  ).join("");
+  const good = `#if (defined (CDL_TEST_OK))\nextern int Dr_Case_Ok(int a);\nCOU_TEST(Dr_Test_Ok, "case ok")\n{\n  Dr_Helper(1);\n}\n#endif\n`;
+  const graph = await build({
+    "drop.c": `void Dr_Helper(int a) { }\n${blocks}${good}void Dr_After(void) { Dr_Helper(0); }\n`,
+  });
+  assert.equal(nodeById(graph, "drop.c")?.parse_errors, undefined, "no syntax errors left");
+  assert.ok(hasEdge(graph, "calls", "drop.c#Dr_After", "drop.c#Dr_Helper"), "Dr_After() → Dr_Helper()");
+  assert.ok(hasEdge(graph, "calls", "drop.c#Dr_Test_Ok", "drop.c#Dr_Helper"), "a block without errors stays in");
+});
+
+// A backslash at the end of a line splits a hex number of a table in two.
+test("C depth: a number split by a line continuation", { skip: grammarAvailable("c") ? false : "c grammar not built" }, async () => {
+  const graph = await build({
+    "splice.c": `unsigned char Sp_Table[6] = {0x01,0x\\\n02,0x03,0\\\nx04,0x05,0x06};\nvoid Sp_Helper(void) { }\nvoid Sp_Run(void) { Sp_Helper(); }\n`,
+  });
+  assert.equal(nodeById(graph, "splice.c")?.parse_errors, undefined, "no syntax errors left");
+  assert.equal(nodeById(graph, "splice.c#Sp_Run")?.span, "L5-L5", "lines stay where they were");
+  assert.ok(hasEdge(graph, "calls", "splice.c#Sp_Run", "splice.c#Sp_Helper"), "Sp_Run() → Sp_Helper()");
+});
+
 test("C++ depth: classes, out-of-line methods, inheritance, calls", { skip: grammarAvailable("cpp") ? false : "cpp grammar not built" }, async () => {
   const graph = await build({
     "app.cpp": `namespace app {\nclass Base {};\nclass Repo : public Base {\npublic:\n  int Save(int x);\n};\nint helper(int x){ return x+1; }\nint Repo::Save(int x){ return helper(x); }\n}\n`,

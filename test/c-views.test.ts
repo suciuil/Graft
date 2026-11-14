@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { erbView, isErbTemplate } from "../src/graph/erb.js";
-import { extractFile, grammarAvailable, withInitializerCommas, withMacroSemicolons } from "../src/graph/extract.js";
+import { extractFile, grammarAvailable, withInitializerCommas, withMacroSemicolons, withSplicedTokens } from "../src/graph/extract.js";
 import { warmDepthGrammars } from "../src/graph/depth-parser.js";
 
 await warmDepthGrammars(["c"]);
@@ -91,6 +91,16 @@ test("initializer commas: a comma takes the place of the first directive in a ga
   assert.equal(lines[16], "#if (B)");
   assert.equal(lines[18], "#endif");
   assert.equal(withInitializerCommas("int a[] = {\n#if A\n 1,\n#endif\n 2\n};\n"), null);
+});
+
+test("spliced tokens: the second half of a broken token moves up, offsets stay", () => {
+  const source = "int t[] = {0x01,0x\\\r\n02,0x03,0\\\r\nx04};\n#define M(a) a + \\\n  1\n";
+  const view = withSplicedTokens(source);
+  assert.ok(view !== null);
+  assert.equal(view.length, source.length);
+  assert.deepEqual(view.split("\n"), ["int t[] = {0x01,0x02\\\r", ",0x03,0x04\\\r", "};", "#define M(a) a + \\", "  1", ""]);
+  // A continuation between tokens needs nothing.
+  assert.equal(withSplicedTokens("#define M(a) a + \\\n  1\n"), null);
 });
 
 test("initializer commas: functions after such a list are extracted", { skip: !grammarAvailable("c") }, () => {

@@ -792,7 +792,9 @@ interface CFamilyParse {
  * C compiler sees it, with those branches blanked (see {@link withoutCppBranches}),
  * and that view competes with the original for the base the branch views start from.
  * So does a view that puts back the commas an initializer list leaves out between
- * `#if` blocks that are never on together (see {@link withInitializerCommas}).
+ * `#if` blocks that are never on together (see {@link withInitializerCommas}),
+ * and one that joins the numbers and names a backslash at the end of a line
+ * broke in two (see {@link withSplicedTokens}).
  *
  * A `.h` header whose C++ sits only in `#ifdef __cplusplus` branches is routed
  * to C (see {@link looksLikeCpp}); when its C parse has errors, it is parsed as
@@ -854,6 +856,14 @@ function extractCFamilyAs(rel: string, source: string, grammar: Language, texts:
   if (cOnly !== null) {
     texts.push(cOnly);
     firsts.push(parse(cOnly));
+    if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
+  }
+  // Numbers and names broken in two by a backslash at the end of a line (see
+  // withSplicedTokens).
+  const spliced = firsts[base].errors > 0 ? withSplicedTokens(texts[base]) : null;
+  if (spliced !== null) {
+    texts.push(spliced);
+    firsts.push(parse(spliced));
     if (firsts[firsts.length - 1].errors < firsts[base].errors) base = firsts.length - 1;
   }
   // Statement macros on lines of their own, without their semicolon (see
@@ -1313,6 +1323,36 @@ function balancingKeep(set: ConditionalSet, keep: number[]): number[] | null {
 }
 
 /**
+ * A view that leaves out, at once, every `#if` block without an `#else` that a
+ * syntax error of the view `keep` sits in (the innermost one around each of
+ * `rows`), or null when fewer than two blocks would go. A test file whose
+ * tests each sit in an `#if defined(…)` of their own, several of them broken in
+ * the same way (a declaration missing its `;` before each test), needs each of
+ * those blocks left out, more than one block at a time can find.
+ */
+function droppingKeep(set: ConditionalSet, keep: number[], rows: number[]): number[] | null {
+  const trial = keep.slice();
+  let dropped = 0;
+  for (const row of rows) {
+    let inner = -1;
+    set.chains.forEach((chain, c) => {
+      const k = keep[c];
+      if (chain.endif < 0 || k < 0) return;
+      const b = chain.branches[k];
+      const to = k + 1 < chain.branches.length ? chain.branches[k + 1].at : chain.endif;
+      if (row <= b.end || row >= to || !chainActive(set, keep, c)) return;
+      if (inner < 0 || chain.branches[0].at > set.chains[inner].branches[0].at) inner = c;
+    });
+    if (inner < 0 || trial[inner] < 0) continue;
+    const { branches } = set.chains[inner];
+    if (branches[branches.length - 1].kw === "else" || branches.some((b) => /\b__cplusplus\b/.test(b.cond))) continue;
+    trial[inner] = -1;
+    dropped++;
+  }
+  return dropped > 1 ? trial : null;
+}
+
+/**
  * Other branch choices for the chains next to the first errors of a view: those
  * the error sits in (innermost first), then those that end shortly before it
  * (nearest first). Chains around the first `hints` (see {@link syntaxErrors})
@@ -1379,6 +1419,18 @@ function refineConditionalView(
     if (counted.errors < current.errors) {
       current = counted;
       currentKeep = together;
+      text = view.text;
+    }
+  }
+  // Every #if block without an #else that holds an error, at once (see droppingKeep).
+  const dropping = current.errors > 0 ? droppingKeep(set, currentKeep, current.rows) : null;
+  if (dropping !== null) {
+    budget--;
+    const view = renderConditionalView(set, dropping);
+    const counted = countErrors(view.text);
+    if (counted.errors < current.errors) {
+      current = counted;
+      currentKeep = dropping;
       text = view.text;
     }
   }
@@ -1567,6 +1619,31 @@ function codeOfLines(lines: string[], startsInComment?: boolean[]): string[] {
     }
     return out;
   });
+}
+
+/**
+ * A backslash at the end of a line joins it to the next one before the
+ * compiler reads any token, so a long table may break a number or a name in
+ * two (`0x\` then `3D,0x75,…`, which is `0x3D`). The grammar only skips the
+ * backslash and the line break, between tokens, and reads two tokens there.
+ * The view returned moves each such second half up to the end of the first,
+ * before the backslash (`0x3D\` then `,0x75,…`): every line keeps its row and
+ * everything after the second half keeps its offset. Null when no token is
+ * broken that way.
+ */
+export function withSplicedTokens(source: string): string | null {
+  if (!source.includes("\\")) return null;
+  const lines = source.split("\n");
+  let changed = false;
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!/\w\\\r?$/.test(lines[i])) continue;
+    const rest = /^\w+/.exec(lines[i + 1]);
+    if (rest === null) continue;
+    lines[i] = lines[i].replace(/\\(\r?)$/, `${rest[0]}\\$1`);
+    lines[i + 1] = lines[i + 1].slice(rest[0].length);
+    changed = true;
+  }
+  return changed ? lines.join("\n") : null;
 }
 
 /** Words that look like a call on a line of their own but are not one. */
