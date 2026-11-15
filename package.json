@@ -59,6 +59,7 @@
     "changelog": "node scripts/changelog.mjs",
     "changelog:publish": "node scripts/publish-changelog.mjs",
     "release:publish": "node scripts/publish-release.mjs",
+    "release:strip-sources": "node scripts/publish-release.mjs --strip-sources",
     "vendor:oracledb": "node scripts/vendor-oracledb.mjs",
     "vendor:odpnet": "node scripts/vendor-odpnet.mjs",
     "prices:bundle": "node --import tsx scripts/update-bundled-prices.mjs",

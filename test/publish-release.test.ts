@@ -1,7 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { assertPublishable, attachedKitAction, attachedKitSha, highestPublishedBuild, releaseNotes, releaseTag, repoCoordinates } from "../scripts/publish-release.mjs";
+import {
+  assertPublishable,
+  attachedKitAction,
+  attachedKitSha,
+  highestPublishedBuild,
+  isSourceFreeCommit,
+  releaseNotes,
+  releaseTag,
+  releaseTagReadme,
+  repoCoordinates,
+} from "../scripts/publish-release.mjs";
 import { FORK_REPO, pagesUrl } from "../scripts/publish-changelog.mjs";
 import { FORK_HOMEPAGE_URL, FORK_REPO_URL } from "../src/about.js";
 
@@ -106,6 +116,26 @@ test("notes naming the kit's SHA-256 never vouch for an upload a failed run cut 
   assert.equal(attachedKitAction({ existing: { name: kit, size: 10 }, body: notes, kit, tag, sha256, size: 20, force: true }), "replace");
   // The notes a release is created with carry no SHA-256 (it is added once the kit is attached)
   assert.equal(releaseNotes({ kit, version: "0.28.0.3", graftVersion: "0.28.0", build: 3, arch: "x64", groups: [], homepage: FORK_HOMEPAGE_URL }).includes("SHA-256"), false);
+});
+
+test("a release's tag carries a README naming the release instead of the source", () => {
+  const web = FORK_REPO_URL;
+  const readme = releaseTagReadme({ version: "0.28.0.3", web });
+  assert.match(readme, /^# graft 0\.28\.0\.3\n/);
+  assert.match(readme, /holds no source code/);
+  assert.ok(readme.includes(`${web}/releases/tag/v0.28.0.3`));
+  // The same release always gets the same file, so a tag already on it stays where it is
+  assert.equal(releaseTagReadme({ version: "0.28.0.3", web }), readme);
+  assert.notEqual(releaseTagReadme({ version: "0.28.0.4", web }), readme);
+});
+
+test("a tag counts as source-free only on that README's tree, with no history behind it", () => {
+  const tree = "t".repeat(40);
+  assert.equal(isSourceFreeCommit({ tree: { sha: tree }, parents: [] }, tree), true);
+  // A commit of the fork: another tree, and parents
+  assert.equal(isSourceFreeCommit({ tree: { sha: "s".repeat(40) }, parents: [{ sha: "p".repeat(40) }] }, tree), false);
+  assert.equal(isSourceFreeCommit({ tree: { sha: tree }, parents: [{ sha: "p".repeat(40) }] }, tree), false);
+  assert.equal(isSourceFreeCommit(null, tree), false);
 });
 
 test("release notes of a build without entries say it repackages the previous one", () => {

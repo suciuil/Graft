@@ -8,9 +8,14 @@
  * `--no-publish`); `npm run release:publish` runs it by hand, for example to retry a
  * failed upload. Maintainer tool: graft itself never runs it.
  *
- * The release is tagged v<kit version> (v0.28.0.2) on the repository's default branch,
- * named "graft <kit version>", and its notes are the entries of that build's changelog
- * group, and it is marked as the latest. Only the kit recorded in kit-build.json can be
+ * The release is tagged v<kit version> (v0.28.0.2), named "graft <kit version>", and its
+ * notes are the entries of that build's changelog group, and it is marked as the latest.
+ * Its tag never points at the fork's source: GitHub adds "Source code (zip/tar.gz)"
+ * downloads of the tagged commit to every release and offers no way to leave them out, so
+ * the tag points at a commit of its own, without parents, whose only file is a README
+ * naming the release (releaseTagReadme). A release whose tag points anywhere else is
+ * moved onto such a commit when it is published again; `--strip-sources` does that for
+ * every kit release of the repository at once. Only the kit recorded in kit-build.json can be
  * published: the last pack meant for publication, whose SHA-256 must still match (a local
  * `--no-publish` kit records nothing and is refused).
  * The notes record the kit's SHA-256. Running it again for a published kit keeps the
@@ -22,6 +27,7 @@
  * otherwise what git's credential helper holds for the host, the same login `git push` uses.
  *
  *   node scripts/publish-release.mjs [--kit <zip>] [--repo <git url>] [--no-changelog] [--dry-run] [--force]
+ *   node scripts/publish-release.mjs --strip-sources [--repo <git url>] [--dry-run]
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -108,6 +114,105 @@ async function api(auth, method, url, body, headers = {}) {
   const text = await res.text();
   if (!res.ok) throw new Error(`${method} ${url.replace(/\?.*$/, "")}: HTTP ${res.status} ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : {};
+}
+
+/**
+ * The only file of the commit a release's tag points at (README.md): it names the release
+ * and says where the kit is, so GitHub's automatic "Source code" downloads of the release
+ * hold this file and no source. Depends on the version and the repository alone, so the
+ * same release always gets the same tree and a tag already on it is left where it is.
+ */
+export function releaseTagReadme({ version, web }) {
+  const tag = releaseTag(version);
+  return [
+    `# graft ${version}`,
+    "",
+    `This tag marks the release of graft's offline installer kit ${version} for Windows.`,
+    "",
+    "It holds no source code on purpose: GitHub adds \"Source code\" downloads of the tagged",
+    "commit to every release, and this commit carries nothing but this file.",
+    "",
+    `Download the kit (the .zip file attached to the release): ${web}/releases/tag/${tag}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Whether the commit a tag points at (as the git commits API returns it) is the
+ * source-free commit of `treeSha`: that tree, and no parents (so no history of the fork
+ * hangs off the tag either).
+ */
+export function isSourceFreeCommit(commit, treeSha) {
+  return commit?.tree?.sha === treeSha && Array.isArray(commit.parents) && commit.parents.length === 0;
+}
+
+/**
+ * Points the tag of release `version` at its source-free commit (see releaseTagReadme),
+ * creating the tag when it does not exist and moving it when it points at any other
+ * commit (the fork's source, as tags made before this did). The release itself, its
+ * notes and its assets are untouched: a release follows its tag by name. Returns
+ * "kept", "created" or "moved".
+ */
+async function sourceFreeTag(auth, where, version) {
+  const tag = releaseTag(version);
+  const tree = await api(auth, "POST", `${where.api}/git/trees`, {
+    tree: [{ path: "README.md", mode: "100644", type: "blob", content: releaseTagReadme({ version, web: where.web }) }],
+  });
+  const ref = await api(auth, "GET", `${where.api}/git/ref/tags/${encodeURIComponent(tag)}`);
+  if (ref?.object) {
+    let sha = ref.object.sha;
+    // An annotated tag: follow it to its commit
+    if (ref.object.type === "tag") sha = (await api(auth, "GET", `${where.api}/git/tags/${sha}`))?.object?.sha;
+    const commit = sha ? await api(auth, "GET", `${where.api}/git/commits/${sha}`) : null;
+    if (isSourceFreeCommit(commit, tree.sha)) return "kept";
+  }
+  const commit = await api(auth, "POST", `${where.api}/git/commits`, {
+    message: `graft ${version}: offline installer kit release (no source code)`,
+    tree: tree.sha,
+    parents: [],
+  });
+  if (ref?.object) {
+    await api(auth, "PATCH", `${where.api}/git/refs/tags/${encodeURIComponent(tag)}`, { sha: commit.sha, force: true });
+    return "moved";
+  }
+  await api(auth, "POST", `${where.api}/git/refs`, { ref: `refs/tags/${tag}`, sha: commit.sha });
+  return "created";
+}
+
+/**
+ * Moves the tag of every kit release of `repo` onto its source-free commit, so none of
+ * the releases offers the fork's source as its "Source code" downloads any more. Releases
+ * whose tag is not a kit version are left alone. Returns the number of tags moved.
+ */
+export async function stripReleaseSources({ repo = FORK_REPO, dryRun = false, log = console.log } = {}) {
+  const where = repoCoordinates(repo);
+  const auth = authorization(where.host);
+  const releases = [];
+  for (let page = 1; page <= 10; page++) {
+    const batch = await api(auth, "GET", `${where.api}/releases?per_page=100&page=${page}`);
+    releases.push(...(batch ?? []));
+    if (!batch || batch.length < 100) break;
+  }
+  let moved = 0;
+  for (const release of releases) {
+    const version = String(release.tag_name).replace(/^v/, "");
+    if (!parseKitVersion(version) || releaseTag(version) !== release.tag_name) {
+      log(`• ${release.tag_name}: not a kit release, left as it is`);
+      continue;
+    }
+    if (dryRun) {
+      log(`Dry run: would point ${release.tag_name} at a commit holding only README.md`);
+      continue;
+    }
+    const outcome = await sourceFreeTag(auth, where, version);
+    if (outcome === "kept") log(`✓ ${release.tag_name} already carries no source code`);
+    else {
+      moved++;
+      log(`✓ ${release.tag_name} now points at a commit holding only README.md: its "Source code" downloads carry no source`);
+    }
+  }
+  if (releases.length === 0) log(`• ${where.web} has no releases`);
+  return moved;
 }
 
 /**
@@ -244,7 +349,7 @@ export async function publishRelease({ kitPath, repo = FORK_REPO, changelog = tr
   }
   const body = releaseNotes({ kit, version, graftVersion: parsed.version, build: parsed.build, arch, groups, homepage, sha256 });
   if (dryRun) {
-    log(`Dry run: would publish ${kit} (${(bytes.length / 1024 / 1024).toFixed(1)} MB) as release ${tag} of ${where.web}, marked latest, with these notes:\n\n${body}\n`);
+    log(`Dry run: would publish ${kit} (${(bytes.length / 1024 / 1024).toFixed(1)} MB) as release ${tag} of ${where.web}, marked latest, tagged on a commit holding only README.md (no source code), with these notes:\n\n${body}\n`);
     if (changelog) publishChangelog({ repo, dryRun, log });
     return `${where.web}/releases/tag/${tag}`;
   }
@@ -255,14 +360,17 @@ export async function publishRelease({ kitPath, repo = FORK_REPO, changelog = tr
   // stops the run here, with its release left as it was.
   const existing = (release?.assets ?? []).find((a) => a.name === kit);
   const action = attachedKitAction({ existing, body: release?.body, kit, tag, sha256, size: bytes.length, force });
+  // The tag goes on a commit without the fork's source before the release is created on it
+  // (and a release tagged on the source before this is moved off it), so its automatic
+  // "Source code" downloads never carry the source.
+  const tagged = await sourceFreeTag(auth, where, version);
+  if (tagged === "moved") log(`✓ moved ${tag} onto a commit holding only README.md: its "Source code" downloads carry no source`);
   if (!release) {
-    const info = await api(auth, "GET", where.api);
     // Neither marked latest nor carrying the kit's SHA-256 yet: both wait until the kit is
     // attached (below), so a failed upload never leaves /releases/latest on a release
     // without its kit, nor notes a later run would take as proof the kit is attached
     release = await api(auth, "POST", `${where.api}/releases`, {
       tag_name: tag,
-      target_commitish: info?.default_branch ?? "master",
       name: `graft ${version}`,
       body: releaseNotes({ kit, version, graftVersion: parsed.version, build: parsed.build, arch, groups, homepage }),
       make_latest: "false",
@@ -309,13 +417,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     return at >= 0 ? argv[at + 1] : undefined;
   };
   const kit = opt("--kit");
-  publishRelease({
-    kitPath: kit ? resolve(kit) : undefined,
-    repo: opt("--repo") ?? FORK_REPO,
-    changelog: !argv.includes("--no-changelog"),
-    dryRun: argv.includes("--dry-run"),
-    force: argv.includes("--force"),
-  }).catch((err) => {
+  const run = argv.includes("--strip-sources")
+    ? stripReleaseSources({ repo: opt("--repo") ?? FORK_REPO, dryRun: argv.includes("--dry-run") })
+    : publishRelease({
+        kitPath: kit ? resolve(kit) : undefined,
+        repo: opt("--repo") ?? FORK_REPO,
+        changelog: !argv.includes("--no-changelog"),
+        dryRun: argv.includes("--dry-run"),
+        force: argv.includes("--force"),
+      });
+  run.catch((err) => {
     console.error(`✗ ${err.message}`);
     process.exit(1);
   });
