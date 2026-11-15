@@ -3,6 +3,11 @@
  *
  * Split out of cli.ts so the formatting helpers can be unit-tested with
  * injected results instead of hitting the network from tests.
+ *
+ * This fork: `graft upgrade` refuses ({@link upgradeDisabledMessage}). New
+ * versions ship as the offline installer kit on the fork's release page, and
+ * the npm self-upgrade (`runUpgrade`, graft alone, never the `trail` package)
+ * is kept only so an upstream merge that touches it stays visible.
  */
 import { existsSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
@@ -10,6 +15,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toPosixPath } from "./util/paths.js";
 import { brand, PACKAGE_FOR } from "./brand.js";
+import { FORK_RELEASES_URL } from "./about.js";
 
 /** Locates package.json relative to a module URL (works for both `dist/cli.js`
  * running one level under the published package root, and `src/cli.ts` running
@@ -127,7 +133,7 @@ export function formatVersionReport(current: string, latest: NpmViewResult): str
   } else if (latest.version === current) {
     lines.push(`latest on npm: ${current} ✓ up to date`);
   } else {
-    lines.push(`latest on npm: ${latest.version}, run ${brand()} upgrade`);
+    lines.push(`latest on npm: ${latest.version}, download the latest installer kit from ${FORK_RELEASES_URL}`);
   }
   return lines.join("\n");
 }
@@ -171,8 +177,6 @@ export interface UpgradeResult {
   errorMessage?: string;
   oldVersion?: string;
   newVersion?: string;
-  /** The `trail` package's version, when `graft upgrade` installed it alongside. */
-  trailVersion?: string;
   /** A plain fix for a failure we recognise, shown instead of npm's error block. */
   fix?: string;
   /** npm's own error output, for a failure we don't recognise. */
@@ -192,8 +196,18 @@ export function formatUpgradeReport(result: UpgradeResult): string {
     const failed = `✗ npm install -g ${PKG_NAME}@latest failed${result.errorMessage ? `: ${result.errorMessage}` : ""}`;
     return `${result.npmError?.trim() ? `${result.npmError.trim()}\n` : ""}${failed}`;
   }
-  const line = `${brand()} ${result.oldVersion ?? "?"} → ${result.newVersion ?? result.oldVersion ?? "?"}`;
-  return result.trailVersion ? `${line}\n✓ trail ${result.trailVersion} installed too: graft keeps working, and trail is its new name` : line;
+  return `${brand()} ${result.oldVersion ?? "?"} → ${result.newVersion ?? result.oldVersion ?? "?"}`;
+}
+
+/**
+ * What `graft upgrade` prints in this fork, where it installs nothing: new
+ * versions ship as the offline installer kit on the fork's release page.
+ */
+export function upgradeDisabledMessage(): string {
+  return (
+    `✗ ${brand()} upgrade is disabled in this fork: new versions ship as the offline installer kit.\n` +
+    `  Download the latest kit from ${FORK_RELEASES_URL}, unzip it and run START-HERE-install-graft.cmd.`
+  );
 }
 
 /** What npm's error block names: its code, and the path (and rename dest) it failed on. */
@@ -272,6 +286,11 @@ function npmRun(args: string[]): { ok: boolean; stderr: string; error?: string }
   return { ok: !res.error && res.status === 0, stderr: res.stderr ?? "", error: res.error?.message };
 }
 
+/** `npm install -g <pkg>` pinned to the fork's registry, as a line to show people and agents. */
+export function npmInstallLine(pkg: string, registry: string | null = FORK_REGISTRY): string {
+  return ["npm install -g", pkg, ...registryArgs(registry, [pkg])].join(" ");
+}
+
 /** Runs `npm install -g @nanonets/graft@latest`, clearing npm leftovers that
  * block it (`clearNpmLeftover`) and turning EACCES into the no-sudo fix, then
  * re-reads the freshly installed version. No-ops with guidance when running
@@ -281,14 +300,13 @@ export function runUpgrade(moduleUrl: string): UpgradeResult {
   if (isRunningViaNpx(moduleUrl)) {
     return { ran: false, ok: true, oldVersion };
   }
-  // `graft upgrade` is the handover: it also installs the `trail` command, once
-  // that package is published. One npm call, so the two land at one version.
-  const alongside = PKG_NAME === PACKAGE_FOR.graft && getNpmViewVersion(PACKAGE_FOR.trail).ok ? [PACKAGE_FOR.trail] : [];
-  const pkgs = [PKG_NAME, ...alongside];
+  // This fork: graft alone. Upstream's upgrade also installs the `trail`
+  // package, which this fork does not ship, and then moves repos to trail.
+  const pkgs = [PKG_NAME];
   const args = ["install", "-g", ...pkgs.map((p) => `${p}@latest`), ...registryArgs()];
   console.error(`· npm ${args.join(" ")}`);
   let res = npmRun(args);
-  // Two leftovers at most (graft upgrade installs two packages), then npm's own error stands.
+  // Two leftovers at most (a stale package folder and a stale bin link), then npm's own error stands.
   for (let retries = 0; !res.ok && retries < 2; retries++) {
     const cleared = clearNpmLeftover(parseNpmError(res.stderr));
     if (!cleared) break;
@@ -303,6 +321,5 @@ export function runUpgrade(moduleUrl: string): UpgradeResult {
     return { ran: true, ok: false, oldVersion, npmError: res.stderr, errorMessage: res.error };
   }
   const newVersion = readGlobalInstalledVersion(PKG_NAME) ?? getNpmViewVersion(PKG_NAME).version ?? oldVersion;
-  const trailVersion = alongside.length ? (readGlobalInstalledVersion(PACKAGE_FOR.trail) ?? undefined) : undefined;
-  return { ran: true, ok: true, oldVersion, newVersion, trailVersion };
+  return { ran: true, ok: true, oldVersion, newVersion };
 }

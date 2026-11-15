@@ -4,7 +4,12 @@
 `docs/changelog.html` lists what this fork adds to or changes in upstream
 Graft (`NanoNets/Graft`, the `upstream` remote), grouped by package build,
 newest first. It ships in the npm package and the offline kit and is opened by
-`graft about fork`. It is generated from the fork's git commit messages by
+`graft about fork`. It is also the fork's homepage,
+https://github-ct.int.automotive-wan.com/pages/suciui/Graft/ (`graft about
+web`). Each pack publishes its kit as a release of that repository and
+refreshes the page (`scripts/publish-release.mjs`; `--no-publish` skips it,
+`npm run release:publish` retries it); `npm run changelog:publish` refreshes
+only the page, whenever it should show new commits. It is generated from the fork's git commit messages by
 `scripts/changelog.mjs` (`npm run changelog`); nothing in it is written by
 hand or taken from the code. The one exception is the items of the
 hand-written report that came before the generated page: they are kept in
@@ -12,7 +17,21 @@ hand-written report that came before the generated page: they are kept in
 listed in, and the commit-message entries an item covers (its `replaces`
 list, exact entry text) are left out so nothing is listed twice. Do not add
 new items there; new changes go into commit messages. If the generator warns
-that a `replaces` text matches no entry, fix that text.
+that a `replaces` text matches no entry, fix that text. The page also lists
+suciui's typed commit lines in the local tree-sitter grammar repositories graft
+builds from (the `file:../tree-sitter-*` dependencies of `package.json` and
+their own) as one short item per grammar and build (`The C grammar has been
+updated.`) whose `details` link opens those lines word for word. They are filed
+under the first fork commit after them that changes that grammar's files in
+`vendor/`; lines a fork commit there already says are left out. Every entry about
+languages and parsing (the Languages filter area), including the legacy items,
+is listed the same way: one short item per language and build (`Bash support has
+been added.`, `The C grammar has been updated.`) whose `details` link opens the
+entries; one naming several languages is under each, one naming none under
+"Other changes to language support and parsing" (`groupLanguages` in
+`scripts/changelog.mjs`). The generator
+keeps them in `changelog-grammars.json` for clones without those repositories:
+commit that file whenever it changes, with `docs/changelog.html`.
 
 1. **Commit messages are the source.** Every line of a fork commit message
    that starts with `- Feature:`, `- Bug-Fix:`, `- Improvement:` or

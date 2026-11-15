@@ -1,5 +1,13 @@
-import { cmd, type Brand } from "../brand.js";
+import { cmd, PACKAGE_FOR, type Brand } from "../brand.js";
 import { ISSUES_URL } from "../about.js";
+import { npmInstallLine } from "../cli-meta.js";
+
+/**
+ * This fork: how a teammate without trail installs it, pinned to the fork's
+ * registry. The skill is committed, and a bare `npm install -g` on a machine
+ * whose `.npmrc` lacks the fork's redirect would fetch upstream's trail.
+ */
+const TRAIL_INSTALL = npmInstallLine(PACKAGE_FOR.trail);
 // The graft Claude Code skill, bundled as a string so `graft init` can write it into a
 // consumer repo's .claude/skills/graft/SKILL.md (no network fetch, version-locked to the
 // installed graft). This is the single source of truth for the skill text; graft's own
@@ -20,8 +28,8 @@ export function skillTemplate(brand: Brand = "graft"): string {
  * Where an agent sends the user when `graft init` or `graft build` fails: this
  * fork's issue tracker (`ISSUES_URL`, also opened by `graft issues`). Shared by
  * the skill and every host's instruction file so they all say the same thing.
- * The address survives `trailSpelling`: in `graft-issues` the word is followed
- * by `-`, which the rename leaves alone.
+ * The address survives `trailSpelling`: in `suciui/graft/issues` the word is
+ * followed by `/`, which the rename leaves alone.
  */
 export const REPORT_FAILURES = `If \`graft init\` or \`graft build\` (including \`graft build --deep\`) fails with an
 error, suggest the user report it at the issue tracker of this graft fork,
@@ -94,8 +102,8 @@ const TRAIL_DESCRIPTION = `Use for ANY task in this repo. What past sessions wor
   trail check before you commit, push or open a PR. If the trail command
   isn't installed, read .trail/learnings/ directly and credit one in a line
   when it shapes your reply; after that first credit, offer once to set trail
-  up, and only if they say yes, run npm install -g @trailhq/trail-code and
-  then trail init --no-agents. If npm says EACCES, never use sudo; offer to
+  up, and only if they say yes, run the npm install command under If trail
+  isn't installed below, never a bare one, and then trail init --no-agents. If npm says EACCES, never use sudo; offer to
   set npm's prefix to ~/.npm-global instead.`;
 
 /** The same moments, first in the body, so they're read before the tool docs. */
@@ -169,7 +177,7 @@ what it was about, and what it let you skip, e.g. \`📝 Used Rushabh's learning
 on the auth refactor: skipped the session-token approach he already ruled
 out\`. The first time you credit one in a session, and only then, add once:
 "Install trail to get this on every task, plus search and checks. Want me to
-set it up?" Only if they say yes, run \`npm install -g @trailhq/trail-code\`,
+set it up?" Only if they say yes, run \`${TRAIL_INSTALL}\`,
 then \`trail init --no-agents\` in the repo, and tell them it's on. Never
 install it without that yes. If npm fails with EACCES, its global folder needs
 root: never use sudo. Offer to point npm at a folder in their home instead
@@ -479,7 +487,13 @@ When a saving could not be priced because graft knows no price for the model,
 the example tally also gets a \`⚠️ Run the 'graft prices update' command: recommended (…)\` line.
 Keep it under the tally too: \`graft prices update\` fetches LiteLLM's public
 price catalog once and stores it locally, so later savings are priced in dollars.
-Don't run it yourself unless asked.
+Don't run it yourself unless asked. When graft has just updated the model prices
+by itself to price the model (the user chose that), the example tally gets an
+\`ℹ️ The model prices have just been updated automatically from LiteLLM, to get the price of …\`
+line instead (or \`ℹ️ The model prices are being updated automatically …\` while
+that download is still running, or \`ℹ️ No known price for …\` when even those
+prices list none).
+Keep it under the tally the same way.
 
 When the agent instructions in this repo are not the ones the installed graft
 version writes (graft was updated since \`graft init\` last ran here), the example

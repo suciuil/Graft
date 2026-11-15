@@ -1,6 +1,6 @@
 /**
  * The environment-variable commands: each variable graft reads that a person
- * would set has its own command (`graft refresh auto`, `graft files store`, …),
+ * would set has its own command (`graft refresh auto`, `graft files store`, â€¦),
  * and `graft env` lists them and sets one by its name. Run against an in-memory
  * store, so nothing touches the real registry or profile.
  */
@@ -112,6 +112,23 @@ test("without a value the command shows the variable; --unset removes it; a valu
   assert.equal(await runVarCommand(v("GRAFT_DIR"), "x", { unset: true }, d), 1);
   assert.equal(await runVarCommand(v("GRAFT_DIR"), undefined, { unset: true }, d), 0);
   assert.equal(d.store.vars.has("GRAFT_DIR"), false);
+});
+
+test("prices auto: saved as 1/0; removing it reports the installer-dependent default, not a flat on", async () => {
+  const d = deps();
+  const auto = v("GRAFT_PRICES_AUTO_UPDATE");
+  await runVarCommand(auto, "off", {}, d);
+  assert.equal(d.store.vars.get("GRAFT_PRICES_AUTO_UPDATE"), "0");
+  await runVarCommand(auto, "on", {}, d);
+  assert.equal(d.store.vars.get("GRAFT_PRICES_AUTO_UPDATE"), "1", "explicitly on, distinguishable from the default");
+  assert.equal(await runVarCommand(auto, undefined, { unset: true }, d), 0);
+  const removed = d.lines.find((l) => l.includes("is not saved")) ?? "";
+  assert.match(removed, /now: on, once you chose automatic price updates in the installer; otherwise off/);
+  assert.doesNotMatch(removed, /\(the default\)/);
+  // A plain default-on switch still says so.
+  const d2 = deps(memoryStore({ GRAFT_BUNDLED_PRICES: "0" }));
+  await runVarCommand(v("GRAFT_BUNDLED_PRICES"), undefined, { unset: true }, d2);
+  assert.match(d2.lines.join("\n"), /now: on \(the default\)/);
 });
 
 test("env set/unset by name do what the variable's own command does; unknown names are refused", async () => {

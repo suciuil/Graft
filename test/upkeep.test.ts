@@ -53,7 +53,8 @@ test('formatUpdateNudge stays silent unless there is something to say', () => {
   const line = formatUpdateNudge('0.9.1', '0.11.0');
   assert.ok(line);
   assert.match(line, /0\.9\.1 → 0\.11\.0/);
-  assert.match(line, /run `graft upgrade`/);
+  assert.match(line, /install the latest kit from https:\/\/\S+\/releases /, 'this fork: the release page, not the disabled `graft upgrade`');
+  assert.doesNotMatch(line, /graft upgrade/);
   assert.equal(line.split('\n').length, 1, 'one line — this rides in an agent context window');
 });
 

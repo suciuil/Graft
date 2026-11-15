@@ -37,6 +37,7 @@ import { HOSTS, hostRelPath } from './hosts/registry.js';
 import { markersFor } from './hosts/sections.js';
 import { getNpmViewVersion, readCurrentVersion } from './cli-meta.js';
 import { brand } from './brand.js';
+import { FORK_RELEASES_URL } from './about.js';
 import { graftCliPath } from './claude/paths.js';
 
 /**
@@ -158,8 +159,8 @@ export function maybeRefreshInBackground(
  * "you're up to date". */
 export function formatUpdateNudge(current: string, latest: string | null | undefined): string | null {
   if (!isNewer(latest, current)) return null;
-  // `upgrade`, not a bare npm install: under graft it brings the trail command along.
-  return `⬆ ${brand()} ${current} → ${latest} available: run \`${brand()} upgrade\` (restart your agent after).`;
+  // This fork: `upgrade` is disabled; new versions ship as the offline installer kit.
+  return `⬆ ${brand()} ${current} → ${latest} available: install the latest kit from ${FORK_RELEASES_URL} (restart your agent after).`;
 }
 
 /* -------------------------------------------------------------------------- */

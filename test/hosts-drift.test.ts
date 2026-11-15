@@ -6,7 +6,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runHostsInit } from '../src/hosts/init.js';
 import { runInit } from '../src/claude/init.js';
-import { changedSections, initDueReason, outdatedInstructionDetails, outdatedInstructions } from '../src/hosts/drift.js';
+import {
+  changedSections,
+  initDueReason,
+  initDueReasonAsync,
+  loadedCodeIsCurrent,
+  outdatedInstructionDetails,
+  outdatedInstructions,
+  setLoadedCodeStampForTest,
+} from '../src/hosts/drift.js';
 import { tmpRepo } from './helpers.js';
 
 function fresh(): string { return tmpRepo('drift'); }
@@ -78,6 +86,50 @@ test('a shared AGENTS.md names only the agents wired here, not every host that r
   // from disk alone, so all three count as wired — but never an unrelated host.
   assert.ok(d.hosts.includes('agents'));
   assert.ok(d.hosts.every((h) => ['agents', 'hermes', 'antigravity'].includes(h)), d.hosts.join(','));
+});
+
+test('a process holding older code (a long-lived MCP server) asks the code on disk', () => {
+  const home = fresh(); const repo = fresh();
+  runHostsInit(repo, { home, agents: ['copilot'], mcp: false, hooks: false, global: false });
+  assert.equal(loadedCodeIsCurrent(), true);
+  setLoadedCodeStampForTest('code from before an upgrade');
+  try {
+    assert.equal(loadedCodeIsCurrent(), false);
+    // What init on disk just wrote is current, whatever this process remembers.
+    assert.equal(initDueReason(repo, { home }), null);
+    const gh = join(repo, '.github', 'copilot-instructions.md');
+    writeFileSync(gh, readFileSync(gh, 'utf8').replace('graft callers', 'graft who'));
+    // The cached answer is dropped once an instruction file changes.
+    assert.match(initDueReason(repo, { home })!, /\.github\/copilot-instructions\.md differ from what graft \S+ installs/);
+  } finally {
+    setLoadedCodeStampForTest(null);
+  }
+  assert.equal(loadedCodeIsCurrent(), true);
+});
+
+test('the MCP server asks the code on disk without blocking, and goes on with the last answer while it waits', async () => {
+  const home = fresh(); const repo = fresh();
+  runHostsInit(repo, { home, agents: ['copilot'], mcp: false, hooks: false, global: false });
+  const gh = join(repo, '.github', 'copilot-instructions.md');
+  writeFileSync(gh, readFileSync(gh, 'utf8').replace('graft callers', 'graft who'));
+  // Current code: answered in-process, exactly as the blocking variant answers.
+  assert.equal(await initDueReasonAsync(repo, { home }), initDueReason(repo, { home }));
+  setLoadedCodeStampForTest('code from before an upgrade');
+  try {
+    // No time to wait and nothing known yet: no warning this call...
+    assert.equal(await initDueReasonAsync(repo, { home }, 0), null);
+    // ...and the same child, still running, answers a call that can wait.
+    const reason = await initDueReasonAsync(repo, { home }, 30_000);
+    assert.match(reason!, /\.github\/copilot-instructions\.md differ from what graft \S+ installs/);
+    // Cached until something changes.
+    assert.equal(await initDueReasonAsync(repo, { home }, 0), reason);
+    // A file changed: the new child has not answered yet, so the last answer stands.
+    writeFileSync(gh, readFileSync(gh, 'utf8').replace('graft who', 'graft whom'));
+    assert.equal(await initDueReasonAsync(repo, { home }, 0), reason);
+    await initDueReasonAsync(repo, { home }, 30_000);
+  } finally {
+    setLoadedCodeStampForTest(null);
+  }
 });
 
 test('changedSections labels changed, new and removed sections, and skips code fences', () => {

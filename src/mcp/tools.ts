@@ -15,9 +15,10 @@ import { callersSavings, headerOf, hitLine, looseNoteFor } from '../graph/traver
 import { withSavings, setDeepDue, setInitDue, setPricing, setRepoRoot, setMcpSurface, setModelTable, sumSavingsFooters, setCompactNudge, setTurnModels, claimedSummary, tallyWarnings } from '../context/savings.js';
 import { calledRecently, recordRecentCall, turnModels } from '../context/recent-calls.js';
 import { callerKey } from '../context/caller.js';
-import { initDueReason } from '../hosts/drift.js';
+import { settleInitDueAsync } from '../hosts/auto-init.js';
 import { runInCallScope } from '../context/call-scope.js';
 import { liveClaudeSession, sessionPricing } from '../claude/session-metrics.js';
+import { withAutoPrices } from '../context/price-auto-update.js';
 import { kiloModelRows } from '../hosts/models.js';
 import { isKiloClient, mcpClient } from './client.js';
 import { UNKNOWN_MODEL, currentModel, recordSavedTokens, setAgentModel, setHostModel } from '../claude/ledger.js';
@@ -330,7 +331,10 @@ async function callToolScoped(
     // this agent). ~3ms when nothing moved; a structural, $0 rebuild when it did.
     // Same reason as the CLI's `noteQuery`: price this session's tokens once,
     // here, so the formatters downstream can put a dollar figure in the nudge.
-    setPricing(sessionPricing(root));
+    // A named model graft has no price for: update the LiteLLM prices first, when
+    // the user chose that (installer, or `graft prices auto`), so this very call
+    // is priced and its tally says the prices were just updated.
+    setPricing(await withAutoPrices(sessionPricing(root)));
     setRepoRoot(root);
     // The unpriced nudge must not advise `--agent-model`, a CLI flag this
     // surface does not have — it advertises the `model` ARGUMENT instead.
@@ -354,7 +358,12 @@ async function callToolScoped(
     let note: string | null = null;
     let deep: string | null = null;
     setDeepDue(null);
-    setInitDue(initDueReason(root, { children: ws?.children }));
+    // Outdated agent instructions are refreshed here when that is safe (see
+    // hosts/auto-init.ts); the tally recommends `graft init` only when it was not.
+    // Async: a server holding older code has the code on disk do it in a child
+    // process, which must not stall the other calls this server is answering.
+    const init = await settleInitDueAsync(root, { children: ws?.children });
+    setInitDue(init.reason);
     if (!NO_REFRESH_TOOLS.has(name)) {
       const r = ws
         ? await ensureFreshChildren(root, ws.children, { contextDir: dirOverride })
@@ -375,6 +384,8 @@ async function callToolScoped(
     // (its savings line, or e.g. `repo map — …`), and it may fire on every call.
     let text = note ? `${note}\n${res.text}` : res.text;
     if (deep) text = `${text.replace(/\n*$/, '')}\n\n${deep}\n`;
+    // Shown once, by the call that refreshed the instructions.
+    if (init.note) text = `${text.replace(/\n*$/, '')}\n\n${init.note}\n`;
     return text === res.text ? res : { ...res, text };
   } catch (err) {
     return { text: err instanceof Error ? err.message : String(err), isError: true };

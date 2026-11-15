@@ -19,6 +19,7 @@ import {
   reconcileWiring,
   wiredHostIds,
   type WiringOpts,
+  type WiringRefresh,
 } from './upkeep.js';
 
 export interface UpkeepResult {
@@ -74,6 +75,19 @@ export function shouldMoveToTrail(repo: string, env: NodeJS.ProcessEnv = process
   if (env.GRAFT_NO_TRAIL_SWITCH === '1') return false;
   // Claude Code's wiring is what says a repo is on trail, so only a repo with it moves.
   return wiredHostIds(repo).includes('claude') && !repoWiredForTrail(repo) && trailOnPath(env);
+}
+
+/**
+ * What re-running `init` here would do to the agent wiring, done now: the hosts
+ * already wired, with the flags `init` was given (replayed from the stamp), no
+ * graph build and no move to trail. Unlike the session-start reconcile, it runs
+ * whatever the stamp says: the caller has just found an instruction file that
+ * differs from what this graft writes, which the stamp cannot see for a shared
+ * file's fenced block (see hosts/auto-init.ts). Null when the repo has no
+ * wiring, or on any failure.
+ */
+export function refreshOutdatedWiring(repo: string, current: string): WiringRefresh | null {
+  return reconcileWiring(repo, current, { rewrite: rewriteWiring, drifted: () => true, toTrail: () => false });
 }
 
 /**

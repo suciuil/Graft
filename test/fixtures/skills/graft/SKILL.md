@@ -225,7 +225,13 @@ When a saving could not be priced because graft knows no price for the model,
 the example tally also gets a `⚠️ Run the 'graft prices update' command: recommended (…)` line.
 Keep it under the tally too: `graft prices update` fetches LiteLLM's public
 price catalog once and stores it locally, so later savings are priced in dollars.
-Don't run it yourself unless asked.
+Don't run it yourself unless asked. When graft has just updated the model prices
+by itself to price the model (the user chose that), the example tally gets an
+`ℹ️ The model prices have just been updated automatically from LiteLLM, to get the price of …`
+line instead (or `ℹ️ The model prices are being updated automatically …` while
+that download is still running, or `ℹ️ No known price for …` when even those
+prices list none).
+Keep it under the tally the same way.
 
 When the agent instructions in this repo are not the ones the installed graft
 version writes (graft was updated since `graft init` last ran here), the example
@@ -236,7 +242,7 @@ commits.
 
 If `graft init` or `graft build` (including `graft build --deep`) fails with an
 error, suggest the user report it at the issue tracker of this graft fork,
-https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues,
+https://github-ct.int.automotive-wan.com/suciui/graft/issues,
 with all the details: the exact command, the full error output, the graft
 version (`graft --version`), the operating system, and what was being done
 when it failed.

@@ -2,8 +2,10 @@
  * A local copy of LiteLLM's public model price catalog, for the models graft's
  * built-in table (`price.ts`) has never heard of.
  *
- * Fetched only by an explicit `graft prices update`. Nothing here ever reaches
- * the network on its own, and the request itself carries nothing about the user:
+ * Fetched by `graft prices update`, or by `price-auto-update.ts` for a model
+ * graft has no price for, when the user chose that (the installer's question
+ * about automatic price updates, `graft prices auto`). Nothing in this file reaches the network on
+ * its own, and the request itself carries nothing about the user:
  * it is one anonymous GET of the WHOLE catalog, so not even the model being
  * priced leaves the machine. Every lookup afterwards is local.
  *

@@ -29,6 +29,7 @@ import {
 } from "./ai/llm-settings.js";
 import { startProgressLine } from "./util/progress-line.js";
 import { chooseDatabricksDeepModel } from "./ai/databricks-setup.js";
+import { detectDeepDefaultModel } from "./ai/deep-default-model.js";
 import { DATABRICKS_BASE_URL, databricksTokenHint, type DatabricksListing } from "./ai/llm/databricks.js";
 import type { ProviderKind } from "./ai/llm/factory.js";
 import { formatCheckReport } from "./context/check.js";
@@ -46,6 +47,7 @@ import {
   priceUpdateNotice,
   updatePriceCatalog,
 } from "./context/price-catalog.js";
+import { autoPricesState, withAutoPrices } from "./context/price-auto-update.js";
 import { hostModelFor } from "./hosts/host-model.js";
 import { CODEX_COPY, codexStatusLines, codexTrustLine } from "./hosts/codex-trust.js";
 import { hostIds, hostWiringName } from "./hosts/registry.js";
@@ -103,8 +105,8 @@ import { buildGraphWithProgress } from "./claude/build-progress.js";
 import { installBrainsServer, installCursorBrainsServer, removeBrainsServer, removeCursorBrainsServer } from "./hosts/claude-global.js";
 import { upsertCodexToml } from "./hosts/mcp-config.js";
 import { homedir } from "node:os";
-import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, readPackageName, resolvePackageJsonPath, runUpgrade } from "./cli-meta.js";
-import { ABOUT_TARGETS, ISSUES_URL, PROJECT_URL, fileUri, findChangelog, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
+import { formatVersionReport, getNpmViewVersion, npmInstallLine, readCurrentVersion, readPackageName, resolvePackageJsonPath, upgradeDisabledMessage } from "./cli-meta.js";
+import { ABOUT_TARGETS, FORK_HOMEPAGE_URL, ISSUES_URL, PROJECT_URL, fileUri, findChangelog, formatAbout, openLocalFile, parseAboutTarget } from "./about.js";
 import { armReportHint, noteFailureForReport, reportHintApplies } from "./report-hint.js";
 import { nativeFallbackNotice } from "./graph/native.js";
 import {
@@ -150,6 +152,7 @@ import {
   type EnvDeps,
 } from "./env-cli.js";
 import { runLocationCommand } from "./context/store-location.js";
+import { storeLocationAdvice } from "./context/store-space.js";
 import { latestSession, liveClaudeSession, formatSessionStats, sessionInputRate, sessionPricing } from "./claude/session-metrics.js";
 import { readRepoRegistry, registerDiscovered, repoRegistryPath } from "./claude/repo-registry.js";
 import { knownFolders } from "./hosts/known-folders.js";
@@ -196,9 +199,8 @@ import type { AskResult } from "./ask/ask.js";
 import { claimedSummary, setClaimListener, setCompactNudge, setDeepDue, setInitDue, setModelTable, setPricing, setRepoRoot, setTurnModels, stderrSavingsCopy, tallyWarnings } from "./context/savings.js";
 import { calledRecently, formatLastCalls, lastTurnCallsBy, readRecentCalls, recordRecentCall, summedTally, turnModels } from "./context/recent-calls.js";
 import { callerKey } from "./context/caller.js";
-import { initDueReason } from "./hosts/drift.js";
-import { formatUpdateNudge, maybeRefreshInBackground, readStamp, readUpdateCache, refreshUpdateCache, wiredHostIds, wiringOpts, writeStamp } from "./upkeep.js";
-import { shouldMoveToTrail } from "./upkeep-run.js";
+import { settleInitDue } from "./hosts/auto-init.js";
+import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   countBucket,
   errorCode,
@@ -264,9 +266,23 @@ function grouped(c: Command, heading: string): Command {
  */
 let queryNote: { repo?: string; hit?: "yes" | "no"; command?: string; notes?: string } = {};
 
+/** How long a CLI call's automatic price download may take (see `noteQuery`). */
+const CLI_PRICES_TIMEOUT_MS = 5_000;
+
 /** Record the repo a query ran against, and pass it straight through so call
- *  sites stay one line. */
-function noteQuery(dir: string): string {
+ *  sites stay one line.
+ *
+ *  `autoPrices: false` is for the long-running commands (`mcp`, `viz`): they
+ *  answer nothing with this pricing (each MCP tool call prices itself in
+ *  `callToolScoped`), so waiting on a price download before the server reads
+ *  its first message would only risk the host's startup timeout, and would
+ *  spend the "prices just updated" line on a call nobody sees.
+ *
+ *  A CLI process cannot leave a download running after its answer the way the
+ *  MCP server does (Node would stay up until it ended, and the agent's shell
+ *  waits for that), so here the download itself is capped at
+ *  {@link CLI_PRICES_TIMEOUT_MS} and the call waits for it to end. */
+async function noteQuery(dir: string, opts: { autoPrices?: boolean } = {}): Promise<string> {
   queryNote.repo = dir;
   // The backstop for a terminal-driven agent that passed no `--agent-model`,
   // which in practice is most of them. GitHub Copilot is the case that needs it:
@@ -285,7 +301,15 @@ function noteQuery(dir: string): string {
   setHostModel(hostModelFor(dir));
   // Every retrieval command funnels through here, which makes it the one place
   // that can price this session's tokens before a formatter needs the number.
-  setPricing(sessionPricing(dir));
+  // A named model graft has no price for is priced by updating the LiteLLM
+  // prices first, when the user chose that (the installer's automatic updates question,
+  // or `graft prices auto on`); see `withAutoPrices`.
+  const pricing = sessionPricing(dir);
+  setPricing(
+    opts.autoPrices === false
+      ? pricing
+      : await withAutoPrices(pricing, { timeoutMs: CLI_PRICES_TIMEOUT_MS, waitMs: CLI_PRICES_TIMEOUT_MS + 2_000 }),
+  );
   setRepoRoot(dir);
   // Deliberately NO per-model table here. That table is only correct for a host
   // whose model list graft can read, which today means Kilo — and Kilo reaches
@@ -365,7 +389,7 @@ program
   )
   .optionsGroup("LLM options (used by `build --deep`; or set the env vars once):")
   .option("--provider <name>", "LLM wire format: openai | anthropic | litellm | orcarouter | llm-incubator (env GRAFT_PROVIDER)")
-  .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL; default claude-haiku-5-5)")
+  .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL; default: the latest Claude Haiku the endpoint serves, else claude-haiku-5-5)")
   .option("--api-key <key>", "provider API key (env GRAFT_API_KEY, then ANTHROPIC_AUTH_TOKEN)")
   .option("--base-url <url>", "LLM endpoint URL (env GRAFT_BASE_URL, then ANTHROPIC_BASE_URL; default: the Databricks AI Gateway)")
   // graft's own help (installGraftHelp, below) carries examples on every command.
@@ -385,9 +409,10 @@ interface GlobalOpts {
 /**
  * Endpoint, key and model picked for this run by an interactive step (the endpoint
  * choice and auth recovery of src/ai/llm-auth.ts, the Databricks model choice of
- * `build --deep`) that replace a value given as a CLI flag.
+ * `build --deep`) that replace a value given as a CLI flag; and the model `build
+ * --deep` found to use when none is configured (src/ai/deep-default-model.ts).
  */
-let llmOverride: Pick<EngineConfig, "apiKey" | "model" | "baseUrl"> = {};
+let llmOverride: Pick<EngineConfig, "apiKey" | "model" | "baseUrl" | "defaultModel"> = {};
 
 /** Config drawn from the global CLI flags (env + defaults fill the rest). */
 function cliConfig(): EngineConfig {
@@ -398,6 +423,8 @@ function cliConfig(): EngineConfig {
     model: llmOverride.model ?? o.model,
     apiKey: llmOverride.apiKey ?? o.apiKey,
     baseUrl: llmOverride.baseUrl ?? o.baseUrl,
+    // Set only when `build --deep` found the latest Claude Haiku the endpoint serves.
+    ...(llmOverride.defaultModel ? { defaultModel: llmOverride.defaultModel } : {}),
   };
 }
 
@@ -498,7 +525,12 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
   const deep = deepNoticeFor(root, { contextDir: globalDir, children: ws?.children, mayStart: !disabled });
   if (deep) console.error(deep.note);
   setDeepDue(deep?.reason ?? null);
-  setInitDue(initDueReason(root, { children: ws?.children }));
+  // Outdated agent instructions are refreshed here when that is safe (see
+  // hosts/auto-init.ts); the tally recommends `graft init` only when it was not.
+  // `--no-refresh` writes nothing: the reason is still reported.
+  const init = settleInitDue(root, { children: ws?.children }, process.env, !disabled);
+  if (init.note) console.error(init.note);
+  setInitDue(init.reason);
 }
 
 /** Attached to every query command: `--no-refresh` answers from the graph exactly
@@ -761,7 +793,7 @@ grouped(program.command("issues"), GROUP.setup)
 
 grouped(program.command("about"), GROUP.setup)
   .alias("info")
-  .description(`Where to read about ${brand()}: the project homepage, the changelog of the changes in this fork, and where to report issues with this fork`)
+  .description(`Where to read about ${brand()}: the project homepage, the fork homepage (the changelog of the changes in this fork) and its copy in this build, and where to report issues with this fork`)
   .argument("[target]", `open one in your browser: ${ABOUT_TARGETS.join(" or ")}`)
   .action((raw: string | undefined) => {
     const changelog = findChangelog(resolvePackageJsonPath(import.meta.url));
@@ -775,12 +807,13 @@ grouped(program.command("about"), GROUP.setup)
       openBrowser(PROJECT_URL);
       return;
     }
-    if (target === "fork") {
-      if (!changelog) {
-        console.error("✗ the fork changelog is not in this installation (expected docs/changelog.html next to package.json).");
-        process.exit(1);
-        return;
-      }
+    if (target === "web" || (target === "fork" && !changelog)) {
+      if (target === "fork") console.log("The fork changelog is not in this installation (expected docs/changelog.html next to package.json); opening the fork homepage instead.");
+      console.log(`Fork homepage: ${FORK_HOMEPAGE_URL}`);
+      openBrowser(FORK_HOMEPAGE_URL);
+      return;
+    }
+    if (target === "fork" && changelog) {
       console.log(`Fork changelog: ${changelog}`);
       console.log(`                ${fileUri(changelog)}`);
       openLocalFile(changelog);
@@ -790,35 +823,16 @@ grouped(program.command("about"), GROUP.setup)
     process.exit(1);
   });
 
-grouped(program.command("upgrade"), GROUP.setup)
-  .description(`Upgrade the globally installed ${brand()} to the latest version on npm`)
+// Disabled in this fork: new versions ship as the offline installer kit, so the
+// command installs nothing (no npm install, no trail package, no move to trail)
+// and points to the release page. Hidden from the help list, like `telemetry`;
+// `graft upgrade --help` still explains it.
+grouped(program.command("upgrade", { hidden: true }), GROUP.setup)
+  .description("Disabled in this fork: download the latest offline installer kit from the fork's release page instead")
   .action(() => {
-    const result = runUpgrade(import.meta.url);
-    console.log(formatUpgradeReport(result));
-    if (result.ran && !result.ok) process.exit(1);
-    if (!TRAIL && result.ok && result.trailVersion) moveHereToTrail(process.cwd());
+    console.error(upgradeDisabledMessage());
+    process.exit(1);
   });
-
-/**
- * After `graft upgrade` brought the trail command along, the repo it ran in
- * moves to trail now, with the agents and flags its last init chose, and its
- * past sessions are read for learnings. Every other repo wired as graft moves
- * the next time a session opens in it (upkeep-run.ts).
- */
-function moveHereToTrail(dir: string): void {
-  const root = checkoutRoot(dir);
-  if (!root || !shouldMoveToTrail(root)) return;
-  const stamp = readStamp(root);
-  const hosts = [...new Set([...(stamp?.hosts ?? []), ...wiredHostIds(root)])];
-  const o = wiringOpts(stamp);
-  const flags = [o.global ? null : "--no-global", o.mcp ? null : "--no-mcp", o.hooks ? null : "--no-hooks", o.statusline ? null : "--no-statusline"].filter(
-    (f): f is string => f !== null,
-  );
-  // An `--agents auto` run moves the same way: the main agents' repo files, laptop settings for the ones installed.
-  const agents = o.laptop ? ["auto"] : hosts;
-  console.log(`· moving this repo to trail: trail init ${agents.length ? `--agents ${agents.join(" ")} ` : ""}${flags.join(" ")}`.trimEnd());
-    spawnSync("trail", ["init", root, "--agents", ...agents, ...flags], { stdio: "inherit", windowsHide: true });
-}
 
 grouped(program.command("build"), GROUP.setup)
   .description(
@@ -1041,6 +1055,22 @@ grouped(program.command("build"), GROUP.setup)
     if (Object.keys(buildConfigPatch).length > 0) {
       for (const root of roots) patchBuildConfig(root, buildConfigPatch);
     }
+    // The folder graft keeps generated files in short of room for this build (on
+    // drive C: under 20 GB free, or anywhere too little for the estimated map):
+    // suggest `graft files location` before anything is built. Not in an
+    // automatic run, which nobody watches.
+    if (!process.env[AUTO_DEEP_CHILD_ENV]) {
+      const globalDir = program.opts<GlobalOpts>().dir;
+      const envDir = process.env.GRAFT_DIR;
+      const advice = storeLocationAdvice(
+        roots.map((root) => {
+          const override = (root === buildRoot ? globalDir : undefined) ?? (envDir ? resolve(root, envDir) : undefined);
+          return { root, mapDir: contextDirFor(root, override) };
+        }),
+        onlyDirs,
+      );
+      for (const line of advice) console.error(line);
+    }
     // Databricks gateway: check the key, then use the model already set when the
     // gateway serves it; only otherwise ask which of its models to use.
     let deepSkip: string | undefined;
@@ -1060,6 +1090,9 @@ grouped(program.command("build"), GROUP.setup)
       // In a terminal, a rejected key / unreachable endpoint is fixed here (change or
       // skip the URL and the key) instead of failing every LLM call of the build.
       let listings: DatabricksListing[] | undefined;
+      /** Model ids the auth check listed; `listingTried` tells "could not list" from "did not ask". */
+      let listedIds: string[] | undefined;
+      let listingTried = false;
       if (isInteractive()) {
         // Databricks: every route when the model choice below runs (it reuses the listings); with
         // --model it does not, and the configured model's route alone answers the check.
@@ -1073,9 +1106,29 @@ grouped(program.command("build"), GROUP.setup)
         else if (auth.status !== "failed") {
           applyLlmChanges(auth.changes);
           listings = auth.listings;
+          listedIds = auth.status === "ok" ? auth.ids : undefined;
+          listingTried = true;
         }
       }
       if (!deepSkip) {
+        // No model configured (no --model, GRAFT_MODEL unset): the latest Claude Haiku the
+        // endpoint serves, not a fixed id. Graft's built-in default stays when it lists none.
+        const detected = await detectDeepDefaultModel({
+          config: cliConfig(),
+          env: process.env,
+          ids: listedIds,
+          listings,
+          listingFailed: listingTried && !listedIds && !listings,
+        });
+        if (detected) {
+          llmOverride = { ...llmOverride, defaultModel: detected.model };
+          // The Databricks model choice below names the model it uses itself.
+          if (!resolveConfig(cliConfig()).databricks) {
+            console.error(
+              `ℹ GRAFT_MODEL is not set: using ${detected.model}, the latest Claude Haiku ${detected.endpoint} serves — \`${cmd("graft model")}\` picks another.`,
+            );
+          }
+        }
         const choice = await chooseDatabricksDeepModel({
           config: cliConfig(),
           env: process.env,
@@ -1319,14 +1372,12 @@ grouped(program.command("build"), GROUP.setup)
       // A part's map: where maps are kept is said once, after all the parts.
       if (part) {
         if (!isOutside(target, g.contextDir)) console.log(`  ${rel}/ is a local cache.`);
-      } else if (isOutside(target, g.contextDir)) {
-        // The profile store (or a --dir/GRAFT_DIR elsewhere): nothing in the repo to ignore.
-        console.log(`  the map is kept outside the repo, so nothing in the repo changed; teammates run \`${cmd("graft build")}\` to get their own.`);
-      } else if (process.env.GRAFT_NO_GITIGNORE) {
+      } else if (!isOutside(target, g.contextDir) && process.env.GRAFT_NO_GITIGNORE) {
         console.log(`  ${rel}/ is a local cache: add it to your gitignore if you want it untracked.`);
       }
       // Upstream also printed "<map>/ is git-ignored (added automatically), a local cache; teammates run
-      // `graft build` to get their own." after every build. This fork leaves that tip out.
+      // `graft build` to get their own." after every build, and this fork used to say "the map is kept
+      // outside the repo, so nothing in the repo changed" for a map in the profile store. Both are left out.
 
       // A build that found no files used to end on the footer above, a "✓ 0 nodes"
       // that read like a broken install. The usual cause is a folder git-ignored by
@@ -1480,8 +1531,6 @@ grouped(program.command("build"), GROUP.setup)
       console.error("");
       if (r.index) {
         console.log(`✓ one map per part: ${r.listed.length} part(s) indexed → ${r.index}`);
-        console.log(`  queries from ${what} search them all; \`${cmd("graft build")}\` here rebuilds every part`);
-        if (isOutside(target, r.index)) console.log("  the maps are kept outside the repo, so nothing in the repo changed");
       } else {
         console.error("✗ no part was built, so the map here was left as it was");
       }
@@ -1539,7 +1588,7 @@ grouped(program.command("ask"), GROUP.find)
   .action(async (query: string, dirArg: string | undefined, opts: { limit: string; source?: boolean; full?: boolean; in?: string; json?: boolean; refresh?: boolean; graphRank?: boolean }) => {
     // The prompt hook passes what the person typed on stdin, out of sight of `ps`.
     if (query === "-") query = readFileSync(0, "utf8").trim();
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg));
     await refreshBefore(dir, opts);
     const askGlobalDir = program.opts<GlobalOpts>().dir;
     if (readWorkspace(dir, askGlobalDir)) {
@@ -1578,7 +1627,7 @@ grouped(program.command("skeleton"), GROUP.find)
   .option("--json", "output the result as JSON")
   .option(...NO_REFRESH_FLAG)
   .action(async (file: string, dirArg: string | undefined, opts: { json?: boolean; refresh?: boolean }) => {
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg));
     await refreshBefore(dir, opts);
     const { skeleton, formatSkeleton } = await import("./ask/ask.js");
     const globalOpts = program.opts<{ dir?: string }>();
@@ -1613,7 +1662,7 @@ async function runCheckCommand(
   label: string,
 ): Promise<void> {
     warnUnsupportedExtensions(opts.extensions);
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg));
     const checkGlobalDir = program.opts<GlobalOpts>().dir;
     if (readWorkspace(dir, checkGlobalDir)) {
       await runWorkspaceCheck(dir, checkGlobalDir);
@@ -2137,6 +2186,14 @@ pricesCommand
           `fetched ${s.bundled.fetchedAt.slice(0, 10)}, ${days(s.bundled.ageDays)}`,
       );
     }
+    const auto = autoPricesState();
+    const autoWhy = {
+      off: `off (\`${cmd("graft prices auto on")}\` turns it on)`,
+      explicit: `on (\`${cmd("graft prices auto")}\`)`,
+      installer: `on (you chose automatic price updates in the installer${auto.date ? ` on ${auto.date}` : ""}; \`${cmd("graft prices auto off")}\` turns it off)`,
+      "no-consent": `off (not chosen in the installer; \`${cmd("graft prices auto on")}\` turns it on)`,
+    }[auto.why];
+    console.log(`automatic update when a model has no known price: ${autoWhy}`);
     if (model) {
       const builtin = listRate({ id: model, confidence: "certain" });
       if (builtin && !builtin.catalogFetchedAt) {
@@ -2408,7 +2465,7 @@ program
     // in the command the caller just typed, and telling them to go build an index
     // first sends them off to fix the wrong thing.
     const tabs = parseTabs(opts.tabs);
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg), { autoPrices: false });
     const { existsSync } = await import("node:fs");
     const { resolve, basename } = await import("node:path");
     const { spawn } = await import("node:child_process");
@@ -2469,7 +2526,7 @@ program
       startMcpServer(process.cwd(), undefined, currentVersion, { brainsOnly: true });
       return;
     }
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg), { autoPrices: false });
     const globalOpts = program.opts<{ dir?: string }>();
     startMcpServer(dir, globalOpts.dir, currentVersion);
   });
@@ -2491,7 +2548,7 @@ grouped(program.command("callers"), GROUP.find)
       dirArg: string | undefined,
       opts: { direction?: string; depth?: string; in?: string; json?: boolean; refresh?: boolean },
     ) => {
-      const dir = noteQuery(queryRoot(dirArg));
+      const dir = await noteQuery(queryRoot(dirArg));
       await refreshBefore(dir, opts);
       const globalOpts = program.opts<{ dir?: string }>();
       if (!opts.json && readWorkspace(dir, globalOpts.dir)) {
@@ -2531,7 +2588,7 @@ grouped(program.command("blast"), GROUP.ci)
   .option("--pr-author <who...>", "GitHub login, git name or email of the PR author, so they are left out of their own suggestions")
   .option(...NO_REFRESH_FLAG)
   .action(async (dirArg: string | undefined, opts: { base?: string; depth?: string; format?: string; name?: boolean; exportViz?: string; title?: string; owners?: boolean; prAuthor?: string[]; refresh?: boolean }) => {
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg));
     await refreshBefore(dir, opts);
     const { runBlastCommand } = await import("./blast/blast-cli.js");
     await runBlastCommand(dir, {
@@ -2562,7 +2619,7 @@ grouped(program.command("grep"), GROUP.find)
       dirArg: string | undefined,
       opts: { ignoreCase?: boolean; fixed?: boolean; in?: string; json?: boolean; refresh?: boolean },
     ) => {
-      const dir = noteQuery(queryRoot(dirArg));
+      const dir = await noteQuery(queryRoot(dirArg));
       await refreshBefore(dir, opts);
       const globalOpts = program.opts<{ dir?: string }>();
       if (readWorkspace(dir, globalOpts.dir)) {
@@ -2591,7 +2648,7 @@ grouped(program.command("map"), GROUP.find)
   .option("--json", "output as JSON")
   .option(...NO_REFRESH_FLAG)
   .action(async (dirArg: string | undefined, opts: { json?: boolean; maxDirs?: string; refresh?: boolean }) => {
-    const dir = noteQuery(queryRoot(dirArg));
+    const dir = await noteQuery(queryRoot(dirArg));
     const root = resolve(dir);
     const globalOpts = program.opts<{ dir?: string }>();
     let maxDirsW: number | undefined;
@@ -3299,7 +3356,7 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
         console.error(`· Trail's page is following along · ${started.url}`);
       }
       // Started as graft or by an old shim (asksForTrail): the repo is set up for trail, whose commands its agents get told to run.
-      if (!trailOnPath()) console.error(`⚠ the trail command isn't installed here · npm install -g ${PACKAGE_FOR.trail} so your agents can run it`);
+      if (!trailOnPath()) console.error(`⚠ the trail command isn't installed here · ${npmInstallLine(PACKAGE_FOR.trail)} so your agents can run it`);
     }
 
     const wantClaude = ids.includes("claude");
@@ -3526,12 +3583,14 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
       console.error(`· restart your agents so a new session picks up ${brand()}`);
       if (TRAIL && !tops.includes(".trail/")) tops.push(".trail/");
       // Only what git sees as new or changed: a teammate's init over committed files has nothing to commit.
-      for (const root of codeWs ? roots : [repo]) {
+      // Upstream graft also printed "· commit .claude/ .mcp.json to share it: graft/ stays local and
+      // git-ignored" here. This fork leaves that tip out; only trail's commit hint remains.
+      if (TRAIL) for (const root of codeWs ? roots : [repo]) {
         const kids = childrenOf.get(root)!;
         const where = codeWs ? ` in ${label(root)}` : "";
         // Outside git there is nothing to commit to, and `git status` failing
         // below would make every path look changed.
-        if (TRAIL && !kids.length && !isGitWorkTree(root)) {
+        if (!kids.length && !isGitWorkTree(root)) {
           console.error(codeWs ? `${NOT_GIT_LINE} (${label(root)})` : NOT_GIT_LINE);
           continue;
         }
@@ -3541,9 +3600,7 @@ async function runInitCommand(dir: string, opts: InitOptions, progress?: InitPro
         });
         if (changedTops.length)
           console.error(
-            TRAIL
-              ? `· commit ${changedTops.slice(0, 5).join(" and ")}${changedTops.length > 5 ? ` +${changedTops.length - 5} more` : ""}${where} once: after that, teammates' Claude reads your learnings even before they install trail`
-              : `· commit ${changedTops.slice(0, 5).join(" ")}${changedTops.length > 5 ? ` +${changedTops.length - 5} more` : ""}${where} to share it: graft/ stays local and git-ignored`,
+            `· commit ${changedTops.slice(0, 5).join(" and ")}${changedTops.length > 5 ? ` +${changedTops.length - 5} more` : ""}${where} once: after that, teammates' Claude reads your learnings even before they install trail`,
           );
       }
     }
@@ -4564,7 +4621,7 @@ if (TRAIL) {
     build: "rebuild the code map · --check fails if it's stale",
     status: "code map, learnings and tokens saved",
     where: "where this repo's map and settings are kept, in your profile or the repo",
-    upgrade: "install the latest trail",
+    upgrade: "disabled in this fork: get the latest installer kit from the release page",
     uninstall: "remove everything trail or graft wrote to this repo",
     telemetry: "anonymous usage stats: permanently off",
     check: "check your diff against this repo's learnings and yours",
@@ -4596,8 +4653,12 @@ for (const name of ["/h", "/help"]) {
       let target: Command = program;
       for (const word of words) {
         const next = (target.commands as Command[]).find((c) => c.name() === word || c.aliases().includes(word));
-        if (!next) break;
-        target = next;
+        if (!next) {
+          if (TRAIL) break;
+          // `graft help nope`: the same error and hint as `graft nope`, not the help.
+          target.error(`error: unknown command '${word}'`, { exitCode: 1, code: "commander.unknownCommand" });
+        }
+        target = next!;
       }
       target.outputHelp();
     });
@@ -4605,9 +4666,11 @@ for (const name of ["/h", "/help"]) {
 if (!TRAIL) installGraftHelp(program);
 
 // Commander's implicit `help <command>` only looks one level down, so
-// `graft help config exclude-dirs` would print `config`'s help. The hidden `/help`
-// above walks the whole path; hand a multi-word `help` to it.
-if (process.argv[2] === "help" && process.argv.length > 4) process.argv.splice(2, 1, "/help");
+// `graft help config exclude-dirs` would print `config`'s help, and it prints the
+// whole help as an error for `graft help nope`. The hidden `/help` above walks the
+// whole path and reports an unknown command; hand `help <command…>` to it (trail:
+// only a multi-word one).
+if (process.argv[2] === "help" && process.argv.length > (TRAIL ? 4 : 3)) process.argv.splice(2, 1, "/help");
 
 // Only global options and no command (`graft --model x`): say what is missing
 // rather than dumping the whole help as an error.

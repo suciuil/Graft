@@ -373,7 +373,23 @@ export interface Pricing {
   rate: InputRate | null;
   /** The model this was resolved for, wording material for either branch. */
   model: AgentModel;
+  /** Set when graft tried to price {@link model} by updating the LiteLLM
+   * catalog automatically on this call (`price-auto-update.ts`), so the tally
+   * can say so instead of asking the user to run `graft prices update`. */
+  autoUpdate?: AutoPriceUpdate;
 }
+
+/** What an automatic price update did for this call's model. */
+export type AutoPriceUpdate =
+  /** Downloaded just now; the rate is set when that priced the model. */
+  | { outcome: 'updated'; fetchedAt: string }
+  /** Not downloaded: the catalog was updated recently and lists no price for the model. */
+  | { outcome: 'current'; fetchedAt: string }
+  /** A download is still running in the background: this call stays unpriced,
+   * a later one is priced once the download has stored the catalog. */
+  | { outcome: 'pending' }
+  /** The download failed; the model stays unpriced. */
+  | { outcome: 'failed'; reason: string };
 
 /**
  * The blended rate this session has actually been paying, or null when nothing

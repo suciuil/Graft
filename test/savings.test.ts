@@ -273,6 +273,48 @@ test('the line depends only on whether a price is known, not on the stored catal
   clearPricing();
 });
 
+test('prices just updated automatically: the tally says so, for the model, and never suggests `graft prices update`', () => {
+  const model = certain('acme-new', 'Acme New');
+  const rate = { usdPerMtok: 3, measured: false, model: 'acme-new', label: 'Acme New', catalogFetchedAt: '2026-11-15T04:00:00.000Z' };
+  setDeepDue('no summaries yet');
+  setPricing({ rate, model, autoUpdate: { outcome: 'updated', fetchedAt: '2026-11-15T04:00:00.000Z' } });
+  let f = footer();
+  const [tally, info, deep] = f.slice(f.indexOf('\u{1F331}')).split('  \n');
+  assert.equal(tally, '🌱 graft saved ~N tokens (~$X for Acme New) this turn');
+  assert.equal(info, 'ℹ️ The model prices have just been updated automatically from LiteLLM, to get the price of Acme New');
+  assert.equal(deep, "⚠️ Run the 'graft build --deep' command — recommended (no summaries yet).");
+  assert.match(f, /This call is worth <\$0\.01 at Acme New list rates/);
+  assert.match(f, /Keep the automatic price update line under the tally/);
+  assert.doesNotMatch(f, /prices update/);
+  setDeepDue(null);
+
+  // Updated, and LiteLLM still lists no price: tokens only, said as such.
+  setPricing({ rate: null, model, autoUpdate: { outcome: 'updated', fetchedAt: '2026-11-15T04:00:00.000Z' } });
+  f = footer();
+  assert.match(f, /by this turn  \nℹ️ The model prices have just been updated automatically from LiteLLM, to get the price of Acme New, but LiteLLM lists no price for it: its savings are shown in tokens only\.$/);
+  assert.doesNotMatch(f, /prices update/);
+
+  // Updated a little earlier (no new download): still no suggestion to run it.
+  setPricing({ rate: null, model, autoUpdate: { outcome: 'current', fetchedAt: '2026-11-15T04:00:00.000Z' } });
+  f = footer();
+  assert.match(f, /ℹ️ No known price for Acme New: the model prices were updated automatically from LiteLLM \(2026-11-15\) and list none for it/);
+  assert.doesNotMatch(f, /prices update/);
+
+  // Still downloading in the background: said as such, no suggestion to run it.
+  setPricing({ rate: null, model, autoUpdate: { outcome: 'pending' } });
+  f = footer();
+  assert.match(f, /ℹ️ The model prices are being updated automatically from LiteLLM, to get the price of Acme New: savings are priced in dollars once that download has finished/);
+  assert.match(f, /Keep the automatic price update line under the tally/);
+  assert.doesNotMatch(f, /prices update/);
+
+  // A failed download is the one case where running the command later helps.
+  setPricing({ rate: null, model, autoUpdate: { outcome: 'failed', reason: 'HTTP 503 from\nsomewhere' } });
+  f = footer();
+  assert.match(f, /⚠️ Run the 'graft prices update' command — recommended \(no known price for Acme New, and updating the model prices automatically from LiteLLM failed: HTTP 503 from somewhere\)/);
+  clearPricing();
+  assert.doesNotMatch(footer(), /automatically/, 'a cleared pricing forgets the update');
+});
+
 test('a priced saving never suggests `graft prices update`', () => {
   setPricing(pricingFor(certain('claude-opus-5')));
   assert.doesNotMatch(footer(), /prices update/);

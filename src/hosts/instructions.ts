@@ -147,6 +147,12 @@ and costs tokens.
 When a saving could not be priced because graft knows no price for the model,
 the tally also gets a "⚠️ Run the 'graft prices update' command — recommended (…)" line. Keep it
 under the tally too; do not run \`graft prices update\` yourself unless asked.
+When graft has just updated the model prices by itself to price the model (the
+user chose that), the tally gets an "ℹ️ The model prices have just been updated
+automatically from LiteLLM, to get the price of …" line (or "ℹ️ The model
+prices are being updated automatically …" while that download is still running,
+or "ℹ️ No known price for …" when even those prices list none) instead. Keep it
+under the tally the same way.
 When the agent instructions in this repo are not the ones the installed graft
 version writes (graft was updated since \`graft init\` last ran here), the tally
 also gets a "⚠️ Run the 'graft init' command — recommended (…)" line. Keep it under the tally the

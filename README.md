@@ -136,7 +136,7 @@ Nothing breaks. The code map you know is now called the graft map, and it is one
 
 `graft` and `@nanonets/graft` run the same code as `trail`, and print what they always printed.
 
-Already have graft? `graft upgrade` adds the `trail` command next to it.
+Already have graft? In this fork `graft upgrade` is disabled and the `trail` package is not shipped: install new versions from the offline installer kit on the [fork's release page](https://github-ct.int.automotive-wan.com/suciui/Graft/releases).
 
 Repos that graft set up move to trail on their own: once the `trail` command is installed, each one moves the first time you open Claude Code in it. To move one right away, run `trail init` in it. Commit what changes so your teammates move too.
 
@@ -775,7 +775,8 @@ trail config follow-nested-repos on|off       # same as build --[no-]follow-nest
                                      # every command takes --repo <dir>; a change applies at the next build or query refresh
 
 trail prices update                  # fetch LiteLLM's public model price catalog (one anonymous GET) into ~/.graft/prices.json,
-                                     # so savings for models the built-in table does not list are priced in dollars (kept until the next update)
+                                     # so savings for models the built-in table does not list are priced in dollars (kept until the next update);
+                                     # run by itself when a model has no known price, if you chose so in the installer (`prices auto`)
 trail prices status [model]          # whether a local catalog is stored and how old it is; with a model, the price used for it
 
 trail savings [period] [dir]         # tokens and dollars saved in this repo, per model: all time, or a yyyy / yyyy-mm / yyyy-mm-dd period
@@ -787,7 +788,7 @@ trail savings --last [dir]           # the latest turn's graft calls and the sum
                                      # the savings line out of the output (e.g. piped it through Select-Object -First or head)
 
 trail status [dir]                   # the graft map, learnings and tokens saved, on one screen
-trail upgrade                        # npm install -g the latest published version
+trail upgrade                        # disabled in this fork: install the latest offline kit from the fork's release page
                                      # a new version is announced automatically (checked once a day);
                                      # after upgrading, the next session refreshes this repo's wiring itself
 trail uninstall [dir]                # remove every file and config entry it wrote here (the inverse of init)
@@ -831,11 +832,14 @@ trail api openrouter-model [id]      # GRAFT_OPENROUTER_MODEL: older name for GR
 trail api system-ca [on|off]         # GRAFT_SYSTEM_CA: trust the OS certificates (corporate proxies)
 trail prices file [path]             # GRAFT_PRICES_FILE
 trail prices bundled [on|off]        # GRAFT_BUNDLED_PRICES: the price snapshot shipped with graft
+trail prices auto [on|off]           # GRAFT_PRICES_AUTO_UPDATE: run `prices update` by itself when a model has no known price
+                                     # (default on once you chose automatic price updates in the Windows installer)
 trail refresh auto [on|off]          # GRAFT_NO_REFRESH: rebuild the graph before a query when the code changed
 trail refresh hash [on|off]          # GRAFT_REFRESH: find changed files by their bytes, not their times
 trail refresh seed [on|off]          # GRAFT_NO_SEED: start a new worktree from its parent's graph
 trail refresh gitignore [on|off]     # GRAFT_NO_GITIGNORE · refresh ignore-file [on|off]: GRAFT_NO_IGNORE
 trail agents gate [on|off]           # GRAFT_NO_GATE · agents statusline / npx / trail-switch
+trail agents auto-init [on|off]      # GRAFT_NO_AUTO_INIT: update outdated agent instructions by itself instead of recommending `init`
 trail output savings-copy [on|off]   # GRAFT_STDERR_SAVINGS · output browser
 trail env list [--set]               # all of them: the command, the variable, its default, its value here and saved
 trail env get|set|unset <NAME> ...   # the same by the variable's name

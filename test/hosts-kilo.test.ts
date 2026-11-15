@@ -9,12 +9,14 @@ import { join } from 'node:path';
 import { runHostsInit } from '../src/hosts/init.js';
 import { KILO_RULE_REL, kiloConfigPath, stripJsonc, writeKiloConfig } from '../src/hosts/kilo.js';
 import { planInit } from '../src/hosts/plan.js';
+import { npxLaunch } from '../src/hosts/mcp-config.js';
 import { toPosixPath } from '../src/util/paths.js';
 import { tmpRepo } from './helpers.js';
 
 function fresh(): string { return tmpRepo('kilo'); }
 
-const GRAFT_SERVER = { type: 'local', command: ['npx', '-y', '@nanonets/graft', 'mcp'], enabled: true };
+// This fork: the npx form names the fork's registry.
+const GRAFT_SERVER = { type: 'local', command: ['npx', ...npxLaunch('@nanonets/graft').args], enabled: true };
 
 test('a bare repo gets the rule file plus a .kilo/kilo.jsonc that loads it', () => {
   const repo = fresh(); const home = fresh();

@@ -110,6 +110,9 @@ $ChoicesFile = Join-Path $env:USERPROFILE '.graft\installer-choices.json'
 # source is asked about again
 $PricesUrl = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
 $PricesAnswerId = "prices-download|$PricesUrl"
+# The separate question about graft downloading that file again by itself (INSTALLER_PRICES_AUTO_ANSWER_ID in
+# src/context/price-auto-update.ts): only this answer turns automatic price updates on, never the one above
+$PricesAutoAnswerId = "prices-auto-update|$PricesUrl"
 
 # $null when $exe does not run (e.g. a version manager's shim or link pointing at a removed version)
 function Get-NodeVersion([string]$exe) {
@@ -1192,6 +1195,14 @@ function Show-PricesNotice {
     Write-Host '  - The prices are stored locally in %USERPROFILE%\.graft\prices.json; every price lookup afterwards stays on this PC.'
 }
 
+# What automatic price updates do, shown before asking about them
+function Show-PricesAutoNotice {
+    Write-Host "graft can also download this price list again by itself, in the background, when an agent uses a model it has no"
+    Write-Host 'price for (at most once a day per model, once an hour after a failed try), so those savings are priced in dollars'
+    Write-Host "too. It is the same download, sending nothing about you, your code or the model. 'graft prices auto off' turns it"
+    Write-Host "off later, 'graft prices auto on' turns it on."
+}
+
 # $true when npm already holds a valid login for $Url, so 'npm login' would only ask for credentials again
 function Test-NpmLoggedIn([string]$Url) {
     $ErrorActionPreference = 'Continue'
@@ -1256,7 +1267,7 @@ $ConsentItems = @(
     [pscustomobject]@{ Id = 'graft-install'; Legacy = $true; Text = "install graft globally with npm from $graftSource" }
     [pscustomobject]@{ Id = 'execution-policy'; Legacy = $true; Text = 'set the PowerShell execution policy for your user to RemoteSigned, so graft runs in PowerShell' }
     [pscustomobject]@{ Id = 'savings-report'; Text = "turn graft's savings report on or off, as you choose in the next question, and check that its Oracle driver (ODP.NET) loads on this PC" }
-    [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings" }
+    [pscustomobject]@{ Id = 'prices-offer'; Legacy = $true; Text = "offer to download LiteLLM's public model price list ('graft prices update'), so graft can price its savings, and ask whether graft may update it by itself" }
     [pscustomobject]@{ Id = 'llm-check'; Legacy = $true; Text = 'check the LLM endpoint, API key and model and, if you choose to, save GRAFT_BASE_URL / GRAFT_API_KEY / GRAFT_MODEL' }
 )
 $Choices = Read-InstallerChoices -Ignore:$Ask
@@ -1537,6 +1548,29 @@ $pricesAnswered = if ($Yes) { -not $pricesBefore -or $pricesBefore.Value -ne 'ye
 if ($pricesAnswered) {
     $Choices.Answers[$PricesAnswerId] = @{ Value = $pricesAnswer; Date = (Get-Today) }
     Save-InstallerChoices $Choices
+}
+# Automatic updates: a question of its own, asked only of someone who wants the price list and can answer. Never
+# turned on without that answer: not by -Yes, nor by a 'yes' to the download above given before this question existed
+if ($getPrices) {
+    $autoBefore = $Choices.Answers[$PricesAutoAnswerId]
+    if ($autoBefore) {
+        if ($autoBefore.Value -eq 'yes') {
+            Write-Host "graft updates the price list by itself when a model it has no price for is used, as you chose on $($autoBefore.Date)"
+            Write-Host "('graft prices auto off' turns that off)."
+        } else {
+            Write-Host "graft does not update the price list by itself, as you chose on $($autoBefore.Date) ('graft prices auto on' turns"
+            Write-Host 'that on).'
+        }
+    } elseif ($Yes) {
+        Write-Host "Automatic price updates are not turned on by -Yes; 'graft prices auto on' turns them on."
+    } elseif (Test-CanPrompt) {
+        Write-Host ''
+        Show-PricesAutoNotice
+        $autoAnswer = if ((Read-Line 'Let graft update the model prices by itself when needed? [Y/n]') -notmatch '^(n|no)$') { 'yes' } else { 'no' }
+        if ($autoAnswer -eq 'no') { Write-Host "Not turned on. 'graft prices auto on' turns it on later." }
+        $Choices.Answers[$PricesAutoAnswerId] = @{ Value = $autoAnswer; Date = (Get-Today) }
+        Save-InstallerChoices $Choices
+    }
 }
 if ($getPrices) {
     try {

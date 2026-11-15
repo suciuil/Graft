@@ -80,7 +80,8 @@ test("graft --help is only the commands, A→Z, each with its own and its global
   assert.doesNotMatch(entry("build"), /--agent-model/);
   assert.match(entry("ask"), /--agent-model <id>/);
   assert.match(entry("ask"), /Examples:\n {8}graft ask /);
-  assert.doesNotMatch(entry("upgrade"), /--dir|Options:/, "no options listed where none apply");
+  assert.doesNotMatch(entry("version"), /--dir|Options:/, "no options listed where none apply");
+  assert.equal(entry("upgrade"), "", "upgrade is disabled in this fork: not listed");
 
   const version = runCli(["-v"]);
   assert.equal(version.status, 0, version.describe());
@@ -134,21 +135,68 @@ test("graft /h and graft /help print the same as graft help, and no help lists t
   assert.doesNotMatch(runCli(["--help"]).stdout, /\/h\b|\/help\b/);
 });
 
-test("an unknown command prints the error, the suggestion, then the full help — on stderr, exit 1", () => {
+test("an unknown command prints the error, the suggestion and a pointer to graft help — not the help — on stderr, exit 1", () => {
   const r = runCli(["buld"]);
   assert.equal(r.status, 1, r.describe());
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /^error: unknown command 'buld'\n\(Did you mean build\?\)\n\nCommands:\n/);
-  assert.equal(r.stderr.slice(r.stderr.indexOf("Commands:")), runCli(["--help"]).stdout, "the same help as graft --help");
+  assert.equal(r.stderr.trim(), "error: unknown command 'buld'\n(Did you mean build?)\nRun `graft help` for the list of available commands.");
+
+  const unlike = runCli(["xyzzy"]);
+  assert.equal(unlike.status, 1, unlike.describe());
+  assert.equal(unlike.stderr.trim(), "error: unknown command 'xyzzy'\nRun `graft help` for the list of available commands.");
 
   const group = runCli(["api", "nope"]);
   assert.equal(group.status, 1, group.describe());
-  assert.match(group.stderr, /^error: unknown command 'nope'\n\n {2}graft api [a-z-]+ /, "a group shows its own commands");
-  assert.match(group.stderr, /^ {2}graft api key /m, "api key among them");
+  assert.equal(group.stderr.trim(), "error: unknown command 'nope'\nRun `graft api --help` for the list of available `api` commands.");
+  assert.doesNotMatch(group.stderr, /graft api key /, "a group's commands are not listed");
+
+  for (const [args, stderr] of [
+    [["help", "nope"], "error: unknown command 'nope'\nRun `graft help` for the list of available commands."],
+    [["/h", "nope"], "error: unknown command 'nope'\nRun `graft help` for the list of available commands."],
+    [["help", "api", "nope"], "error: unknown command 'nope'\nRun `graft api --help` for the list of available `api` commands."],
+  ] as const) {
+    const h = runCli([...args]);
+    assert.equal(h.status, 1, h.describe());
+    assert.equal(h.stdout, "", args.join(" "));
+    assert.equal(h.stderr.trim(), stderr, args.join(" "));
+  }
 
   const missing = runCli(["ask"]);
   assert.equal(missing.status, 1);
   assert.equal(missing.stderr.trim(), "error: missing required argument 'query'", "other errors stay one line");
+});
+
+test("an unknown parameter of a known command prints the error and a pointer to that command's --help, exit 1", () => {
+  const option = runCli(["build", "--nope"]);
+  assert.equal(option.status, 1, option.describe());
+  assert.equal(option.stdout, "");
+  assert.equal(option.stderr.trim(), "error: unknown option '--nope'\nRun `graft build --help` for more info about this command.");
+
+  const typo = runCli(["build", "--deeep"]);
+  assert.equal(typo.status, 1, typo.describe());
+  assert.equal(typo.stderr.trim(), "error: unknown option '--deeep'\n(Did you mean --deep?)\nRun `graft build --help` for more info about this command.");
+
+  const nested = runCli(["api", "key", "--nope"]);
+  assert.equal(nested.status, 1, nested.describe());
+  assert.match(nested.stderr, /\nRun `graft api key --help` for more info about this command\.\n?$/);
+
+  const extra = runCli(["upgrade", "extra"]);
+  assert.equal(extra.status, 1, extra.describe());
+  assert.match(extra.stderr, /^error: too many arguments for 'upgrade'\..*\nRun `graft upgrade --help` for more info about this command\.\n?$/s);
+
+  const top = runCli(["--nope"]);
+  assert.equal(top.status, 1, top.describe());
+  assert.equal(top.stderr.trim(), "error: unknown option '--nope'\nRun `graft help` for the list of available commands.");
+});
+
+test("graft upgrade is disabled in this fork: it installs nothing, points to the release page and exits 1", () => {
+  const r = runCli(["upgrade"]);
+  assert.equal(r.status, 1, r.describe());
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /graft upgrade is disabled in this fork/);
+  assert.match(r.stderr, /https:\/\/github-ct\.int\.automotive-wan\.com\/suciui\/Graft\/releases/);
+  assert.doesNotMatch(r.stderr, /npm install|trail/, "no npm run, no trail package");
+  assert.match(runCli(["upgrade", "--help"]).stdout, /Disabled in this fork/, "--help still explains it");
 });
 
 test("graft find-command lists the commands whose name or description holds the keyword, then each one's full help", () => {

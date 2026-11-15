@@ -24,7 +24,7 @@ import { HOSTS, hostRelPath, hostWiringName } from '../src/hosts/registry.js';
 import { instructionBody, cursorRule } from '../src/hosts/instructions.js';
 import { trailSpelling } from '../src/claude/skill-template.js';
 import { GRAFT_MARKERS, TRAIL_MARKERS, fencedBlock, upsertSection } from '../src/hosts/sections.js';
-import { registerMcpConfigs, serverEntry } from '../src/hosts/mcp-config.js';
+import { npxLaunch, registerMcpConfigs, serverEntry } from '../src/hosts/mcp-config.js';
 import { changed, runRetract } from '../src/hosts/retract.js';
 import { runInit } from '../src/claude/init.js';
 import { runUpkeep } from '../src/upkeep-run.js';
@@ -109,14 +109,16 @@ test('trail init for every agent: trail-named files, trail commands, a trail ser
   assert.match(readFileSync(join(repo, '.adal', 'skills', 'trail', 'SKILL.md'), 'utf8'), /^---\nname: trail\n/);
 
   // The MCP server is trail's, under trail's name, in every config.
-  const npx = { command: 'npx', args: ['-y', '@trailhq/trail-code', 'mcp'] };
+  // This fork: the npx form names the fork's registry, so it never fetches upstream's trail.
+  const npx = npxLaunch('@trailhq/trail-code');
+  assert.ok(npx.args.some((a) => a.startsWith('--@trailhq:registry=')), npx.args.join(' '));
   for (const rel of [join('.cursor', 'mcp.json'), join('.gemini', 'settings.json'), join('.kiro', 'settings', 'mcp.json')]) {
     assert.deepEqual(JSON.parse(readFileSync(join(repo, rel), 'utf8')).mcpServers, { trail: npx }, rel);
   }
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, 'opencode.json'), 'utf8')).mcp, { trail: { type: 'local', command: ['npx', '-y', '@trailhq/trail-code', 'mcp'], enabled: true } });
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, 'opencode.json'), 'utf8')).mcp, { trail: { type: 'local', command: ['npx', ...npx.args], enabled: true } });
   assert.deepEqual(JSON.parse(readFileSync(join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8')).mcpServers, { trail: npx });
   for (const toml of [join(repo, '.grok', 'config.toml'), join(home, '.codex', 'config.toml')]) {
-    assert.equal(readFileSync(toml, 'utf8'), '[mcp_servers.trail]\ncommand = "npx"\nargs = ["-y", "@trailhq/trail-code", "mcp"]\n', toml);
+    assert.equal(readFileSync(toml, 'utf8'), `[mcp_servers.trail]\ncommand = "npx"\nargs = [${npx.args.map((a) => JSON.stringify(a)).join(', ')}]\n`, toml);
   }
   assert.ok(existsSync(join(home, '.gemini', 'skills', 'trail', 'SKILL.md')));
   assert.ok(!existsSync(join(home, '.gemini', 'skills', 'graft')));

@@ -82,6 +82,13 @@ export function rankModelsForHint(ids: string[]): string[] {
   return [...chat.filter((id) => !isTopTierModel(id)), ...chat.filter(isTopTierModel)];
 }
 
+/** Claude Haiku, whatever the spelling: `claude-haiku-5-5`, `anthropic/claude-haiku-5.5`,
+ * `claude-3-5-haiku-20241022`, and gateway ids that drop "claude"
+ * (`model_service.models.1adp-haiku-5-5`). Only Anthropic ships a Haiku. */
+export function isClaudeHaiku(id: string): boolean {
+  return /haiku/i.test(id);
+}
+
 /**
  * The model to recommend, in this order of preference:
  *   1. the latest Claude Haiku (the family of graft's default model),
@@ -92,7 +99,7 @@ export function rankModelsForHint(ids: string[]): string[] {
  */
 export function suggestModel(ranked: string[]): string | undefined {
   const families: ((id: string) => boolean)[] = [
-    (id) => /claude/i.test(id) && /haiku/i.test(id),
+    isClaudeHaiku,
     (id) => /claude/i.test(id) && /sonnet/i.test(id),
     (id) => /gemini/i.test(id) && /flash/i.test(id) && !/lite/i.test(id),
     (id) => /gpt/i.test(id) && /terra/i.test(id),

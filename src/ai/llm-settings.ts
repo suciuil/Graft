@@ -453,7 +453,9 @@ function effective(kind: SettingKind, deps: SettingDeps, env: NodeJS.ProcessEnv)
     return from ? `${cfg.baseUrl} (${from})` : `${cfg.baseUrl ?? defaultBaseUrl(cfg.provider)} (graft's default for the ${cfg.provider} provider)`;
   }
   if (kind === "key") return cfg.apiKey ? `${maskSecret(cfg.apiKey)} (${from || "from the environment"})` : "none — `graft build --deep` falls back to the structural build";
-  return from ? `${cfg.model} (${from})` : `${cfg.model} (graft's default model)`;
+  return from
+    ? `${cfg.model} (${from})`
+    : `${cfg.model} (graft's default model; \`graft build --deep\` uses the latest Claude Haiku the endpoint serves, when it lists one)`;
 }
 
 function printStatus(kind: SettingKind, deps: SettingDeps, saved: string | undefined): void {

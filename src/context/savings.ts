@@ -80,6 +80,7 @@ export function setPricing(p: Pricing | null): void {
   callScope().pricing = {
     rate: rate && Number.isFinite(rate.usdPerMtok) && rate.usdPerMtok > 0 ? rate : null,
     model: p?.model ?? NO_MODEL,
+    ...(p?.autoUpdate ? { autoUpdate: p.autoUpdate } : {}),
   };
 }
 
@@ -185,11 +186,61 @@ function namedButUnpriced(rate: InputRate | null): boolean {
  * agents relay, so it is the only place the user reliably learns about it.
  */
 function pricesLine(rate: InputRate | null): string {
+  const auto = autoPricesLine(rate);
+  if (auto !== null) return auto;
   if (!namedButUnpriced(rate)) return '';
   return (
     `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft prices update')}' command \u2014 recommended (no known price for the model used: it fetches ` +
     'model prices from LiteLLM and stores them locally, so the next prompts\u2019 savings are priced in dollars)'
   );
+}
+
+/**
+ * The tally's price line when graft updated (or tried to update) the LiteLLM
+ * prices by itself on this call (`price-auto-update.ts`), or null when it did
+ * not, which leaves {@link pricesLine} to its usual wording.
+ *
+ * The user asked for these updates (the installer's automatic updates question, or
+ * `graft prices auto on`), so the line tells them it happened and for which
+ * model, instead of asking them to run `graft prices update` themselves. Only a
+ * failed download still recommends that command: it is the one case where
+ * running it later can change something.
+ */
+function autoPricesLine(rate: InputRate | null): string | null {
+  const { autoUpdate, model } = callScope().pricing;
+  if (!autoUpdate || model.confidence !== 'certain' || !model.id) return null;
+  // withAutoPrices only runs when the price is unknown, so a known rate can come only
+  // from the update that just happened; anything else leaves pricesLine's own wording
+  if (rate && autoUpdate.outcome !== 'updated') return null;
+  const name = (rate ? modelLabel(rate) : null) ?? model.label ?? model.id;
+  switch (autoUpdate.outcome) {
+    case 'updated':
+      return rate
+        ? `${WARNING_BREAK}\u2139\uFE0F The model prices have just been updated automatically from LiteLLM, to get the price of ${name}`
+        : `${WARNING_BREAK}\u2139\uFE0F The model prices have just been updated automatically from LiteLLM, to get the price of ${name}, ` +
+            'but LiteLLM lists no price for it: its savings are shown in tokens only';
+    case 'current':
+      return (
+        `${WARNING_BREAK}\u2139\uFE0F No known price for ${name}: the model prices were updated automatically from LiteLLM ` +
+          `(${autoUpdate.fetchedAt.slice(0, 10)}) and list none for it, so its savings are shown in tokens only`
+      );
+    case 'pending':
+      return (
+        `${WARNING_BREAK}\u2139\uFE0F The model prices are being updated automatically from LiteLLM, to get the price of ${name}: ` +
+        'savings are priced in dollars once that download has finished'
+      );
+    case 'failed':
+      return (
+        `${WARNING_BREAK}\u26A0\uFE0F Run the '${cmd('graft prices update')}' command \u2014 recommended (no known price for ${name}, and ` +
+        `updating the model prices automatically from LiteLLM failed: ${oneLine(autoUpdate.reason)})`
+      );
+  }
+}
+
+/** A failure reason on one short line, for the tally. */
+function oneLine(s: string): string {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  return flat.length > 160 ? `${flat.slice(0, 157)}...` : flat;
 }
 
 /**
@@ -481,7 +532,9 @@ export function savingsTurnNudge(savedTokens: number): string {
       ? `Reproduce the table exactly, summed across your ${b} calls, in a ` +
         'collapsed/expandable section.'
       : named
-        ? 'Keep the price-update line under the tally, as shown.'
+        ? scope.pricing.autoUpdate && scope.pricing.autoUpdate.outcome !== 'failed'
+          ? 'Keep the automatic price update line under the tally, as shown.'
+          : 'Keep the price-update line under the tally, as shown.'
         : scope.overMcp
           ? `Send \`model: "<your model id>"\` with your ${b} tool calls to have ` +
             'savings priced directly.'
@@ -511,11 +564,16 @@ export function savingsTurnNudge(savedTokens: number): string {
   // the table anyway — with a single row repeating the number it had already
   // reported. A price graft did not print is a price the agent computed, which
   // is the one thing this whole module exists to prevent.
+  // Just priced by an automatic price update: the line saying so rides in the
+  // example, and the user learns of the update only if the agent keeps it.
+  const justUpdated = scope.pricing.autoUpdate?.outcome === 'updated'
+    ? ' Keep the automatic price update line under the tally, as shown.'
+    : '';
   return (
     ` This call is worth ${formatDollars(usd)} at ${basis}. At the end of your ` +
     `reply, tell the user the total ${b} tokens saved this turn and what they ` +
     'were worth, as ONE line — no table: this call is priced, and a table ' +
-    `belongs only to a call that is not.${mixed}${sum}${tallyTail(example)}`
+    `belongs only to a call that is not.${mixed}${justUpdated}${sum}${tallyTail(example)}`
   );
 }
 

@@ -1,7 +1,8 @@
 {
   "$comment": "Last offline kit written by npm run pack:bundle; the next kit's build number continues from it. Commit this file. See scripts/kit-build.mjs.",
-  "build": 1,
-  "date": "2026-11-05",
-  "kit": "graft-0.28.0.1-win-x64.zip",
-  "version": "0.28.0"
+  "version": "0.28.0",
+  "build": 3,
+  "kit": "graft-0.28.0.3-win-x64.zip",
+  "date": "2026-11-15",
+  "sha256": "f2395e309438d9bbbd58de1808053ef7f0a886e5a0a46fe041a5faf6df70b189"
 }

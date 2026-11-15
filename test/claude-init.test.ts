@@ -241,7 +241,7 @@ test('CLI: graft init prints one line per step, and no banner', () => {
   assert.match(res.stderr, /skipped the graph build: run graft build/);
   assert.match(res.stderr, /✓ claude +\.claude[\\/], \.mcp\.json/);
   assert.match(res.stderr, /restart your agents so a new session picks up graft/);
-  assert.match(res.stderr, /commit \.claude\/ \.mcp\.json to share it: graft\/ stays local and git-ignored/);
+  assert.doesNotMatch(res.stderr, /to share it: graft\/ stays local/, 'the commit tip is left out in this fork');
   assert.ok(!res.stderr.includes('|___/'), 'the banner is --verbose only');
   assert.ok(!res.stderr.includes('✓ wrote'), 'file-by-file lines are --verbose only');
 });

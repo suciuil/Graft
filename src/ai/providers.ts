@@ -38,6 +38,13 @@ export interface EngineConfig {
   apiKey?: string;
   /** Model id. Env: GRAFT_MODEL. Provider-specific default. */
   model?: string;
+  /**
+   * The model used when none is configured (neither `model` nor its env vars),
+   * in place of {@link DEFAULT_MODEL}: `graft build --deep` sets it to the latest
+   * Claude Haiku the endpoint serves (src/ai/deep-default-model.ts). Unlike
+   * `model` it still counts as graft's default, not as the user's choice.
+   */
+  defaultModel?: string;
   /** Base URL of the endpoint. Env: GRAFT_BASE_URL, then ANTHROPIC_BASE_URL. Default: the Databricks AI Gateway. */
   baseUrl?: string;
   /**
@@ -64,6 +71,8 @@ export interface ResolvedConfig {
   provider: ProviderKind;
   apiKey?: string;
   model: string;
+  /** True when no model is configured (`model`, GRAFT_MODEL, …): `model` is graft's default. */
+  modelDefaulted?: boolean;
   /** Tried in order when the endpoint does not serve `model` (its id without the routing prefix). */
   modelFallbacks?: string[];
   baseUrl?: string;
@@ -159,13 +168,15 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
   // The Databricks gateway serves each model family under its own route and wire format.
   if (isDatabricksGatewayUrl(baseUrl)) {
     const root = databricksRoot(baseUrl!);
-    const model = normalizeDatabricksModel(config.model ?? env.GRAFT_MODEL ?? DATABRICKS_DEFAULT_MODEL);
+    const configured = config.model ?? env.GRAFT_MODEL;
+    const model = normalizeDatabricksModel(configured ?? config.defaultModel ?? DATABRICKS_DEFAULT_MODEL);
     const route = databricksRoute(model);
     return {
       contextDir: config.contextDir ?? env.GRAFT_DIR,
       provider: route === "anthropic" ? "anthropic" : "openai",
       apiKey,
       model,
+      modelDefaulted: configured === undefined,
       modelFallbacks: databricksModelFallbacks(model),
       baseUrl: databricksRouteUrl(root, route),
       headers: databricksHeaders(),
@@ -183,12 +194,8 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
     };
   }
 
-  const model =
-    config.model ??
-    env.GRAFT_MODEL ??
-    env.GRAFT_OPENROUTER_MODEL ??
-    env.ORCAROUTER_MODEL ??
-    DEFAULT_MODELS[provider];
+  const configured = config.model ?? env.GRAFT_MODEL ?? env.GRAFT_OPENROUTER_MODEL ?? env.ORCAROUTER_MODEL;
+  const model = configured ?? config.defaultModel ?? DEFAULT_MODELS[provider];
   // Gateways disagree on routing prefixes, so a prefixed id also tries its bare form.
   const modelFallbacks = modelFallbacksFor(model, model === DEFAULT_MODELS[provider]);
 
@@ -209,6 +216,7 @@ export function resolveConfig(config: EngineConfig = {}, env: NodeJS.ProcessEnv 
     provider,
     apiKey,
     model,
+    modelDefaulted: configured === undefined,
     modelFallbacks,
     baseUrl,
     headers,

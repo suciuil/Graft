@@ -62,12 +62,16 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   about: {
     description:
       "Find information about graft. Without a target it prints what graft is for, the project homepage " +
-      "(https://github.com/trailhq/Trail-Code) and the path of the fork changelog (docs/changelog.html, shipped " +
-      "with this build), which lists every change this fork makes that upstream does not have, newest first. " +
-      "`graft about home` opens the homepage in your browser; `graft about fork` opens the fork changelog. " +
+      "(https://github.com/trailhq/Trail-Code), the fork homepage " +
+      "(https://github-ct.int.automotive-wan.com/pages/suciui/Graft/), which is the fork changelog: every " +
+      "change this fork makes that upstream does not have, newest first, and where to download the " +
+      "fork's Windows offline installer kit, the latest or any published build " +
+      "(https://github-ct.int.automotive-wan.com/suciui/Graft/releases). " +
+      "`graft about home` opens the project homepage in your browser, `graft about web` the fork homepage, and " +
+      "`graft about fork` the changelog copy of this build (the fork homepage when this installation has none). " +
       "The addresses are also printed, in case no browser opens (or GRAFT_NO_BROWSER is set). " +
       "Nothing is sent: it only opens a page. `graft info` is the same command.",
-    examples: ["graft about", "graft about home", "graft about fork"],
+    examples: ["graft about", "graft about home", "graft about web", "graft about fork"],
   },
   "api key": {
     description:
@@ -103,7 +107,10 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Free, no API key. Add --deep to also have an LLM write summaries and a concept map; that needs an API key, " +
       "an endpoint and a model: save them once with `graft api key`, `graft api url` and `graft model`, or pass " +
       "--api-key, --base-url and --model (below). --deep only re-summarizes code that changed since the last run; " +
-      "add --force to re-summarize everything.",
+      "add --force to re-summarize everything. Before building, when the map goes to the folder graft keeps generated " +
+      "files in (`graft files location`) and that folder is on drive C: with less than 20 GB free, or its drive may not " +
+      "have room for the map with a safe margin (estimated from the source it indexes), graft suggests moving that " +
+      "folder with `graft files location <folder>`; the build goes on either way.",
     examples: ["graft build", "graft build --deep", "graft build --deep --force", "graft build --check"],
     globals: ["dir", "llm"],
   },
@@ -323,7 +330,8 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "the new location saved and are the copied originals deleted from the old one; if any folder cannot be brought " +
       "over, everything is put back and nothing is deleted. A folder of the same name already at the destination is kept and " +
       "the old one left in place. Maps kept inside a repo (graft/) are not moved; --dir and GRAFT_DIR still win. Without a " +
-      "folder it shows the current location; --default moves everything back to ~/.graft/repos.",
+      "folder it shows the current location; --default moves everything back to ~/.graft/repos. `graft build` suggests " +
+      "this command when the location is on drive C: with less than 20 GB free, or its drive may not have room for the map it builds.",
     examples: [
       "graft files location",
       "graft files location D:\\graft-maps --dry-run",
@@ -362,7 +370,7 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   issues: {
     description:
       "Open the issue tracker of this graft build in your browser, where you can report a bug or request a feature: " +
-      "https://github-ct.int.automotive-wan.com/suciui/graft-issues/issues. The address is also printed, in case no " +
+      "https://github-ct.int.automotive-wan.com/suciui/graft/issues. The address is also printed, in case no " +
       "browser opens (or GRAFT_NO_BROWSER is set). Nothing is sent: it only opens the page.",
     examples: ["graft issues"],
   },
@@ -408,7 +416,8 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
   "prices status": {
     description:
       "Show whether a local copy of LiteLLM's model price catalog is stored and how old it is, and the snapshot of " +
-      "that catalog shipped with graft; name a model to see the price graft would use for it. Local only, no network.",
+      "that catalog shipped with graft, and whether graft updates it by itself when a model has no known price " +
+      "(`graft prices auto`); name a model to see the price graft would use for it. Local only, no network.",
     examples: ["graft prices status", "graft prices status claude-opus-4-5"],
   },
   "prices update": {
@@ -416,7 +425,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Download LiteLLM's public model price catalog and store it locally (~/.graft/prices.json), so savings for " +
       "models graft's built-in table does not list are priced in dollars. One anonymous GET of the whole catalog, " +
       "a public .json file hosted on GitHub: no code, prompts, model names, keys or anything else about you or your repo is sent. Kept until you run it again. graft already ships a " +
-      "snapshot of this catalog; whichever of the two is newer is used first.",
+      "snapshot of this catalog; whichever of the two is newer is used first. Once you chose automatic price updates in " +
+      "the Windows installer (or turned `graft prices auto` on), graft also runs it by itself when a model has no known " +
+      "price; `graft prices auto off` stops that.",
     examples: ["graft prices update"],
   },
   savings: {
@@ -470,7 +481,11 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
     examples: ["graft uninstall", "graft uninstall --yes"],
   },
   upgrade: {
-    description: "Upgrade the globally installed graft to the latest version on npm.",
+    description:
+      "Disabled in this fork: it installs nothing and exits with an error. New versions ship as the offline installer " +
+      "kit: download the latest one from the fork's release page " +
+      "(https://github-ct.int.automotive-wan.com/suciui/Graft/releases), unzip it and run " +
+      "START-HERE-install-graft.cmd.",
     examples: ["graft upgrade"],
   },
   version: {
@@ -739,21 +754,43 @@ export function installGraftHelp(program: Command): void {
     for (const sub of cmd.commands as Command[]) configure(sub);
   };
   configure(program);
-  showHelpOnUnknownCommand(program);
+  hintOnUsageError(program);
 }
 
 /**
- * `graft foo` (and `graft api foo`): after commander's `unknown command` error and
- * its "Did you mean …?", print the help of the command that was mistyped under,
- * to stderr, so the available commands are right there. Other errors (a missing
- * argument, an unknown option) stay one line.
+ * The line added under commander's error (and its "Did you mean …?") when a
+ * command or a parameter is not known, or null for any other error, which stays
+ * as commander prints it:
+ *
+ * - `graft foo`: the command is unknown; `graft help` lists them all.
+ * - `graft api foo`: unknown under the `api` group; `graft api --help` lists its commands.
+ * - `graft build --nope`, `graft upgrade extra`: the parameter is unknown;
+ *   `graft build --help` tells what that command takes.
+ *
+ * Only the hint is printed, never the help itself.
  */
-function showHelpOnUnknownCommand(cmd: Command): void {
-  if (cmd.commands.length === 0) return;
+export function usageErrorHint(cmd: Command, code: string | undefined): string | null {
+  const name = rootOf(cmd).name();
+  const path = pathOf(cmd);
+  if (code === "commander.unknownCommand") {
+    return path
+      ? `Run \`${name} ${path} --help\` for the list of available \`${path}\` commands.`
+      : `Run \`${name} help\` for the list of available commands.`;
+  }
+  if (code === "commander.unknownOption" || code === "commander.excessArguments") {
+    return path
+      ? `Run \`${name} ${path} --help\` for more info about this command.`
+      : `Run \`${name} help\` for the list of available commands.`;
+  }
+  return null;
+}
+
+/** Wire `usageErrorHint` into `cmd` and every command under it. */
+function hintOnUsageError(cmd: Command): void {
   const error = cmd.error.bind(cmd);
   cmd.error = (message, errorOptions) => {
-    if (errorOptions?.code === "commander.unknownCommand") cmd.showHelpAfterError(true);
-    return error(message, errorOptions);
+    const hint = usageErrorHint(cmd, errorOptions?.code);
+    return error(hint ? `${message}\n${hint}` : message, errorOptions);
   };
-  for (const sub of cmd.commands as Command[]) showHelpOnUnknownCommand(sub);
+  for (const sub of cmd.commands as Command[]) hintOnUsageError(sub);
 }

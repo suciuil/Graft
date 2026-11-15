@@ -5,9 +5,9 @@
  *   graft files store | map-dir | repos-list
  *   graft api provider | retries | tool-rescues | balance-wait | balance-poll |
  *             balance-backoff | balance-backoff-max | openrouter-model | system-ca
- *   graft prices file | bundled
+ *   graft prices file | bundled | auto
  *   graft refresh auto | hash | seed | gitignore | ignore-file
- *   graft agents gate | statusline | npx | trail-switch
+ *   graft agents gate | statusline | npx | trail-switch | auto-init
  *   graft output savings-copy | browser
  *
  * plus `graft env list|get|set|unset` over all of them. Each saves a USER
@@ -61,6 +61,13 @@ export interface EnvVar {
   absolute?: boolean;
   /** `switch`: whether the feature is on while the variable is not set. */
   defaultOn?: boolean;
+  /**
+   * `switch`: the default is not simply on or off but depends on something else
+   * (`GRAFT_PRICES_AUTO_UPDATE`: the installer's answer), so removing the
+   * variable reports {@link unset}, which says what it depends on, rather than
+   * "on (the default)".
+   */
+  defaultDepends?: boolean;
   /** `switch`: what to store for on / off; `null` removes the variable. */
   store?: { on: string | null; off: string | null };
   /** `switch`: whether the feature is on for a set, non-empty value, read exactly as graft's code reads it. */
@@ -93,7 +100,8 @@ export const ENV_GROUPS: Record<string, { title: string; help: string }> = {
     help:
       "How graft behaves inside the agents `graft init` wired: `agents gate` turns the hook that steers whole-file reads " +
       "to graft on or off, `agents statusline` the Claude Code status line, `agents npx` how MCP configs start graft, and " +
-      "`agents trail-switch` whether repos move to trail when the trail command is installed. Each is a user environment " +
+      "`agents trail-switch` whether repos move to trail when the trail command is installed, and `agents auto-init` " +
+      "whether outdated agent instructions are updated without asking for `graft init`. Each is a user environment " +
       "variable, saved for every new terminal.",
   },
   output: {
@@ -342,6 +350,25 @@ export const ENV_VARS: EnvVar[] = [
     isOn: (raw) => !OFF_WORDS.has(raw.trim().toLowerCase()),
     examples: ["graft prices bundled", "graft prices bundled off"],
   },
+  {
+    name: "GRAFT_PRICES_AUTO_UPDATE",
+    command: "prices auto",
+    title: "Show or set GRAFT_PRICES_AUTO_UPDATE: update the model prices automatically when a model has no known price",
+    help:
+      "Whether graft runs `graft prices update` by itself when a call names a model it has no price for, so that call's " +
+      "savings are priced in dollars and the savings tally says the prices were just updated, instead of recommending " +
+      "the command. on (the default) does so once you chose automatic price updates in the Windows installer; " +
+      "set it to on to do so without the installer, off never to. The download is the one `graft prices update` makes " +
+      "(LiteLLM's whole public price list, nothing about you, your repo or the model is sent), at most once a day per " +
+      "model, once an hour after a failed try, and never while the local copy is less than an hour old.",
+    unset: "on, once you chose automatic price updates in the installer; otherwise off",
+    kind: "switch",
+    defaultOn: true,
+    defaultDepends: true,
+    store: { on: "1", off: "0" },
+    isOn: (raw) => !OFF_WORDS.has(raw.trim().toLowerCase()),
+    examples: ["graft prices auto", "graft prices auto off", "graft prices auto on"],
+  },
   // ── refresh ──
   {
     name: "GRAFT_NO_REFRESH",
@@ -482,6 +509,22 @@ export const ENV_VARS: EnvVar[] = [
     store: { on: null, off: "1" },
     isOn: (raw) => raw !== "1",
     examples: ["graft agents trail-switch", "graft agents trail-switch off"],
+  },
+  {
+    name: "GRAFT_NO_AUTO_INIT",
+    command: "agents auto-init",
+    title: "Show or set GRAFT_NO_AUTO_INIT: update outdated agent instructions without asking for `graft init`",
+    help:
+      "When the agent instructions `graft init` wrote into a repo differ from what the installed graft writes (after an " +
+      "upgrade), a graft query rewrites graft's part of them by itself, for the agents and with the choices `graft init` " +
+      "was given there, and says so once. It never does while git is merging or rebasing, nor over instructions a newer " +
+      "graft wrote. off = leave the files alone and recommend `graft init` under the savings tally instead.",
+    unset: "on",
+    kind: "switch",
+    defaultOn: true,
+    store: { on: null, off: "1" },
+    isOn: (raw) => raw !== "1",
+    examples: ["graft agents auto-init", "graft agents auto-init off"],
   },
   // ── output ──
   {
@@ -698,7 +741,7 @@ function write(v: EnvVar, value: string | null, deps: EnvDeps): number {
     return 1;
   }
   if (value === null) {
-    const now = v.kind === "switch" ? `${v.defaultOn ? "on" : "off"} (the default)` : v.unset;
+    const now = v.kind === "switch" && !v.defaultDepends ? `${v.defaultOn ? "on" : "off"} (the default)` : v.unset;
     deps.out(`✓ ${v.name} is not saved (removed from ${deps.store.where}) — now: ${now}`);
   } else {
     deps.out(`✓ saved ${v.name} = ${describeValue(v, value)} to ${deps.store.where}`);

@@ -15,7 +15,28 @@ import {
   parseNpmError,
   clearNpmLeftover,
   noSudoFix,
+  npmInstallLine,
+  upgradeDisabledMessage,
 } from '../src/cli-meta.js';
+import { FORK_RELEASES_URL } from '../src/about.js';
+
+// --- this fork: `graft upgrade` installs nothing and points to the kit's release page ---
+
+test('upgradeDisabledMessage: says the command is disabled and names the release page and the kit installer', () => {
+  const out = upgradeDisabledMessage();
+  assert.match(out, /^✗ graft upgrade is disabled in this fork/);
+  assert.ok(out.includes(FORK_RELEASES_URL), out);
+  assert.match(out, /START-HERE-install-graft\.cmd/);
+  assert.doesNotMatch(out, /npm|trail/);
+});
+
+// --- this fork: the trail package only ever comes from the fork's registry ---
+
+test('npmInstallLine: the install people and agents are told to run names the fork registry', () => {
+  assert.equal(npmInstallLine('@trailhq/trail-code', 'https://example.invalid/npm/'), 'npm install -g @trailhq/trail-code --@trailhq:registry=https://example.invalid/npm/');
+  assert.equal(npmInstallLine('@trailhq/trail-code', null), 'npm install -g @trailhq/trail-code');
+  assert.match(npmInstallLine('@trailhq/trail-code'), /^npm install -g @trailhq\/trail-code --@trailhq:registry=\S+$/, "package.json's registry by default");
+});
 
 // --- npmCommandLine: what reaches cmd on Windows ---
 
@@ -59,7 +80,7 @@ test('formatVersionReport: up to date', () => {
 
 test('formatVersionReport: newer version available', () => {
   const out = formatVersionReport('0.4.4', { ok: true, version: '0.4.5' });
-  assert.equal(out, 'graft 0.4.4\nlatest on npm: 0.4.5, run graft upgrade');
+  assert.equal(out, `graft 0.4.4\nlatest on npm: 0.4.5, download the latest installer kit from ${FORK_RELEASES_URL}`);
 });
 
 test('formatVersionReport: offline / unreachable', () => {

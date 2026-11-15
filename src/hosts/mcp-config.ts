@@ -12,7 +12,8 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { PlannedWrite } from './plan.js';
 import { readJsonObject, type ConfigWrite } from './config-write.js';
-import { commandOnPath, trailOnPath, type Brand } from '../brand.js';
+import { commandOnPath, trailOnPath, PACKAGE_FOR, type Brand } from '../brand.js';
+import { registryArgs } from '../cli-meta.js';
 
 /** MCP registration reports the same write-result record every installer does. */
 export type McpWrite = ConfigWrite;
@@ -44,12 +45,23 @@ export interface McpTarget extends PlannedWrite {
  * checked-in hook shim with another machine's home directory baked into it. A
  * bare `graft` works on any machine that has it installed; `npx` remains the
  * fallback for machines that don't.
+ *
+ * This fork: the `npx` form names the fork's registry itself
+ * (`--@nanonets:registry=…`, from `publishConfig.registry`). These files are
+ * committed, so they run on teammates' machines whose `.npmrc` never got the
+ * redirect `scripts/postinstall.mjs` writes (no fork install, or an install that
+ * skipped scripts); without the flag their `npx` would fetch the official
+ * package from registry.npmjs.org, upstream's code with its cloud features on.
  */
-const NPX_LAUNCH = { command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] };
+export function npxLaunch(pkg: string, registry?: string | null): { command: string; args: string[] } {
+  // `undefined` takes the fork's registry from package.json; `null` means none.
+  return { command: 'npx', args: ['-y', ...registryArgs(registry, [pkg]), pkg, 'mcp'] };
+}
+const NPX_LAUNCH = npxLaunch(PACKAGE_FOR.graft);
 const BIN_LAUNCH = { command: 'graft', args: ['mcp'] };
 // The same server under trail's name, for a repo that uses trail: its tools are
 // `trail_*` (and it still answers `graft_*`).
-const TRAIL_NPX_LAUNCH = { command: 'npx', args: ['-y', '@trailhq/trail-code', 'mcp'] };
+const TRAIL_NPX_LAUNCH = npxLaunch(PACKAGE_FOR.trail);
 const TRAIL_BIN_LAUNCH = { command: 'trail', args: ['mcp'] };
 
 // A PATH lookup, not a spawn: Node can't spawn Windows' `graft.cmd` without a shell.
@@ -190,7 +202,7 @@ function jsonTarget(
  * 'global': registering there affects every project on the machine.
  *
  * `name` is the repo's name for the tool: under trail the server is `trail`,
- * launched as `trail mcp` (or `npx -y @trailhq/trail-code mcp`). The files
+ * launched as `trail mcp` (or `npx -y <fork registry> @trailhq/trail-code mcp`). The files
  * are the same either way.
  */
 export function mcpTargets(

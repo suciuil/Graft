@@ -27,14 +27,24 @@
  * package name is not a stable handle: the groovy grammar publishes itself as
  * `@bootswithdefer/tree-sitter-groovy` while graft asks for `tree-sitter-groovy`.
  *
- * Usage: node scripts/pack-bundle.mjs [--skip-build]
+ * Usage: node scripts/pack-bundle.mjs [--skip-build] [--no-publish]
  *   --skip-build  reuse the current dist/ and prebuilds instead of rebuilding first;
  *                 refused when either is older than its sources
+ *   --no-publish  keep the kit local: no release, no homepage refresh, and no build
+ *                 record (kit-build.json, changelog-builds.json and docs/changelog.html are
+ *                 left as they are)
+ *
+ * Once the kit is written it is published (scripts/publish-release.mjs): as release
+ * v<kit version> of the fork's public repository, marked latest, with the kit attached, and
+ * the fork homepage there (the changelog, now with this build) is refreshed. A failed
+ * publication leaves the kit and the changelog records in place and exits 1; retry it with
+ * `npm run release:publish`.
  *
  * On Windows it also writes graft-<version>.<build>-win-<arch>.zip, the offline installer kit
  * (<build> counts the packs of this graft version: 0, 1, 2, … and back to 0 for a new version;
  * see scripts/kit-build.mjs; the last kit is recorded in kit-build.json, which is committed
- * together with docs/changelog.html so every clone continues the same numbering):
+ * together with docs/changelog.html so every clone continues the same numbering, and a kit
+ * meant for publication is numbered past the highest build already published as a release):
  * the tarball, START-HERE-install-graft.cmd, install-graft-helper.ps1, docs/changelog.html (as
  * changelog.html, whose path the installer shows) and the latest LTS node-vX.Y.Z-win-<arch>.zip,
  * downloaded from nodejs.org into the repo root (SHA-256 checked, reused when already
@@ -61,7 +71,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { addBuild, BUILDS_RELATIVE, formatBuilds, generateChangelog, localDate, readBuilds } from "./changelog.mjs";
+import { addBuild, BUILDS_RELATIVE, formatBuilds, generateChangelog, GRAMMARS_RELATIVE, localDate, readBuilds } from "./changelog.mjs";
 import { kitFileName, kitVersion, latestKitInChangelog, nextKitBuild, parseKitName, parseKitRecord } from "./kit-build.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,6 +79,7 @@ const stagingDir = join(repoRoot, "build-bundle");
 /** The graft version and build number of the last kit written (see scripts/kit-build.mjs); committed. */
 const kitRecordPath = join(repoRoot, "kit-build.json");
 const skipBuild = process.argv.includes("--skip-build");
+const noPublish = process.argv.includes("--no-publish");
 const PLATFORM = `${process.platform}-${process.arch}`;
 
 function die(message) {
@@ -107,6 +118,28 @@ function previousKit() {
   if (newest) console.warn(`! no ${kitRecordPath} — continuing from the newest kit in the repo root (${kitVersion(newest.version, newest.build)})`);
   else console.warn(`! no ${kitRecordPath} and no earlier numbered kit — this kit is build 0`);
   return newest ? { version: newest.version, build: newest.build } : null;
+}
+
+/**
+ * The kit to number this one after: {@link previousKit}, or, for a kit meant for
+ * publication, the highest build of this graft version already published as a release
+ * when that is higher (kit-build.json not committed or not pulled after a publication),
+ * so a pack never takes a build number a published kit already carries.
+ */
+async function previousPublishableKit() {
+  const previous = previousKit();
+  if (noPublish) return previous;
+  let published = null;
+  try {
+    const { publishedKitBuild } = await import("./publish-release.mjs");
+    published = await publishedKitBuild(pkg.version);
+  } catch (err) {
+    console.warn(`! could not list the published releases (${err.message}): numbering the kit from ${kitRecordPath} alone`);
+    return previous;
+  }
+  if (published === null || (previous?.version === pkg.version && previous.build >= published)) return previous;
+  console.warn(`! build ${kitVersion(pkg.version, published)} is already published as a release: numbering this kit after it`);
+  return { version: pkg.version, build: published };
 }
 
 /** Same shell-free npm invocation as build-grammars.mjs: the `.cmd` shim cannot be
@@ -228,7 +261,7 @@ const buildsPath = join(repoRoot, BUILDS_RELATIVE);
 const bundleDate = localDate();
 // On Windows the build is named by its kit version (a.b.c.d, d counting the packs of this
 // graft version), so each kit gets its own changelog group; elsewhere by the package version.
-const kitBuild = process.platform === "win32" ? nextKitBuild(pkg.version, previousKit()) : null;
+const kitBuild = process.platform === "win32" ? nextKitBuild(pkg.version, await previousPublishableKit()) : null;
 // kitBuild starts at 0, so test for null, not truthiness.
 const buildVersion = kitBuild !== null ? kitVersion(pkg.version, kitBuild) : pkg.version;
 const changelog = (() => {
@@ -239,9 +272,9 @@ const changelog = (() => {
     die(`could not read ${buildsPath} (${err.message}) — restore it from git (git checkout -- ${BUILDS_RELATIVE})`);
   }
   try {
-    const { html, groups } = generateChangelog(repoRoot, builds);
+    const { html, groups, grammars } = generateChangelog(repoRoot, builds);
     const group = groups.find((g) => g.kind === "bundle" && g.date === bundleDate && g.version === buildVersion);
-    return { html, builds, count: group ? group.entries.length : 0, generated: true };
+    return { html, builds, grammars, count: group ? group.entries.length : 0, generated: true };
   } catch (err) {
     console.warn(`! docs/changelog.html not regenerated (${err.message}); shipping it as it is`);
     return { html: readFileSync(changelogPath, "utf8"), builds, count: 0, generated: false };
@@ -644,28 +677,63 @@ if (kitName) {
   // the new kit is the only artifact left in the repo root.
   rmSync(join(repoRoot, finalName), { force: true });
   removeStaleArtifacts(kitName);
-  // The next pack, on any clone, numbers its kit from this one
-  const record = {
-    $comment: "Last offline kit written by npm run pack:bundle; the next kit's build number continues from it. Commit this file. See scripts/kit-build.mjs.",
-    version: pkg.version,
-    build: kitBuild,
-    kit: kitName,
-    date: bundleDate,
-  };
-  writeFileSync(kitRecordPath, `${JSON.stringify(record, null, 2)}\n`);
+  // The next pack, on any clone, numbers its kit from this one. Only a kit meant for
+  // publication is recorded: its SHA-256 is what publish-release.mjs checks before it
+  // publishes a kit (a local --no-publish kit
+  // reuses the number and must never be published in its place).
+  if (!noPublish) {
+    const record = {
+      $comment: "Last offline kit written by npm run pack:bundle; the next kit's build number continues from it. Commit this file. See scripts/kit-build.mjs.",
+      version: pkg.version,
+      build: kitBuild,
+      kit: kitName,
+      date: bundleDate,
+      sha256: createHash("sha256").update(readFileSync(join(repoRoot, kitName))).digest("hex"),
+    };
+    writeFileSync(kitRecordPath, `${JSON.stringify(record, null, 2)}\n`);
+  }
   const kitMb = (statSync(join(repoRoot, kitName)).size / 1024 / 1024).toFixed(1);
   console.log(`\n✓ ${kitName} (${kitMb} MB, build ${kitBuild} of graft ${pkg.version}) — ${nodeZipName}, ${finalName}, install-graft-helper.ps1, START-HERE-install-graft.cmd, changelog.html`);
 }
 
-if (changelog.generated) {
+// A local kit (--no-publish) records no build: its entries stay "Not yet bundled" and go
+// to the next published kit, whose release notes list them.
+if (changelog.generated && !noPublish) {
   writeFileSync(buildsPath, formatBuilds(changelog.builds));
   writeFileSync(changelogPath, changelog.html);
+  // The grammar repositories' commits read for this changelog, for clones without them
+  if (changelog.grammars.changed) writeFileSync(changelog.grammars.path, changelog.grammars.text);
   console.log(`\n✓ docs/changelog.html: build ${buildVersion} (${bundleDate}) recorded in ${BUILDS_RELATIVE}, ${changelog.count} entr${changelog.count === 1 ? "y" : "ies"} from commit messages`);
 }
 
-const toCommit = [kitName ? "kit-build.json" : null, changelog.generated ? `${BUILDS_RELATIVE} and docs/changelog.html` : null].filter(Boolean).join(", ");
+const recorded = changelog.generated && !noPublish;
+const toCommit = [
+  kitName && !noPublish ? "kit-build.json" : null,
+  recorded && changelog.grammars.changed ? GRAMMARS_RELATIVE : null,
+  recorded ? `${BUILDS_RELATIVE} and docs/changelog.html` : null,
+]
+  .filter(Boolean)
+  .join(", ");
 if (toCommit) console.log(`\n  Commit ${toCommit} now${kitName ? `, so the next kit continues from build ${kitBuild}` : ""} and later commits are listed under the next build.`);
 if (kitName) console.log(`\n  Install on another ${PLATFORM} machine: unzip ${kitName} and double-click START-HERE-install-graft.cmd, or from the unzipped folder:`);
 else console.log(`\n  Install on another ${PLATFORM} machine with:`);
 console.log(`    npm i -g ./${finalName} --ignore-scripts\n`);
 console.log("  (--ignore-scripts: every binding in here is prebuilt, so nothing compiles on the\n   target. Without it npm 12 warns about unapproved install scripts, then installs anyway.)\n");
+
+// Publish the kit as a release of the fork's repository and refresh its homepage (the
+// changelog, which now carries this build). Only kits are published: elsewhere there is none.
+if (kitName && noPublish) {
+  console.log(
+    `• not published (--no-publish): a local kit, recorded nowhere and never published (the next published kit takes build ${kitBuild} again). ` +
+      "To publish a kit, pack without --no-publish.\n",
+  );
+} else if (kitName) {
+  console.log("• publishing the kit as a release and refreshing the fork homepage …");
+  try {
+    const { publishRelease } = await import("./publish-release.mjs");
+    await publishRelease({ kitPath: join(repoRoot, kitName) });
+    console.log("");
+  } catch (err) {
+    die(`${kitName} was built, but publishing it failed: ${err.message}\n  Retry with: npm run release:publish`);
+  }
+}

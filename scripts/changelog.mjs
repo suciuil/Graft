@@ -22,6 +22,22 @@
  * it was listed in, and the generated entries it already covers (its "replaces" list) are left
  * out, so nothing is listed twice.
  *
+ * The local tree-sitter grammars graft builds its parsers from (the `file:../…` dependencies of
+ * package.json, and theirs, such as ../tree-sitter-c) are separate git repositories. Their
+ * typed lines are listed too, but only from commits by GRAMMAR_AUTHOR (the fork's own work, not
+ * the third-party history), merges left out, as one short item per grammar and fork commit
+ * ("The C grammar has been updated.") whose collapsed details list the lines word for word
+ * (see readGrammarRepos and attachGrammarEntries). A grammar commit ships with the first fork
+ * commit after it that changes that grammar's vendored package under vendor/; until then it is
+ * "Not yet bundled"; all items of one grammar in one group are merged into one. A grammar line
+ * that a fork commit changing the same vendored package already says in its own words is left out.
+ * The fork's own lines about parsing one of those languages (see isParsingEntry) are moved behind
+ * the same details link. Then every entry of the Languages area, legacy items included, goes
+ * behind one short item per language and group (see groupLanguages), so the main list keeps one
+ * line per language and build. What was read is kept in changelog-grammars.json, so
+ * the page comes out the same on a machine that has only graft checked out (the snapshot is used
+ * for every grammar repo that is not there); commit it with the changelog.
+ *
  * Grouping, newest first:
  *   - "Not yet bundled": commits after the last package build.
  *   - One group per `npm run pack:bundle` run, recorded in changelog-builds.json (repo root,
@@ -41,7 +57,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseKitVersion } from "./kit-build.mjs";
 
@@ -52,6 +68,10 @@ export const LEGACY_RELATIVE = "changelog-legacy.json";
 export const UPSTREAM_REF = "upstream/main";
 /** Git notes ref whose lines are read as part of the commit message they are attached to. */
 export const NOTES_REF = "refs/notes/changelog";
+/** Snapshot of the typed grammar-repo commits, for machines without the sibling grammar repos. */
+export const GRAMMARS_RELATIVE = "changelog-grammars.json";
+/** Only grammar-repo commits whose author name or e-mail matches this (case-insensitive) are listed. */
+export const GRAMMAR_AUTHOR = "suciui";
 
 /** Entry types in page order: within a group features come first, then improvements, fixes, changes. */
 export const TYPES = [
@@ -202,18 +222,32 @@ export function groupCommits(commits, { unrecorded, builds }) {
       else if (firstOpen >= 0) group = bundles[firstOpen];
       else group = pending;
     }
-    for (const e of c.entries) {
+    for (const { area, ...e } of c.entries) {
+      if (e.grammar) {
+        // One "grammar updated" item per grammar and group; commits come newest first, so the
+        // details of an older commit go in front and the list reads oldest first
+        const same = group.entries.find((x) => x.grammar === e.grammar);
+        if (same) same.details = [...e.details, ...same.details];
+        else group.entries.push({ ...e, details: [...e.details], areas: areasOf(e.text, area), key: null });
+        continue;
+      }
       // The same sentence committed twice is listed once, where it first shipped (oldest wins below)
       const key = `${e.type}\u0000${e.text.toLowerCase()}`;
-      group.entries.push({ ...e, areas: areasOf(e.text), key });
+      group.entries.push({ ...e, areas: areasOf(e.text, area), key });
     }
   }
+  // By type; within a type the grammar items come last, by language
   const order = (g) =>
-    g.entries.sort((a, b) => TYPES.findIndex((t) => t.key === a.type) - TYPES.findIndex((t) => t.key === b.type));
+    g.entries.sort(
+      (a, b) =>
+        TYPES.findIndex((t) => t.key === a.type) - TYPES.findIndex((t) => t.key === b.type) ||
+        (a.grammar ? 1 : 0) - (b.grammar ? 1 : 0) ||
+        (a.grammar && b.grammar ? a.text.localeCompare(b.text, "en") : 0),
+    );
   const groups = [pending, ...bundles.reverse(), ...[...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))];
   // Drop repeats, keeping the oldest occurrence: walk oldest group first
   for (const g of [...groups].reverse()) {
-    g.entries = [...g.entries].reverse().filter((e) => !seen.has(e.key) && seen.add(e.key)).reverse();
+    g.entries = [...g.entries].reverse().filter((e) => e.key === null || (!seen.has(e.key) && seen.add(e.key))).reverse();
   }
   for (const g of groups) {
     order(g);
@@ -284,13 +318,23 @@ export function mergeLegacy(groups, legacy) {
   return { groups: out, unmatched: [...replaced].filter((t) => !found.has(t)) };
 }
 
+/** The collapsed list of a language item's changes, opened by its "details" link. */
+function detailsHtml(details) {
+  const items = details
+    .map((d) => `<li data-type="${d.type}"><span class="tag">${TYPES.find((x) => x.key === d.type).tag}</span><span>${d.html ?? entryHtml(d.text)}</span></li>`)
+    .join("");
+  const n = details.length;
+  return `<details class="more"><summary>details: ${n} change${n === 1 ? "" : "s"}</summary><ul class="details">${items}</ul></details>`;
+}
+
 function renderGroup(g) {
   const items = g.entries
     .map((e) => {
       const t = TYPES.find((x) => x.key === e.type);
       const labels = e.areas.map((k) => `<span class="area">${esc(AREAS.find((x) => x.key === k).label)}</span>`).join("");
-      const body = e.html ?? entryHtml(e.text);
-      return `    <li data-type="${e.type}" data-area="${e.areas.join(" ")}"><span class="tag">${t.tag}</span><span>${labels}${body}</span></li>\n`;
+      const body = (e.html ?? entryHtml(e.text)) + (e.details?.length ? ` ${detailsHtml(e.details)}` : "");
+      const types = e.types?.length > 1 ? ` data-types="${e.types.join(" ")}"` : "";
+      return `    <li data-type="${e.type}"${types} data-area="${e.areas.join(" ")}"><span class="tag">${t.tag}</span><span>${labels}${body}</span></li>\n`;
     })
     .join("");
   if (g.kind === "pending") {
@@ -416,17 +460,394 @@ export function readHistory(repoRoot, buildsData) {
   return { commits, unrecorded, builds };
 }
 
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, ""));
+  } catch {
+    return null;
+  }
+}
+
+/** The `file:` dependencies of a package.json, as absolute directories. */
+function fileDependencies(dir) {
+  const pkg = readJson(join(dir, "package.json"));
+  if (!pkg) return [];
+  const deps = { ...pkg.devDependencies, ...pkg.optionalDependencies, ...pkg.dependencies };
+  return Object.values(deps)
+    .filter((v) => typeof v === "string" && v.startsWith("file:"))
+    .map((v) => resolve(dir, v.slice("file:".length)));
+}
+
+/**
+ * The local grammar repositories graft builds from: the `file:` dependencies of package.json
+ * that are git repositories, and their own `file:` dependencies (tree-sitter-css, which
+ * tree-sitter-css-in-js is generated from). `package` is the name of the package graft vendors,
+ * which ships the repository's changes: its own for a direct dependency, the depending
+ * package's for a transitive one. Repositories not checked out are left out.
+ * @returns {{ repo: string, path: string, package: string }[]}  sorted by repo
+ */
+export function localGrammarRepos(repoRoot) {
+  const found = new Map();
+  const visit = (dir, ships) => {
+    const key = dir.toLowerCase();
+    if (found.has(key) || !existsSync(join(dir, ".git"))) return;
+    const name = readJson(join(dir, "package.json"))?.name;
+    if (!name) return;
+    const pkg = ships ?? name;
+    found.set(key, { repo: basename(dir), path: dir, package: pkg });
+    for (const dep of fileDependencies(dir)) visit(dep, pkg);
+  };
+  for (const dir of fileDependencies(repoRoot)) visit(dir, null);
+  return [...found.values()].sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
+}
+
+/** The typed, non-merge commits of a grammar repository by GRAMMAR_AUTHOR, oldest first. */
+export function readGrammarCommits(path) {
+  const log = git(path, [
+    "log",
+    "--no-merges",
+    `--author=${GRAMMAR_AUTHOR}`,
+    "--regexp-ignore-case",
+    "--date=short",
+    "--no-notes",
+    `--notes=${NOTES_REF}`,
+    "--format=%H%x1f%ct%x1f%ad%x1f%B%x1f%N%x1e",
+    "HEAD",
+  ]);
+  return log
+    .split("\x1e")
+    .map((rec) => rec.replace(/^\s+/, ""))
+    .filter(Boolean)
+    .map((rec) => {
+      const [hash, time, date, body, note] = rec.split("\x1f");
+      return { hash, time: Number(time), date, entries: parseCommitMessage(`${body ?? ""}\n\n${note ?? ""}`) };
+    })
+    .filter((c) => c.entries.length)
+    .reverse();
+}
+
+/** The text written to changelog-grammars.json. */
+export function formatGrammars(repos) {
+  const data = {
+    about:
+      "Generated by scripts/changelog.mjs from the commits of the local tree-sitter grammar repositories; used when they are not checked out. Do not edit.",
+    author: GRAMMAR_AUTHOR,
+    repos: repos.map(({ repo, package: pkg, commits }) => ({ repo, package: pkg, commits })),
+  };
+  return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+/**
+ * The grammar repositories and their typed commits: read from the checked-out sibling
+ * repositories, and from the snapshot (changelog-grammars.json) for those that are not there.
+ * @returns {{ repos: { repo: string, package: string, commits: { hash: string, time: number, date: string, entries: {type: string, text: string}[] }[] }[], snapshot: string, snapshotPath: string, snapshotChanged: boolean }}
+ */
+export function readGrammarRepos(repoRoot) {
+  const snapshotPath = join(repoRoot, GRAMMARS_RELATIVE);
+  const before = existsSync(snapshotPath) ? readFileSync(snapshotPath, "utf8") : "";
+  const stored = before ? readJson(snapshotPath) : null;
+  if (before && !Array.isArray(stored?.repos)) throw new Error(`${snapshotPath} has no "repos" list`);
+  // A snapshot written for another author is not reused: its commits would be the wrong ones
+  const byRepo = new Map(stored && stored.author === GRAMMAR_AUTHOR ? stored.repos.map((r) => [r.repo, r]) : []);
+  for (const { repo, path, package: pkg } of localGrammarRepos(repoRoot)) {
+    try {
+      byRepo.set(repo, { repo, package: pkg, commits: readGrammarCommits(path) });
+    } catch {
+      // An unreadable checkout keeps what the snapshot has for it
+    }
+  }
+  const repos = [...byRepo.values()].filter((r) => r.commits.length).sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
+  const snapshot = repos.length || before ? formatGrammars(repos) : "";
+  // A Windows checkout holds the committed file with CRLF (core.autocrlf, `* text=auto`):
+  // line endings are not a change, or every run would report one
+  return { repos, snapshot, snapshotPath, snapshotChanged: snapshot !== before.replace(/\r\n/g, "\n") };
+}
+
+/**
+ * Whether a vendored file (a path under vendor/) belongs to the package: its packed tarball
+ * (vendor/<scope->name-<version>.tgz) or its prebuilt binding (vendor/<key>/prebuilds/<platform>/<[scope+]name>.node).
+ */
+export function isVendoredFile(file, pkg) {
+  const name = pkg.replace(/^@[^/]+\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    new RegExp(`^vendor/(?:[^/]*-)?${name}-\\d[^/]*\\.tgz$`).test(file) ||
+    new RegExp(`^vendor/[^/]+/prebuilds/[^/]+/(?:[^/]*[+-])?${name}\\.node$`).test(file)
+  );
+}
+
+const STOP_WORDS = new Set(
+  "the and for are now with such that this from into not its was has have can also than then when which their them they these those one two all any per but other more longer".split(" "),
+);
+
+/** The significant words of an entry, for telling whether another entry already says it. */
+function significantWords(text) {
+  return new Set(
+    (text.toLowerCase().match(/[a-z0-9_$@#]+/g) ?? [])
+      .map((w) => (w.length > 3 ? w.replace(/s$/, "") : w))
+      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w)),
+  );
+}
+
+/**
+ * Whether one of the `others` entries already says `text`: at least `ratio` of its significant
+ * words occur in that entry. Entries of fewer than four significant words never count as said.
+ */
+export function alreadySaid(text, others, ratio = 0.8) {
+  const words = significantWords(text);
+  if (words.size < 4) return false;
+  return others.some((other) => {
+    const set = other instanceof Set ? other : significantWords(other);
+    let hits = 0;
+    for (const w of words) if (set.has(w)) hits++;
+    return hits / words.size >= ratio;
+  });
+}
+
+/** Language names of the grammar repositories whose name is not just the language capitalised. */
+const GRAMMAR_NAMES = {
+  c: "C",
+  cpp: "C++",
+  "c-sharp": "C#",
+  cmake: "CMake",
+  css: "CSS",
+  "css-in-js": "CSS-in-JS",
+  csv: "CSV",
+  html: "HTML",
+  json: "JSON",
+  matlab: "MATLAB",
+  plsql: "PL/SQL",
+  scss: "SCSS",
+  xml: "XML",
+  yaml: "YAML",
+};
+
+/** The language a grammar repository parses: "tree-sitter-c-sharp" → "C#", "tree-sitter-kotlin-grammar" → "Kotlin". */
+export function grammarName(repo) {
+  const key = repo.replace(/^tree-sitter-/, "").replace(/-grammar$/, "");
+  return GRAMMAR_NAMES[key] ?? key.replace(/(^|-)([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
+}
+
+/** Other words an entry may name a grammar's language by. */
+const GRAMMAR_ALIASES = { make: ["Makefiles?"] };
+
+/** Whether a text names a language, by its name or an alias regex ("C" is not "C++" or "C#"). */
+function namesLanguage(text, name, aliases = []) {
+  const names = [name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"), ...aliases];
+  return new RegExp(`(?<![\\w#+-])(?:${names.join("|")})(?![\\w#+-])`).test(text);
+}
+
+/** Whether an entry's text names the language of a grammar repository ("C" is not "C++" or "C#"). */
+export function namesGrammar(text, repo) {
+  const key = repo.replace(/^tree-sitter-/, "").replace(/-grammar$/, "");
+  // "C# Razor" is the Razor grammar, not C#
+  return namesLanguage(key === "c-sharp" ? text.replace(/C# Razor/g, "Razor") : text, grammarName(repo), GRAMMAR_ALIASES[key]);
+}
+
+/** Languages graft reads with grammars that are not the fork's own, for grouping the Languages entries. */
+const OTHER_LANGUAGES = ["Python", "JavaScript", "TypeScript", "Java", "Go", "Rust", "Ruby", "PHP", "Swift", "Scala", "Lua"];
+/** The item Languages entries that name no language go under. */
+export const OTHER_LANGUAGE = "Other";
+
+/** The first sentence of an entry, which says what it is about. */
+function firstSentence(text) {
+  return (/^.*?[.!?](?=\s+["'A-Z]|$)/.exec(text)?.[0] ?? text).trim();
+}
+
+/**
+ * Puts every Languages entry of a group (main area "lang") behind one short item per language,
+ * so the main list keeps one line per language and build whose details link lists them: the
+ * grammar items of attachGrammarEntries, the commit-message entries and the legacy items about
+ * that language. An entry naming several languages is listed under each, and one naming none
+ * under OTHER_LANGUAGE. The item says "<Language> support has been added." when a feature in it
+ * announces the language's support, "The <Language> grammar has been updated." when it holds
+ * grammar or parsing changes of a fork grammar, and "<Language> support has been updated."
+ * otherwise. Its type is the first of TYPES among its details, and `types` lists all of them for
+ * the type filter. Details come by type, in the order they were listed within a type.
+ * @param {ReturnType<typeof groupCommits>} groups
+ * @param {string[]} repos  the grammar repositories (for the language names)
+ */
+export function groupLanguages(groups, repos) {
+  const languages = [
+    ...repos.map((repo) => ({ name: grammarName(repo), repo })),
+    ...OTHER_LANGUAGES.map((name) => ({ name, repo: null })),
+  ].filter((l, i, all) => all.findIndex((x) => x.name === l.name) === i);
+  const typeIndex = (type) => TYPES.findIndex((t) => t.key === type);
+  return groups.map((g) => {
+    const buckets = new Map();
+    const bucket = (name, repo) => {
+      if (!buckets.has(name)) buckets.set(name, { name, repo, details: [], also: new Set() });
+      return buckets.get(name);
+    };
+    const rest = [];
+    for (const e of g.entries) {
+      if (e.areas[0] !== "lang") {
+        rest.push(e);
+        continue;
+      }
+      if (e.grammar) {
+        const b = bucket(grammarName(e.grammar), e.grammar);
+        b.details.push(...e.details.map((d) => ({ ...d, grammar: true, fromGrammar: true })));
+        continue;
+      }
+      const detail = { type: e.type, text: e.text, ...(e.html ? { html: e.html } : {}), grammar: isParsingEntry(e.text, e.type) };
+      const named = languages.filter((l) => (l.repo ? namesGrammar(e.text, l.repo) : namesLanguage(e.text, l.name)));
+      for (const l of named.length ? named : [{ name: OTHER_LANGUAGE, repo: null }]) {
+        const b = bucket(l.name, l.repo);
+        b.details.push(detail);
+        for (const a of e.areas.slice(1)) b.also.add(a);
+      }
+    }
+    const items = [...buckets.values()].map((b) => {
+      const seen = new Set();
+      const details = b.details
+        .filter((d) => !seen.has(d.text) && seen.add(d.text))
+        .map((d, i) => ({ d, i }))
+        .sort((x, y) => typeIndex(x.d.type) - typeIndex(y.d.type) || x.i - y.i)
+        .map(({ d: { grammar, fromGrammar, ...d } }) => d);
+      const types = TYPES.map((t) => t.key).filter((t) => details.some((d) => d.type === t));
+      // Only graft's own entries announce a language, not the lines of its grammar repository
+      const announced = b.details.some(
+        (d) => !d.fromGrammar && d.type === "feature" && /^[^.]{0,40}\bsupport\b/i.test(firstSentence(d.text)) && namesLanguage(firstSentence(d.text), b.name),
+      );
+      const text =
+        b.name === OTHER_LANGUAGE
+          ? "Other changes to language support and parsing."
+          : announced
+            ? `${b.name} support has been added.`
+            : b.repo && b.details.some((d) => d.grammar)
+              ? `The ${b.name} grammar has been updated.`
+              : `${b.name} support has been updated.`;
+      return { type: types[0], types, text, areas: ["lang", ...b.also], language: b.name, details };
+    });
+    // By type; within a type the language items come last, by language, "Other" last
+    const rank = (e) => typeIndex(e.type) * 3 + (e.language ? 2 : e.legacy ? 0 : 1);
+    const other = (e) => (e.language === OTHER_LANGUAGE ? 1 : 0);
+    const entries = [...rest, ...items].sort(
+      (a, b) => rank(a) - rank(b) || (a.language && b.language ? other(a) - other(b) || a.language.localeCompare(b.language, "en") : 0),
+    );
+    return { ...g, entries };
+  });
+}
+
+/**
+ * Whether a fork commit's entry is about how files of a language are parsed (parse and syntax
+ * errors, what is recognised or read correctly, rebuilt parsers), as opposed to a new language
+ * or another feature of graft: such entries go behind the grammar's details link too. Only the
+ * first sentence counts, which says what the entry is about. A feature counts only when it is
+ * about syntax or parse errors and not about what the index or graph now holds.
+ */
+export function isParsingEntry(text, type = "fix") {
+  const first = (/^.*?[.!?](?=\s+["'A-Z]|$)/.exec(text)?.[0] ?? text).trim();
+  // "Bash support (.sh, …)", "MATLAB and Simulink support." announce a language, not a fix;
+  // entries about this changelog only name the parser work it lists
+  if (/^[^.]{0,40}\bsupport\b/i.test(first) || /\bchangelog\b/i.test(first)) return false;
+  if (type === "feature") return /syntax errors?|parse errors?|\bparses?\b/i.test(first) && !/\bindex|\bgraph\b|show up/i.test(first);
+  return /\bpars(?:e|es|ed|er|ers|ing)\b|syntax errors?|recogni[sz]ed|\bno longer (?:read as|breaks|swallows)\b|\bread (?:correctly|in full|more|without)\b/i.test(first);
+}
+
+/**
+ * Adds the grammar repositories' changes to the fork commits that ship them: the first fork
+ * commit (by commit time) at or after the grammar commit that changes a vendored file of its
+ * package. Changes no fork commit ships yet go into a pending pseudo-commit (hash "") at the
+ * front. Each fork commit gets one short item per grammar ("The C grammar has been updated.",
+ * filed under "lang") whose `details` are that grammar's lines, word for word, oldest first,
+ * followed by the fork commit's own entries about parsing that language (see namesGrammar and
+ * isParsingEntry), which leave the main list; an entry naming several such languages is listed
+ * under each. A grammar line the fork commits that change the same vendored package already say
+ * (see alreadySaid) is left out, and a grammar with no line left gets no item.
+ * @param {{ hash: string, date: string, entries: object[] }[]} commits  the fork's commits, newest first
+ * @param {ReturnType<typeof readGrammarRepos>["repos"]} repos
+ * @param {{ hash: string, time: number, files: string[] }[]} vendorLog  the fork commits that change vendor/
+ * @returns {typeof commits}  a new list; the commits passed in are not changed
+ */
+export function attachGrammarEntries(commits, repos, vendorLog) {
+  const out = commits.map((c) => ({ ...c, entries: [...c.entries] }));
+  const byHash = new Map(out.map((c) => [c.hash, c]));
+  const own = new Map(commits.map((c) => [c.hash, c.entries]));
+  const pending = { hash: "", date: "", entries: [] };
+  const items = new Map();
+  const itemFor = (target, repo) => {
+    const key = `${target.hash}\u0000${repo}`;
+    if (!items.has(key)) {
+      const item = { type: "improvement", text: `The ${grammarName(repo)} grammar has been updated.`, area: "lang", grammar: repo, details: [] };
+      items.set(key, item);
+      target.entries.push(item);
+    }
+    return items.get(key);
+  };
+  for (const { repo, package: pkg, commits: grammarCommits } of repos) {
+    const ships = vendorLog
+      .filter((v) => byHash.has(v.hash) && v.files.some((f) => isVendoredFile(f, pkg)))
+      .sort((a, b) => a.time - b.time);
+    // Only the fork commits' own words count, not grammar items attached to them before
+    const said = ships.flatMap((v) => own.get(v.hash) ?? []).map((e) => significantWords(e.text));
+    for (const g of grammarCommits) {
+      const ship = ships.find((v) => v.time >= g.time);
+      const target = ship ? byHash.get(ship.hash) : pending;
+      const details = g.entries.filter((e) => !alreadySaid(e.text, said)).map((e) => ({ type: e.type, text: e.text }));
+      if (!details.length) continue;
+      if (!ship && g.date > pending.date) pending.date = g.date;
+      itemFor(target, repo).details.push(...details);
+    }
+  }
+  // The grammar repositories' own lines per commit and grammar, before fork lines join them
+  const grammarLines = new Map([...items].map(([key, item]) => [key, item.details.map((d) => d.text)]));
+  // The fork commits' own lines about parsing a language one of the grammars parses
+  for (const commit of out) {
+    for (const e of own.get(commit.hash)) {
+      if (!isParsingEntry(e.text, e.type)) continue;
+      let named = repos.map((r) => r.repo).filter((repo) => namesGrammar(e.text, repo));
+      // A line naming no language goes with the grammar lines of this commit that mostly say it
+      if (!named.length) {
+        named = repos
+          .map((r) => r.repo)
+          .filter((repo) => alreadySaid(e.text, grammarLines.get(`${commit.hash}\u0000${repo}`) ?? [], 0.6));
+      }
+      if (!named.length) continue;
+      commit.entries = commit.entries.filter((x) => x !== e);
+      for (const repo of named) itemFor(commit, repo).details.push({ type: e.type, text: e.text });
+    }
+  }
+  return pending.entries.length ? [pending, ...out] : out;
+}
+
+/** The fork's commits that change files under vendor/, with those files. */
+function readVendorLog(repoRoot) {
+  const log = git(repoRoot, ["log", "--no-merges", "--format=%x1e%H%x1f%ct", "--name-only", `${UPSTREAM_REF}..HEAD`, "--", "vendor"]);
+  return log
+    .split("\x1e")
+    .filter((rec) => rec.trim())
+    .map((rec) => {
+      const [head, ...files] = rec.split("\n");
+      const [hash, time] = head.split("\x1f");
+      return { hash, time: Number(time), files: files.map((f) => f.trim()).filter(Boolean) };
+    });
+}
+
 /**
  * The regenerated changelog page; `buildsData` defaults to changelog-builds.json and `legacy` to
- * the items of changelog-legacy.json.
+ * the items of changelog-legacy.json. `grammars` is the regenerated snapshot of the grammar
+ * repositories (changelog-grammars.json) and whether it differs from the file.
  */
 export function generateChangelog(repoRoot, buildsData = readBuilds(repoRoot), legacy = readLegacy(repoRoot)) {
   const path = join(repoRoot, CHANGELOG_RELATIVE);
   const before = readFileSync(path, "utf8");
-  const { commits, unrecorded, builds } = readHistory(repoRoot, buildsData);
-  const { groups, unmatched } = mergeLegacy(groupCommits(commits, { unrecorded, builds }), legacy);
+  const history = readHistory(repoRoot, buildsData);
+  const grammars = readGrammarRepos(repoRoot);
+  const commits = grammars.repos.length ? attachGrammarEntries(history.commits, grammars.repos, readVendorLog(repoRoot)) : history.commits;
+  const merged = mergeLegacy(groupCommits(commits, history), legacy);
+  const { unmatched } = merged;
+  const groups = groupLanguages(merged.groups, grammars.repos.map((r) => r.repo));
   const html = renderChangelog(before, groups);
-  return { path, before, html, changed: html !== before, groups, unmatched };
+  return {
+    path,
+    before,
+    html,
+    changed: html !== before,
+    groups,
+    unmatched,
+    grammars: { path: grammars.snapshotPath, text: grammars.snapshot, changed: grammars.snapshotChanged },
+  };
 }
 
 async function main(argv) {
@@ -434,19 +855,23 @@ async function main(argv) {
   const hook = argv.includes("--hook");
   const quiet = hook || argv.includes("--quiet");
   try {
-    const { path, html, changed, groups, unmatched } = generateChangelog(repoRoot);
+    const { path, html, changed, groups, unmatched, grammars } = generateChangelog(repoRoot);
     const pending = groups.find((g) => g.kind === "pending").entries.length;
     if (unmatched.length && !hook) {
       console.error(`! ${LEGACY_RELATIVE}: ${unmatched.length} "replaces" text(s) match no commit-message entry any more, so nothing is left out for them:`);
       for (const t of unmatched) console.error(`  - ${t.length > 100 ? `${t.slice(0, 100)}…` : t}`);
     }
     if (argv.includes("--check")) {
-      if (changed) {
-        console.error(`✗ ${CHANGELOG_RELATIVE} is out of date — run npm run changelog`);
+      if (changed || grammars.changed) {
+        console.error(`✗ ${changed ? CHANGELOG_RELATIVE : GRAMMARS_RELATIVE} is out of date — run npm run changelog`);
         return 1;
       }
       if (!quiet) console.log(`✓ ${CHANGELOG_RELATIVE} is up to date`);
       return 0;
+    }
+    if (grammars.changed) {
+      writeFileSync(grammars.path, grammars.text);
+      console.log(`✓ updated ${GRAMMARS_RELATIVE} from the local grammar repositories — commit it with ${CHANGELOG_RELATIVE}`);
     }
     if (changed) writeFileSync(path, html);
     if (changed || !quiet) {

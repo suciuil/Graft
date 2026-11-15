@@ -7,16 +7,21 @@ process.env.GRAFT_MCP_NPX = '1';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { registerMcpConfigs, serverEntry } from '../src/hosts/mcp-config.js';
+import { npxLaunch, registerMcpConfigs, serverEntry } from '../src/hosts/mcp-config.js';
+import { readForkRegistry } from '../src/cli-meta.js';
 
 function fresh(): string { return mkdtempSync(join(tmpdir(), 'graft-mcpcfg-')); }
+
+// This fork: the npx form names the fork's registry (package.json's publishConfig.registry).
+const REGISTRY = readForkRegistry(import.meta.url);
+const NPX_ARGS = ['-y', ...(REGISTRY ? [`--@nanonets:registry=${REGISTRY}`] : []), '@nanonets/graft', 'mcp'];
 
 test('cursor/gemini/kiro get repo-local JSON entries', () => {
   const repo = fresh(); const home = fresh();
   const w = registerMcpConfigs(repo, ['cursor', 'gemini', 'kiro'], { home });
   assert.deepEqual(w.map((x) => x.action), ['created', 'created', 'created']);
   const cursor = JSON.parse(readFileSync(join(repo, '.cursor', 'mcp.json'), 'utf8'));
-  assert.deepEqual(cursor.mcpServers.graft, { command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] });
+  assert.deepEqual(cursor.mcpServers.graft, { command: 'npx', args: NPX_ARGS });
   assert.ok(existsSync(join(repo, '.gemini', 'settings.json')));
   assert.ok(existsSync(join(repo, '.kiro', 'settings', 'mcp.json')));
 });
@@ -87,7 +92,7 @@ test('copilot gets .vscode/mcp.json under `servers`, with a stdio type; foreign 
   const w = registerMcpConfigs(repo, ['copilot'], { home });
   assert.deepEqual(w.map((x) => [x.id, x.action]), [['copilot', 'updated']]);
   const cfg = JSON.parse(readFileSync(join(repo, '.vscode', 'mcp.json'), 'utf8'));
-  assert.deepEqual(cfg.servers.graft, { type: 'stdio', command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] });
+  assert.deepEqual(cfg.servers.graft, { type: 'stdio', command: 'npx', args: NPX_ARGS });
   assert.ok(cfg.servers.other, 'foreign server preserved');
   assert.deepEqual(cfg.inputs, [{ id: 'k' }], 'other top-level keys preserved');
   assert.equal(cfg.mcpServers, undefined, 'VS Code keys servers under `servers`, not `mcpServers`');
@@ -111,7 +116,7 @@ test('serverEntry prefers the installed binary and falls back to npx', () => {
   delete process.env.GRAFT_MCP_NPX;
   try {
     assert.deepEqual(serverEntry({ onPath: true }), { command: 'graft', args: ['mcp'] });
-    assert.deepEqual(serverEntry({ onPath: false }), { command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] });
+    assert.deepEqual(serverEntry({ onPath: false }), { command: 'npx', args: NPX_ARGS });
     for (const e of [serverEntry({ onPath: true }), serverEntry({ onPath: false })]) {
       assert.ok(!e.command.startsWith('/'), 'never an absolute path — configs get shared');
     }
@@ -123,4 +128,23 @@ test('serverEntry prefers the installed binary and falls back to npx', () => {
 test('GRAFT_MCP_NPX overrides an installed binary', () => {
   process.env.GRAFT_MCP_NPX = '1';
   assert.equal(serverEntry({ onPath: true }).command, 'npx', 'the escape hatch wins');
+});
+
+// This fork: committed configs run on teammates' machines whose .npmrc may lack the
+// fork's redirect, so the npx line itself pins each package's scope to the fork's registry.
+test('the npx form pins the package to the fork registry, for graft and for trail', () => {
+  assert.deepEqual(npxLaunch('@nanonets/graft', 'https://fork.invalid/npm/'), {
+    command: 'npx',
+    args: ['-y', '--@nanonets:registry=https://fork.invalid/npm/', '@nanonets/graft', 'mcp'],
+  });
+  assert.deepEqual(npxLaunch('@trailhq/trail-code', 'https://fork.invalid/npm/').args, ['-y', '--@trailhq:registry=https://fork.invalid/npm/', '@trailhq/trail-code', 'mcp']);
+  assert.deepEqual(npxLaunch('@nanonets/graft', null).args, ['-y', '@nanonets/graft', 'mcp'], 'no registry known: nothing to name');
+  assert.ok(REGISTRY, "package.json names the fork's registry");
+  process.env.GRAFT_MCP_NPX = '1';
+  for (const brand of ['graft', 'trail'] as const) {
+    const { args } = serverEntry({ brand });
+    const pkg = args[args.length - 2];
+    assert.ok(args.includes(`--${pkg.split('/')[0]}:registry=${REGISTRY}`), `${brand}: ${args.join(' ')}`);
+    assert.ok(!args.join(' ').includes('registry.npmjs.org'));
+  }
 });

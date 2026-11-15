@@ -109,7 +109,8 @@ async function interactive(deps: DeepModelDeps, root: string): Promise<DeepModel
 
   const current = cfg.model;
   const src = settingSource("model", deps.config, cfg, deps.env);
-  const from = src.env ?? "graft's default";
+  const from =
+    src.env ?? (cfg.modelDefaulted && deps.config.defaultModel ? "graft's default: the latest Claude Haiku the gateway serves" : "graft's default");
   const verdict = currentModelVerdict(current, listings, src.env !== undefined);
   if (verdict.usable) {
     // The model already set (GRAFT_MODEL, or the default) is one the gateway serves

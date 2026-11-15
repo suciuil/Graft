@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { resolveContextDir } from './state.js';
 import { graftCliPath } from './paths.js';
 import type { HookOut } from '../skills/types.js';
+import { HOOK_CHILD_ENV } from '../context/price-auto-update.js';
 
 /** Default budget for a graft child process invoked from a hook, matching the 8s
  * the installed hook entries carry. */
@@ -16,9 +17,10 @@ export const CHILD_TIMEOUT_MS = 8000;
 
 /** The env a hook's graft child runs with. In a repo on trail with no map yet, the
  * child starts its first build and answers at once: the wait it would otherwise do
- * (graph/refresh.ts) outlasts any hook's budget. */
+ * (graph/refresh.ts) outlasts any hook's budget. Nor does it download model prices
+ * (see HOOK_CHILD_ENV): the hook would kill it before the download ends. */
 function hookChildEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, GRAFT_FIRST_BUILD_WAIT_MS: '0' };
+  return { ...process.env, GRAFT_FIRST_BUILD_WAIT_MS: '0', [HOOK_CHILD_ENV]: '1' };
 }
 
 /**

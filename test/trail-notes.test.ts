@@ -406,7 +406,10 @@ test("the trail skill's description names when to use its commands, and the body
   assert.match(data.description, /When the session finds what the code can't tell\s+the next person/);
   assert.match(data.description, /save a learning with trail note and commit it with the change/);
   assert.match(data.description, /\.trail\/learnings\//, "where the learnings are, for a Claude without trail");
-  assert.match(data.description, /npm install -g @trailhq\/trail/, "and how to get the command");
+  // This fork: the description points to the body's install, which names the fork's
+  // registry (its URL would put another name in the description), never a bare one.
+  assert.match(data.description, /run the npm install command under If trail\s+isn't installed below, never a bare one/, "and how to get the command");
+  assert.match(content, /run `npm install -g @trailhq\/trail-code --@trailhq:registry=\S+`/, "pinned to the fork's registry");
   assert.match(data.description, /If npm says EACCES, never use sudo/, "and never with sudo");
   assert.doesNotMatch(data.description, /graft/, "nothing about the old name or the graft\/ folder");
   const moments = content.indexOf("## When to reach for trail");

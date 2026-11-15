@@ -110,10 +110,19 @@ const run = (batch) => spawnSync(process.execPath, ["--import", "tsx", "--test",
     ...gitEnv,
     ...tmpEnv,
     GRAFT_NO_TRAIL_SWITCH: "1",
+    // A query in a scratch repo with outdated instructions would otherwise
+    // rewrite them, and with no stamp replay `init`'s writes outside the repo
+    // (~/.codex, ~/.claude) into the developer's real home. Its own tests turn
+    // it back on (test/auto-init.test.ts).
+    GRAFT_NO_AUTO_INIT: "1",
     GRAFT_PRICES_FILE: join(repoRoot, "test", ".no-such-prices.json"),
     // Likewise the LiteLLM snapshot shipped with graft: regenerating it must not
     // change which models the tests see priced. Its own tests turn it back on.
     GRAFT_BUNDLED_PRICES: "0",
+    // A developer who said "yes" to the installer's price list question would
+    // otherwise have every test that names an unpriced model download LiteLLM's
+    // catalog. Its own tests turn it back on with a fake fetch.
+    GRAFT_PRICES_AUTO_UPDATE: "0",
     GRAFT_REPOS_FILE: reposFile,
     // The opt-in savings report keeps its switch and queue in a scratch home,
     // so a developer who enabled it never queues (or sends) a test's savings.
