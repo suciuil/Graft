@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FORK_HOMEPAGE_URL, FORK_RELEASES_URL, FORK_REPO_URL, ISSUES_URL, PROJECT_URL, fileUri, findChangelog, formatAbout, parseAboutTarget } from "../src/about.js";
 
@@ -67,6 +67,15 @@ test("formatAbout lists the fork's issue tracker and how to open it", () => {
     assert.match(text, /graft issues/);
   }
   assert.equal(ISSUES_URL, "https://github-ct.int.automotive-wan.com/suciui/graft/issues");
+  assert.ok(ISSUES_URL.toLowerCase().startsWith(`${FORK_REPO_URL.toLowerCase()}/`));
+});
+
+test("the changelog page links the fork's releases and issue tracker", () => {
+  const html = readFileSync(join(repoRoot, "docs", "changelog.html"), "utf8");
+  assert.ok(html.includes(`${FORK_RELEASES_URL}/latest`));
+  assert.ok(html.includes(`"${FORK_RELEASES_URL}"`));
+  assert.ok(html.includes(ISSUES_URL));
+  assert.ok(!html.includes("graft-tool"));
 });
 
 test("formatAbout prints no path when the installation has no changelog copy", () => {

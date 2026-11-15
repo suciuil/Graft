@@ -19,11 +19,8 @@ import { pathToFileURL } from "node:url";
 /** The upstream project's homepage. */
 export const PROJECT_URL = "https://github.com/trailhq/Trail-Code";
 
-/** The fork's public distribution repository: its homepage and its releases live there. */
+/** The fork's public repository: its issue tracker, its homepage and its releases live there. */
 export const FORK_REPO_URL = "https://github-ct.int.automotive-wan.com/suciui/Graft";
-
-/** The fork's source repository: its issue tracker lives there. */
-export const FORK_SOURCE_URL = "https://github-ct.int.automotive-wan.com/suciui/graft";
 
 /**
  * The fork's homepage: the latest fork changelog, served by GitHub Pages from the
@@ -35,8 +32,11 @@ export const FORK_HOMEPAGE_URL = "https://github-ct.int.automotive-wan.com/pages
 /** Every published offline installer kit of this fork, the latest first (`scripts/publish-release.mjs`). */
 export const FORK_RELEASES_URL = `${FORK_REPO_URL}/releases`;
 
-/** Where users of this fork report bugs and request features (`graft issues`, listed by `graft about`). */
-export const ISSUES_URL = `${FORK_SOURCE_URL}/issues`;
+/**
+ * Where users of this fork report bugs and request features (`graft issues`, listed by `graft about`):
+ * the issue tracker of `FORK_REPO_URL` (GitHub ignores the case of the repository name).
+ */
+export const ISSUES_URL = "https://github-ct.int.automotive-wan.com/suciui/graft/issues";
 
 /** The fork changelog, relative to the package (or repo) root. */
 export const CHANGELOG_RELATIVE = join("docs", "changelog.html");
