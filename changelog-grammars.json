@@ -532,6 +532,21 @@
               "text": "A macro in front of a cast and a sum in an argument, such as vSetTpNew(TP_CHANNEL_INDEX (word)rub_SepTime+1, s), no longer causes a parse error."
             }
           ]
+        },
+        {
+          "hash": "816da00be0aceb2f824d5add6ddcfdec8db7b4ae",
+          "time": 1794927881,
+          "date": "2026-11-17",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "Calls nested three or more deep inside parentheses, such as x = (A(B(C(a))));, no longer cause a parse error."
+            },
+            {
+              "type": "change",
+              "text": "A macro in front of a qualified cast in an argument, such as f(X_FIRST (const T *)p), is now read as a macro call with the type as its argument, followed by the value."
+            }
+          ]
         }
       ]
     },
@@ -1325,6 +1340,29 @@
             {
               "type": "fix",
               "text": "`get '/api/x'(controller: 'x')` is now read as a call of `get` with the string-named call as its argument, instead of two separate statements."
+            }
+          ]
+        },
+        {
+          "hash": "d5b3b22ec7efd93d1a9cd8f1356631aba28c3d55",
+          "time": 1794928780,
+          "date": "2026-11-17",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "Methods and fields whose type is written in capitals after a modifier or an annotation (`public T withName(String n)`, `private URI uri`, `@Override URI base()`), untyped fields after an access modifier alone (`private x = 1`) and type parameters bounded by an all-capitals type (`class Builder<T extends Builder>`, `class B<T extends B<T>>`) now parse correctly."
+            },
+            {
+              "type": "fix",
+              "text": "Class literals such as `Foo.class` and `String.class` now parse correctly."
+            },
+            {
+              "type": "feature",
+              "text": "`synchronized (lock) { ... }` blocks are now recognized, also with a class literal as the lock (`synchronized (Foo.class) { }`)."
+            },
+            {
+              "type": "fix",
+              "text": "A triple-quoted string that starts with a line continuation (`'''\\` at the end of the line) no longer causes a parse error in files with CRLF line endings."
             }
           ]
         }
