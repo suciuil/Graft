@@ -39,18 +39,21 @@ test("a file name entry claims only that name: CMakeLists.txt, never other .txt 
     assert.equal(languageOf(f), "cmake", f);
     assert.equal(languageLabelOf(f), "cmake", f);
   }
-  for (const f of ["notes.txt", "MyCMakeLists.txt", "CMakeLists.txt.bak"]) assert.equal(languageOf(f), null, f);
+  // Other .txt files are plain text (indexed only on opt-in), never CMake.
+  for (const f of ["notes.txt", "MyCMakeLists.txt"]) assert.equal(languageOf(f), "text", f);
+  assert.equal(languageOf("CMakeLists.txt.bak"), null);
 });
 
 test("shell and Perl files are claimed by their extensions and start-up file names", { skip: languageOf("a.sh") && languageOf("a.pl") ? false : "bash/perl grammar not built" }, () => {
   for (const f of ["a.sh", "a.bash", ".bashrc", "home/.bash_profile", "A.SH"]) assert.equal(languageOf(f), "bash", f);
   for (const f of ["a.pl", "lib/My/App.pm", "t/basic.t"]) assert.equal(languageOf(f), "perl", f);
-  for (const f of ["a.zsh", "a.ksh", "a.txt"]) assert.equal(languageOf(f), null, f);
+  for (const f of ["a.zsh", "a.ksh"]) assert.equal(languageOf(f), null, f);
 });
 
 test("makefiles are claimed by name and fragments by extension; automake files are not", { skip: languageOf("Makefile") ? false : "make grammar not built" }, () => {
   for (const f of ["Makefile", "makefile", "GNUmakefile", "src/Makefile", "rules.mk", "win.mak"]) assert.equal(languageOf(f), "make", f);
-  for (const f of ["Makefile.am", "Makefile.in", "MyMakefile", "makefile.txt"]) assert.equal(languageOf(f), null, f);
+  for (const f of ["Makefile.am", "Makefile.in", "MyMakefile"]) assert.equal(languageOf(f), null, f);
+  assert.equal(languageOf("makefile.txt"), "text", "a .txt named like a makefile is plain text");
 });
 
 test("MATLAB source files and live scripts are claimed", { skip: languageOf("a.m") ? false : "matlab grammar not built" }, () => {

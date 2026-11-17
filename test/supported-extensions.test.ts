@@ -12,6 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { supportedExtensions, unsupportedExtensions } from "../src/graph/source-files.js";
+import { languageOf } from "../src/graph/extract.js";
 
 test("supportedExtensions covers both tiers, sorted and de-duped", () => {
   const exts = supportedExtensions();
@@ -45,7 +46,9 @@ test("extension normalization: missing dot and mixed case still match a parser",
 
 test("a file claimed by its whole name (CMakeLists.txt) is judged by that name, not as an extension", { skip: supportedExtensions().includes("CMakeLists.txt") ? false : "cmake grammar not built" }, () => {
   assert.deepEqual(unsupportedExtensions(["CMakeLists.txt", "cmakelists.txt", ".cmake"]), []);
-  assert.deepEqual(unsupportedExtensions([".txt"]), [".txt"], "claiming CMakeLists.txt does not claim every .txt");
+  // Every other .txt is plain text (graph/text.ts), so `-e .txt` is accepted too.
+  assert.deepEqual(unsupportedExtensions([".txt"]), []);
+  assert.equal(languageOf("notes.txt"), "text", "claiming CMakeLists.txt does not make every .txt CMake");
 });
 
 test("-e m and -e mlx are accepted once the MATLAB grammar is built; Simulink files always are", { skip: supportedExtensions().includes(".m") ? false : "matlab grammar not built" }, () => {

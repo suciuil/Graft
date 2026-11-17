@@ -12,6 +12,8 @@ import { collectBindings, goReceiverVarOf, resolveRecvType, type FileBindings } 
 import { depthReady, parseDepth, type SyntaxNode } from "./depth-parser.js";
 import { grammarAvailable } from "./native.js";
 import { extractSimulink } from "./simulink.js";
+import { extractText } from "./text.js";
+import { plainTextExtensions } from "../util/plain-text.js";
 import { isTresosTemplate, tresosViews } from "./tresos.js";
 import { erbView, isErbTemplate } from "./erb.js";
 // The fork's optional grammars always parse native (depth-parser.ts backendOf), so their extractors take the full node API.
@@ -52,7 +54,8 @@ export type Language =
   | "perl"
   | "make"
   | "matlab"
-  | "simulink";
+  | "simulink"
+  | "text";
 
 /** The active SQL dialect, or null when no SQL grammar is built. Only Oracle
  * PL/SQL is wired today, so this is "plsql" exactly when that grammar loads. */
@@ -192,6 +195,27 @@ const OPTIONAL_EXTENSIONS: ReadonlyArray<{ ext: string; grammar: Language; label
   { ext: ".mlx", grammar: "matlab", label: "matlab" },
 ];
 
+/**
+ * Plain text, chunked by text.ts with no grammar. Checked LAST, after the optional
+ * table, so `CMakeLists.txt` stays CMake — even where the CMake grammar is not
+ * built, entryFor returns no entry for it rather than falling through to here.
+ *
+ * Always claimed by extension, like Simulink, but indexed only when the repo opts
+ * in (`BuildConfig.indexText`): graph/source-files.ts drops `.txt` files from the
+ * source set otherwise. The filter lives there, not here, because languageOf is a
+ * pure path → language map that the build, `check`, the fingerprint and the
+ * resolver all share, and none of them should read repo state to answer it.
+ * The extensions come from util/plain-text.ts, which every other place that
+ * treats text specially reads too: `.txt`, plus the ones the repo being indexed
+ * added (`graft config index-text add`). That list is read per call rather than
+ * fixed here, the way {@link grammarAvailable} is for the optional grammars, and
+ * it never holds an extension another table claims, so text never takes a file
+ * from a parser.
+ */
+function textExtensions(): Array<{ ext: string; grammar: Language; label: string }> {
+  return plainTextExtensions().map((ext) => ({ ext, grammar: "text" as Language, label: "text" }));
+}
+
 /** Whether `lowerPath` is claimed by an extension-table entry: a suffix match for an
  * extension (`.ts`), a case-insensitive basename match for a file name
  * (`CMakeLists.txt`), on either path separator. */
@@ -206,7 +230,8 @@ function entryFor(path: string): { ext: string; grammar: Language; label: string
   const core = EXTENSIONS.find((e) => claims(p, e.ext));
   if (core) return core;
   const opt = OPTIONAL_EXTENSIONS.find((e) => claims(p, e.ext));
-  return opt && grammarAvailable(opt.grammar) ? opt : undefined;
+  if (opt) return grammarAvailable(opt.grammar) ? opt : undefined;
+  return textExtensions().find((e) => claims(p, e.ext));
 }
 
 /** The depth tier's whole extension table â€” core entries, then the optional ones
@@ -216,13 +241,18 @@ export function depthRegistry(): ReadonlyArray<{ ext: string; grammar: Language;
   return [
     ...EXTENSIONS.map((e) => ({ ...e, optional: false })),
     ...OPTIONAL_EXTENSIONS.map((e) => ({ ...e, optional: true })),
+    ...textExtensions().map((e) => ({ ...e, optional: false })),
   ];
 }
 
 /** Every file extension a depth-tier (hand-written) extractor claims â€” the core
  * grammars always, plus any optional grammar whose binding is currently built. */
 export function depthExtensions(): string[] {
-  return [...EXTENSIONS.map((e) => e.ext), ...OPTIONAL_EXTENSIONS.filter((e) => grammarAvailable(e.grammar)).map((e) => e.ext)];
+  return [
+    ...EXTENSIONS.map((e) => e.ext),
+    ...OPTIONAL_EXTENSIONS.filter((e) => grammarAvailable(e.grammar)).map((e) => e.ext),
+    ...textExtensions().map((e) => e.ext),
+  ];
 }
 
 /** Map a file path to a supported language, or null if unsupported. */
@@ -336,7 +366,7 @@ export interface ExtractResult {
 /** Max chars of normalized body stored per symbol for search. Large enough that
  * essentially every real definition is stored whole â€” only a rare giant function
  * is clipped â€” while bounding how much the committed graph can grow. */
-const MAX_BODY_CHARS = 5000;
+export const MAX_BODY_CHARS = 5000;
 
 /** Cap for a file node's module-level residual (imports, constants, module
  * docstring â€” everything not inside a symbol). Higher than the per-symbol cap
@@ -568,6 +598,7 @@ const KINDS_BY_LANG: Record<Language, Record<string, Kind>> = {
   make: {},
   matlab: {},
   simulink: {},
+  text: {},
 };
 
 /**
@@ -630,6 +661,8 @@ const CALL_TYPES: Record<Language, ReadonlySet<string>> = {
   matlab: new Set<string>(),
   // Simulink: simulink.ts emits its edges (model references, chart code).
   simulink: new Set<string>(),
+  // Plain text: prose has no call graph.
+  text: new Set<string>(),
 };
 
 const FUNCTION_VALUE_TYPES = new Set([
@@ -698,6 +731,8 @@ interface DefDescriptor {
 export function extractFile(rel: string, source: string, lang: Language): ExtractResult {
   // Simulink packages need no grammar: their unpacked XML/JSON is read directly.
   if (lang === "simulink") return extractSimulink(rel, source);
+  // Plain text is cut into line chunks, no grammar (text.ts).
+  if (lang === "text") return extractText(rel, source);
   // A `.h` header carrying C++ constructs is really C++ â€” the C grammar can't
   // parse classes/templates â€” so route it to the C++ extractor. Shared with the
   // build banner's label so the two can never name different languages.
@@ -4671,14 +4706,15 @@ function plsqlCallee(
 }
 
 /** A bare file node for a language with no symbol structure to extract (Razor)
- * or whose optional grammar isn't built. Mirrors the walk path's file node. */
-export function fileNodeOf(rel: string, source: string): NodeV1 {
+ * or whose optional grammar isn't built. Mirrors the walk path's file node.
+ * `lineCount` spares a caller that has already split `source` a second split. */
+export function fileNodeOf(rel: string, source: string, lineCount: number = source.split("\n").length): NodeV1 {
   return {
     id: rel,
     name: basename(rel),
     kind: "file",
     path: rel,
-    span: `L1-L${Math.max(1, source.split("\n").length)}`,
+    span: `L1-L${Math.max(1, lineCount)}`,
     signature: null,
     exported: true,
     origin: "ast",

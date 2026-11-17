@@ -41,6 +41,9 @@ export type Kind =
   | "element"
   | "view"
   | "heading"
+  // A slice of a plain-text file (graph/text.ts) that opens with no heading of its
+  // own: cut at a paragraph break once the previous slice grew big enough.
+  | "chunk"
   // A build target: CMake's add_library / add_executable / add_custom_target (what
   // target_link_libraries names), or a make rule's target (what prerequisites name).
   | "target";

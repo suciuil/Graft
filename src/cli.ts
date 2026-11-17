@@ -63,7 +63,7 @@ import { combinedStaleness, deepRebuildDue, deepStalenessFor, ensureFreshChildre
 import { federateSkeleton, isPartsWorkspace, isWorkspaceBuildRoot, readWorkspace, removeWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
-import { listSourceFiles, unsupportedExtensions, supportedExtensions } from "./graph/source-files.js";
+import { claimedByParser, listSourceFiles, unsupportedExtensions, supportedExtensions, useTextExtensions } from "./graph/source-files.js";
 import { diagnoseEmptyBuild, formatEmptyBuild } from "./graph/empty-build.js";
 import { allPartsPlan, formatTooLarge, GRAPH_TOO_LARGE_EXIT, GraphTooLargeError, mb, type TooLargeReport } from "./graph/size-guard.js";
 import { buildAllParts, type PartsBuildResult } from "./graph/parts-build.js";
@@ -73,16 +73,18 @@ import {
   CONFIG_APPLY_NOTE,
   addDirEntries,
   clearDirEntries,
-  describeExcludeEntry,
+  dirEntryNote,
   dirProblem,
   excludeDirProblem,
   formatConfigList,
   includeDirProblem,
-  includeEntryNote,
+  indexTextDirProblem,
+  normalizeDirEntry,
   parseOnOff,
   readDirList,
   readFlag,
   removeDirEntries,
+  textExtensionNote,
   writeFlag,
   type DirListKey,
   type FlagKey,
@@ -123,10 +125,14 @@ import {
   readAutoDeep,
   readDeepStaleThreshold,
   readGlobalSettings,
+  readTextScope,
   resolveAutoDeep,
   resolveDeepStaleThreshold,
+  textExtensionsOf,
   type BuildConfig,
 } from "./util/state.js";
+import { isPlainTextPath, plainTextExtensions } from "./util/plain-text.js";
+import { textFileLoad } from "./graph/text.js";
 import {
   AUTO_DEEP_CHILD_ENV,
   autoDeepDue,
@@ -477,8 +483,21 @@ const engineFrom = (): Graft => new Graft(cliConfig());
  * no-op — `graft build -e ".vue"` used to accept it, index nothing, and exit 0. The
  * supported set is listed so `-e` also answers "what is actually supported".
  */
-function warnUnsupportedExtensions(exts?: string[]): void {
+function warnUnsupportedExtensions(exts?: string[], repo?: string): void {
   if (!exts?.length) return;
+  // Plain text is `.txt` plus what `repo` added with `graft config index-text add`.
+  if (repo) useTextExtensions(readTextScope(repo).exts);
+  // `-e` picks the files `--deep` summarizes, and plain text never is one
+  // (context/build.ts), so `-e txt` would be a quiet no-op: say what does index it.
+  for (const e of exts) {
+    const shown = e.trim().startsWith(".") ? e.trim() : `.${e.trim()}`;
+    if (plainTextExtensions().includes(shown.toLowerCase())) {
+      console.error(
+        `⚠ -e "${shown}": -e picks what --deep summarizes, and plain text is never summarized. ` +
+          `To index ${shown} files as searchable chunks, use ${cmd("--index-text")} (or ${cmd("graft config index-text on")}).`,
+      );
+    }
+  }
   const bad = unsupportedExtensions(exts);
   if (bad.length === 0) return;
   for (const e of bad) {
@@ -877,6 +896,23 @@ grouped(program.command("build"), GROUP.setup)
     "exclude untracked nested Git clones; persisted for later builds and automatic refreshes (default)",
   )
   .option(
+    "--index-text",
+    "index plain-text .txt files, each cut into chunks with their own line spans (never summarized by --deep); " +
+      "persisted for later builds and automatic refreshes",
+  )
+  .option(
+    "--no-index-text",
+    "leave .txt files out of the graph; persisted for later builds and automatic refreshes (default)",
+  )
+  .option(
+    "--index-text-dir <path>",
+    "index .txt files only under this folder (relative to the repo root, with its subtree), repeatable; turns " +
+      "--index-text on. Code is still indexed everywhere. Persisted, REPLACING the saved list; " +
+      "`graft config index-text-dirs add|remove|list` manages it one entry at a time",
+    (val: string, prev: string[]) => [...prev, val],
+    [] as string[],
+  )
+  .option(
     "--include-dir <name>",
     "index a directory the built-in skip list leaves out (node_modules, dist, build, _build, out, target, vendor, coverage, " +
       "__pycache__, venv) — a bare name, repeatable (e.g. --include-dir build --include-dir vendor); dot-dirs are never " +
@@ -932,6 +968,8 @@ grouped(program.command("build"), GROUP.setup)
       allParts?: boolean;
       followSubmodules?: boolean;
       followNestedRepos?: boolean;
+      indexText?: boolean;
+      indexTextDir?: string[];
       gitignore?: boolean;
       ignore?: boolean;
       workspace?: string | false;
@@ -958,7 +996,7 @@ grouped(program.command("build"), GROUP.setup)
       console.error(`✗ --synth-concurrency must be a number, got "${opts.synthConcurrency}"`);
       process.exit(1);
     }
-    warnUnsupportedExtensions(opts.extensions);
+    warnUnsupportedExtensions(opts.extensions, resolve(dir ?? "."));
     // --force only changes what the LLM pass recomputes; without --deep there is none.
     if (opts.force && !opts.deep) {
       console.error("✗ --force only applies with --deep (it re-runs the LLM pass on every file): `graft build --deep --force`");
@@ -1016,13 +1054,54 @@ grouped(program.command("build"), GROUP.setup)
       }
       onlyDirs = normalized;
     }
+    // Read before the heap check below, which must count the files this build
+    // will have: `--index-text` adds `.txt` files the saved setting leaves out.
+    const indexTextWasExplicit = command.getOptionValueSource("indexText") === "cli";
+    if (indexTextWasExplicit && typeof opts.indexText === "boolean") {
+      buildConfigPatch.indexText = opts.indexText;
+    }
+    if (opts.indexTextDir && opts.indexTextDir.length > 0) {
+      // Folders to take `.txt` files from: naming one asks for text there, so it
+      // turns indexText on, and contradicts an explicit --no-index-text.
+      if (indexTextWasExplicit && opts.indexText === false) {
+        console.error("✗ --index-text-dir indexes .txt files under a folder, so it cannot go with --no-index-text");
+        process.exit(1);
+      }
+      for (const p of opts.indexTextDir) {
+        const problem = indexTextDirProblem(p);
+        if (problem) {
+          console.error(`✗ --index-text-dir "${p}": ${problem}`);
+          process.exit(1);
+        }
+      }
+      buildConfigPatch.indexText = true;
+      buildConfigPatch.indexTextDirs = [...new Set(opts.indexTextDir.map((p) => normalizeDirEntry("indexTextDirs", p)))];
+    }
     // A large repo is built in a Node with a bigger heap (util/heap.ts): this same
     // command, run again as a child, before anything is asked or written.
     if (!process.env[HEAP_RAISED_ENV] && heapArgs().length > 0) {
       const target = resolve(dir);
       let count = 0;
       try {
-        count = listSourceFiles(target, contextDirFor(target, program.opts<GlobalOpts>().dir), undefined, onlyDirs ? new Set(onlyDirs) : undefined).length;
+        const saved = readTextScope(target);
+        const files = listSourceFiles(
+          target,
+          contextDirFor(target, program.opts<GlobalOpts>().dir),
+          undefined,
+          onlyDirs ? new Set(onlyDirs) : undefined,
+          { on: buildConfigPatch.indexText ?? saved.on, dirs: buildConfigPatch.indexTextDirs ?? saved.dirs, exts: saved.exts },
+        );
+        // A text file weighs about one file per chunk it yields (graph/text.ts).
+        for (const f of files) {
+          if (!isPlainTextPath(f)) count += 1;
+          else {
+            try {
+              count += textFileLoad(statSync(f).size);
+            } catch {
+              count += 1;
+            }
+          }
+        }
       } catch {
         /* unreadable folder: the build itself reports it */
       }
@@ -1224,6 +1303,8 @@ grouped(program.command("build"), GROUP.setup)
           excludeDirs: opts.excludeDir,
           followSubmodules: followSubmodulesWasExplicit ? opts.followSubmodules : undefined,
           followNestedRepos: followNestedReposWasExplicit ? opts.followNestedRepos : undefined,
+          indexText: buildConfigPatch.indexText,
+          indexTextDirs: buildConfigPatch.indexTextDirs,
           packageName: readPackageName(import.meta.url),
         });
         return;
@@ -1906,7 +1987,7 @@ const REPO_OPT = ["--repo <dir>", "repository root (default: nearest ancestor wi
 const configRepo = (opts: { repo?: string }) => queryRoot(opts.repo);
 
 const configCommand = grouped(program.command("config"), GROUP.setup).description(
-  "List and change this repo's settings in .graft/config.json: excludeDirs, includeDirs, followSubmodules, followNestedRepos",
+  "List and change this repo's settings in .graft/config.json: excludeDirs, includeDirs, followSubmodules, followNestedRepos, indexText, indexTextDirs, indexTextExtensions",
 );
 
 configCommand
@@ -1927,8 +2008,23 @@ function dirListCommands(name: string, key: DirListKey, what: string): void {
     }
     console.log(`${key}:`);
     for (const e of list) {
-      const note = key === "excludeDirs" ? describeExcludeEntry(e) : includeEntryNote(e);
+      const note = dirEntryNote(key, e, repo);
       console.log(`  ${e}${note ? `  — ${note}` : ""}`);
+    }
+  };
+  // indexTextDirs only narrows indexText: adding a folder means "index the text
+  // there", so it turns indexText on; emptying the list widens it to the whole repo.
+  const textScopeNote = (repo: string): void => {
+    if (key !== "indexTextDirs") return;
+    const on = readFlag(repo, "indexText").value;
+    if (readDirList(repo, key).length === 0) {
+      console.log(
+        on
+          ? `· ${key} is empty, so every .txt file in the repository is indexed — \`${cmd("graft config index-text off")}\` stops that`
+          : `· ${key} is empty; indexText is off, so no .txt file is indexed`,
+      );
+    } else if (!on) {
+      console.log(`· indexText is off, so these folders take effect once it is on: \`${cmd("graft config index-text on")}\``);
     }
   };
   group
@@ -1939,7 +2035,14 @@ function dirListCommands(name: string, key: DirListKey, what: string): void {
   group
     .command("add")
     .description(`Add entries to ${key}; ones already there are left as they are`)
-    .argument("<entries...>", key === "excludeDirs" ? "names, root-relative paths or globs" : "bare directory names")
+    .argument(
+      "<entries...>",
+      key === "excludeDirs"
+        ? "names, root-relative paths or globs"
+        : key === "indexTextDirs"
+          ? "folder paths relative to the repo root"
+          : "bare directory names",
+    )
     .option(...REPO_OPT)
     .action((entries: string[], opts: { repo?: string }) => {
       for (const e of entries) {
@@ -1952,11 +2055,17 @@ function dirListCommands(name: string, key: DirListKey, what: string): void {
       const repo = configRepo(opts);
       const { added, present } = addDirEntries(repo, key, entries);
       for (const e of added) {
-        const note = key === "excludeDirs" ? describeExcludeEntry(e) : includeEntryNote(e);
+        const note = dirEntryNote(key, e, repo);
         console.log(`✓ added ${e}${note ? `  — ${note}` : ""}`);
       }
       for (const e of present) console.log(`· ${e} is already in ${key}`);
-      if (added.length) console.log(CONFIG_APPLY_NOTE());
+      let changed = added.length > 0;
+      if (key === "indexTextDirs" && !readFlag(repo, "indexText").value) {
+        writeFlag(repo, "indexText", true);
+        console.log(`✓ indexText: on — .txt files are indexed from the folders in ${key} only`);
+        changed = true;
+      }
+      if (changed) console.log(CONFIG_APPLY_NOTE());
     });
   group
     .command("remove")
@@ -1969,6 +2078,7 @@ function dirListCommands(name: string, key: DirListKey, what: string): void {
       const { removed, missing } = removeDirEntries(repo, key, entries);
       for (const e of removed) console.log(`✓ removed ${e}`);
       for (const e of missing) console.error(`· ${e} is not in ${key} — \`${cmd(`graft config ${name} list`)}\` shows what is`);
+      if (removed.length) textScopeNote(repo);
       if (removed.length) console.log(CONFIG_APPLY_NOTE());
       if (missing.length && !removed.length) process.exitCode = 1;
     });
@@ -1977,20 +2087,23 @@ function dirListCommands(name: string, key: DirListKey, what: string): void {
     .description(`Remove every ${key} entry`)
     .option(...REPO_OPT)
     .action((opts: { repo?: string }) => {
-      const cleared = clearDirEntries(configRepo(opts), key);
+      const repo = configRepo(opts);
+      const cleared = clearDirEntries(repo, key);
       if (!cleared.length) {
         console.log(`${key} was already empty`);
         return;
       }
       console.log(`✓ removed ${cleared.length} entr${cleared.length === 1 ? "y" : "ies"}: ${cleared.join(", ")}`);
+      textScopeNote(repo);
       console.log(CONFIG_APPLY_NOTE());
     });
 }
 dirListCommands("exclude-dirs", "excludeDirs", "the directories left out of the graph");
 dirListCommands("include-dirs", "includeDirs", "the built-in skipped directories indexed anyway");
+dirListCommands("index-text-dirs", "indexTextDirs", "the folders plain-text files are indexed from");
 
-function flagCommand(name: string, key: FlagKey, what: string): void {
-  configCommand
+function flagCommand(name: string, key: FlagKey, what: string): Command {
+  return configCommand
     .command(name)
     .alias(key)
     .description(`Show or set ${key}: ${what}`)
@@ -2012,6 +2125,109 @@ function flagCommand(name: string, key: FlagKey, what: string): void {
       }
       const { value: current, set } = readFlag(repo, key);
       console.log(`${key}: ${current ? "on" : "off"}${set ? "" : " (default)"}`);
+      if (key === "indexText") {
+        const exts = [".txt", ...textExtensionsOf({ indexTextExtensions: readDirList(repo, "indexTextExtensions") }).filter((e) => !claimedByParser(e))];
+        console.log(`  files: ${exts.join(", ")}${exts.length > 1 ? "" : ` (\`${cmd("graft config index-text add <ext>")}\` adds more)`}`);
+        const dirs = readDirList(repo, "indexTextDirs");
+        if (dirs.length) console.log(`  only under: ${dirs.join(", ")}${current ? "" : " (once it is on)"}`);
+        else if (current) console.log(`  in every folder (\`${cmd("graft config index-text-dirs add <folder>")}\` narrows it)`);
+      }
+    });
+}
+
+/**
+ * `graft config index-text add|remove|list|clear`: the extensions indexText
+ * indexes as plain text on top of `.txt` (`indexTextExtensions`). Subcommands of
+ * the on/off command itself, so one command owns everything about which text is
+ * indexed; commander dispatches `add`/`remove`/`list`/`clear` here and anything
+ * else to the on/off action.
+ */
+function textExtensionCommands(group: Command): void {
+  const key = "indexTextExtensions" as const;
+  const name = "index-text";
+  // The on/off command has its own --repo, and commander hands it the --repo
+  // written after `add .log` too (options are split off before the subcommand is
+  // found), so a subcommand reads its repo from either place.
+  const repoOf = (opts: { repo?: string }) => configRepo({ repo: opts.repo ?? group.opts<{ repo?: string }>().repo });
+  // Like indexTextDirs: adding an extension asks for those files to be indexed,
+  // so it turns indexText on; the list itself has no effect while it is off.
+  const offNote = (repo: string): void => {
+    if (!readFlag(repo, "indexText").value) {
+      console.log(`· indexText is off, so these extensions take effect once it is on: \`${cmd("graft config index-text on")}\``);
+    }
+  };
+  group
+    .command("list")
+    .description("Show the extensions indexed as plain text: .txt, then the ones added")
+    .option(...REPO_OPT)
+    .action((opts: { repo?: string }) => {
+      const repo = repoOf(opts);
+      const list = readDirList(repo, key);
+      console.log(`${key}: ${list.length ? "" : "none — only .txt files are plain text"}`.trimEnd());
+      for (const e of list) {
+        const note = textExtensionNote(e);
+        console.log(`  ${e}${note ? `  — ${note}` : ""}`);
+      }
+      offNote(repo);
+    });
+  group
+    .command("add")
+    .description("Index files with these extensions as plain text too (.log, .out, ...); turns indexText on")
+    .argument("<extensions...>", "file extensions, with or without the dot, that graft does not parse")
+    .option(...REPO_OPT)
+    .action((entries: string[], opts: { repo?: string }) => {
+      for (const e of entries) {
+        const problem = dirProblem(key, e);
+        if (problem) {
+          console.error(`✗ ${cmd(`graft config ${name} add`)} "${e}": ${problem}`);
+          process.exit(1);
+        }
+      }
+      const repo = repoOf(opts);
+      const { added, present } = addDirEntries(repo, key, entries);
+      for (const e of added) console.log(`✓ added ${e} — indexed as plain text, cut into chunks like .txt`);
+      for (const e of present) console.log(`· ${e} is already in ${key}`);
+      let changed = added.length > 0;
+      if (!readFlag(repo, "indexText").value) {
+        writeFlag(repo, "indexText", true);
+        console.log("✓ indexText: on");
+        changed = true;
+      }
+      if (changed) console.log(CONFIG_APPLY_NOTE());
+    });
+  group
+    .command("remove")
+    .alias("rm")
+    .description("Stop indexing files with these extensions as plain text (.txt always is while indexText is on)")
+    .argument("<extensions...>", "extensions to remove, with or without the dot")
+    .option(...REPO_OPT)
+    .action((entries: string[], opts: { repo?: string }) => {
+      const repo = repoOf(opts);
+      const { removed, missing } = removeDirEntries(repo, key, entries);
+      for (const e of removed) console.log(`✓ removed ${e}`);
+      for (const e of missing) {
+        console.error(
+          e === ".txt"
+            ? `· .txt is always plain text — \`${cmd("graft config index-text off")}\` stops indexing text files`
+            : `· ${e} is not in ${key} — \`${cmd(`graft config ${name} list`)}\` shows what is`,
+        );
+      }
+      if (removed.length) console.log(CONFIG_APPLY_NOTE());
+      if (missing.length && !removed.length) process.exitCode = 1;
+    });
+  group
+    .command("clear")
+    .description("Remove every added extension, so only .txt files are plain text")
+    .option(...REPO_OPT)
+    .action((opts: { repo?: string }) => {
+      const repo = repoOf(opts);
+      const cleared = clearDirEntries(repo, key);
+      if (!cleared.length) {
+        console.log(`${key} was already empty`);
+        return;
+      }
+      console.log(`✓ removed ${cleared.length} extension${cleared.length === 1 ? "" : "s"}: ${cleared.join(", ")} — only .txt files are plain text now`);
+      console.log(CONFIG_APPLY_NOTE());
     });
 }
 flagCommand("follow-submodules", "followSubmodules", "index initialized Git submodules into this repo's graph");
@@ -2019,6 +2235,13 @@ flagCommand(
   "follow-nested-repos",
   "followNestedRepos",
   "index nested Git clones this repo's index does not track into one graph",
+);
+textExtensionCommands(
+  flagCommand(
+    "index-text",
+    "indexText",
+    "index plain-text files (.txt, plus the extensions `add` names), cut into chunks with their own line spans",
+  ),
 );
 
 /** What the `api url` / `api key` / `model` / `effort` commands read and write through. */

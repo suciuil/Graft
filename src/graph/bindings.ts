@@ -286,7 +286,8 @@ export function collectBindings(root: SyntaxNode, lang: Language): FileBindings 
     lang === "perl" ||
     lang === "make" ||
     lang === "matlab" ||
-    lang === "simulink"
+    lang === "simulink" ||
+    lang === "text"
   ) {
     return bindings;
   }

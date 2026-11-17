@@ -135,7 +135,9 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "from the current directory (the nearest one with a graft/ index), or on the one --repo names. A change applies " +
       "at the next build, or the refresh before the next query.\n" +
       "Settings: excludeDirs (directories left out of the graph), includeDirs (built-in skipped directories indexed " +
-      "anyway), followSubmodules (index Git submodules), followNestedRepos (index nested Git clones), and " +
+      "anyway), followSubmodules (index Git submodules), followNestedRepos (index nested Git clones), indexText (index .txt files in chunks), indexTextDirs (the folders " +
+      "indexText takes them from), indexTextExtensions (more extensions indexed like .txt, set with " +
+      "`graft config index-text add`), and " +
       "deepStaleThreshold (set with `graft deep-threshold`) and autoDeep (set with `graft auto-deep`).",
     examples: ["graft config list", "graft config exclude-dirs --help"],
   },
@@ -246,6 +248,90 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "Separate from followSubmodules, which covers clones the parent pins as submodules. Gitignored nested clones " +
       "stay out either way. The same as `graft build --follow-nested-repos` / `--no-follow-nested-repos`.",
     examples: ["graft config follow-nested-repos", "graft config follow-nested-repos off"],
+  },
+  "config index-text": {
+    description:
+      "Show or set indexText. On: plain-text .txt files are indexed — each one cut into chunks of a few hundred " +
+      "lines, at its headings where it has any (underlined, numbered or ALL-CAPS lines), else at blank lines — and " +
+      "every chunk becomes a node with its own line span, so `graft ask` and `graft grep` point at the part of a " +
+      "large log, spec or dump that matters instead of the whole file. Text files up to 50 MB are read; a file " +
+      "with very many chunks gets a table of contents on its card instead of a line per chunk. Text chunks are " +
+      "never summarized by `graft build --deep`, so they cost no AI tokens. CMakeLists.txt stays CMake. Off (the " +
+      "default): no .txt file is indexed. The same as `graft build --index-text` / `--no-index-text`.\n" +
+      "On indexes every .txt file in the repository; to take them from some folders only, list those folders with " +
+      "`graft config index-text-dirs add <folder>`. To index other plain-text files the same way (.log, .out, .lst, " +
+      "...), add their extensions with `graft config index-text add <ext>` (indexTextExtensions). Shown without a " +
+      "value, the setting also names those extensions and folders.",
+    examples: [
+      "graft config index-text",
+      "graft config index-text on",
+      "graft config index-text add .log .out",
+      "graft config index-text-dirs add docs/specs",
+    ],
+  },
+  "config index-text list": {
+    description:
+      "Show the indexTextExtensions: the extensions indexed as plain text on top of .txt. An entry graft ignores " +
+      "(one it parses as code or data, or a malformed one written into .graft/config.json by hand) is flagged.",
+    examples: ["graft config index-text list"],
+  },
+  "config index-text add": {
+    description:
+      "Add one or more file extensions to indexTextExtensions, and turn indexText on: files with them are then " +
+      "indexed like .txt files — cut into chunks with their own line spans, up to 50 MB a file, under the " +
+      "indexTextDirs folders when it lists any, never summarized by --deep. The dot is optional and case does not " +
+      "matter (log, .LOG and .log are the same). Only extensions graft does not parse are accepted: .md, .json, " +
+      ".xml, .c and the rest stay with their parsers (`graft languages` lists them). .txt is plain text anyway.",
+    examples: ["graft config index-text add .log", "graft config index-text add log out lst"],
+  },
+  "config index-text remove": {
+    description:
+      "Remove extensions from indexTextExtensions, so files with them are no longer indexed. .txt files stay " +
+      "indexed while indexText is on; `graft config index-text off` stops indexing text. Exits 1 when none of " +
+      "them was there.",
+    examples: ["graft config index-text remove .out"],
+  },
+  "config index-text clear": {
+    description: "Remove every indexTextExtensions entry, so only .txt files are indexed as plain text.",
+    examples: ["graft config index-text clear"],
+  },
+  "config index-text-dirs": {
+    description:
+      "indexTextDirs lists the folders indexText takes plain-text files (.txt and indexTextExtensions) from, so a repo can index its specs or " +
+      "logs without every requirements.txt, LICENSE.txt and test fixture elsewhere. Code is indexed everywhere either " +
+      "way. Empty (the default): with indexText on, every .txt file in the repository is indexed.\n" +
+      "An entry is a folder PATH relative to the repo root (docs/specs): that folder and everything under it. Absolute " +
+      "paths, .. and wildcards are rejected. Either slash works, and a leading ./ or trailing / is dropped. Matching is " +
+      "case-sensitive, on every OS.\n" +
+      "Adding a folder turns indexText on. Turning indexText off keeps the list, so turning it back on restores the " +
+      "same folders. The same as `graft build --index-text-dir <folder>` (repeatable), which replaces the list.",
+    examples: [
+      "graft config index-text-dirs list",
+      "graft config index-text-dirs add docs/specs logs/nightly",
+      "graft config index-text-dirs remove logs/nightly",
+      "graft config index-text-dirs clear",
+    ],
+  },
+  "config index-text-dirs list": {
+    description: "Show the indexTextDirs folders; a folder that does not exist in the repo is flagged.",
+    examples: ["graft config index-text-dirs list"],
+  },
+  "config index-text-dirs add": {
+    description:
+      "Add one or more folders (paths relative to the repo root) to indexTextDirs, and turn indexText on: .txt files " +
+      "are then indexed from those folders and their subfolders only. Absolute paths, .. and wildcards are rejected.",
+    examples: ["graft config index-text-dirs add docs/specs", "graft config index-text-dirs add docs/specs logs"],
+  },
+  "config index-text-dirs remove": {
+    description:
+      "Remove folders from indexTextDirs. Removing the last one leaves indexText on for the whole repository; " +
+      "`graft config index-text off` stops indexing text. Exits 1 when none of them was there.",
+    examples: ["graft config index-text-dirs remove logs"],
+  },
+  "config index-text-dirs clear": {
+    description:
+      "Remove every indexTextDirs folder. With indexText on, every .txt file in the repository is then indexed.",
+    examples: ["graft config index-text-dirs clear"],
   },
   "deep-threshold": {
     description:

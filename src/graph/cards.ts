@@ -23,6 +23,7 @@ import { CACHE_DIR, readNodes } from "../context/node-file.js";
 import { GRAPH_DIR } from "./write.js";
 import { parseErrorWarning } from "./parse-errors.js";
 import { inBrand } from "../brand.js";
+import { isPlainTextPath } from "../util/plain-text.js";
 
 const INDEX_FILE = "INDEX.md";
 /** Where a root-level file card goes when `graft/<stem>.md` is already a concept
@@ -97,6 +98,34 @@ function conceptsByPath(outDir: string): Map<string, string[]> {
   return map;
 }
 
+/** Most lines a plain-text file's card lists. A large text file can have up to
+ * 2,000 chunks (graph/text.ts); a card listing every one would itself be the
+ * big read the card exists to save. */
+const TEXT_CARD_ENTRIES = 60;
+
+/**
+ * A table of contents for a text file with more chunks than a card should list:
+ * its headings (the chunks that open with one), or, when it has none or too
+ * many, every k-th entry so the list still spans the whole file. Each entry
+ * keeps its span; the note says how to reach the rest.
+ */
+function textContents(sourcePath: string, sorted: NodeV1[]): string[] {
+  const headings = sorted.filter((n) => n.kind === "heading");
+  const pool = headings.length > 0 ? headings : sorted;
+  const step = Math.ceil(pool.length / TEXT_CARD_ENTRIES);
+  const shown = pool.filter((_, i) => i % step === 0);
+  const what = headings.length > 0 ? `${headings.length} start at a heading` : "none starts at a heading";
+  const sample = step > 1 ? `one in every ${step} of them` : "each of them";
+  const out = [
+    `_Table of contents: ${sorted.length} chunks in all, ${what}; listed below is ${sample}, each with its span. ` +
+      `\`graft ask "<words>" --in ${sourcePath}\` finds the chunk that holds a passage, ` +
+      `\`graft skeleton ${sourcePath}\` lists every chunk._`,
+    "",
+  ];
+  for (const n of shown) out.push(`- ${n.name} · ${n.kind} · ${n.span}`);
+  return out;
+}
+
 /** Render one file's card. `fileNode` may be absent for parse-only fragments. */
 function renderCard(
   sourcePath: string,
@@ -119,6 +148,10 @@ function renderCard(
   const sorted = [...symbols].sort(
     (a, b) => spanStart(a.span) - spanStart(b.span) || a.name.localeCompare(b.name),
   );
+  if (isPlainTextPath(sourcePath) && sorted.length > TEXT_CARD_ENTRIES) {
+    lines.push(...textContents(sourcePath, sorted));
+    return lines.join("\n") + "\n";
+  }
   for (const n of sorted) {
     const desc = oneLiner(n);
     const tail = desc ? ` — ${desc}` : "";

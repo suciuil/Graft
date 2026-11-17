@@ -121,6 +121,9 @@ const DEPTH: Record<Language, DepthSpec> = {
   // enumeration members; model references as calls, dictionary links as imports, and
   // what block parameters, signals and chart code use as references.
   simulink: code(true, true, false, false),
+  // Plain text (opt-in, `--index-text`): line chunks at headings or paragraph
+  // breaks, each with its span. No calls, imports or types in prose.
+  text: data(),
   razor: { level: "file-only", symbols: false, calls: false, imports: false, inherits: false, types: false },
 };
 
@@ -159,6 +162,7 @@ const DISPLAY: Record<string, string> = {
   make: "Make",
   matlab: "MATLAB",
   simulink: "Simulink",
+  text: "Plain text",
   rust: "Rust",
   ruby: "Ruby",
   scala: "Scala",

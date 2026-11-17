@@ -129,8 +129,8 @@ export async function warmDepthGrammars(langs: Iterable<Language>): Promise<void
 
 /** True when `lang`'s grammar is loaded and can parse. Never throws. */
 export function depthReady(lang: Language): boolean {
-  // Simulink packages are read without a grammar (graph/simulink.ts).
-  if (lang === "simulink") return true;
+  // Simulink packages and plain text are read without a grammar (graph/simulink.ts, graph/text.ts).
+  if (lang === "simulink" || lang === "text") return true;
   return backendOf(lang) === "native" ? nativeReady(lang) : loaded.get(lang)?.ok === true;
 }
 

@@ -64,7 +64,8 @@ function builtRepo(): string {
     'import { total } from "./total.js";\nexport function report(xs: number[]): string {\n  return `sum=${total(xs)}`;\n}\n',
   );
   writeFileSync(join(d, "README.md"), "# fixture\n");
-  // No grammar claims `.txt`, in any build. README.md would not do: markdown is
+  // `.txt` is indexed only when the repo opts in (`indexText`, off here), in any
+  // build. README.md would not do: markdown is
   // an OPTIONAL_EXTENSIONS grammar, so it IS indexed wherever it happens to be
   // built, and an unindexed-file check seeded from it passes or fails by machine.
   writeFileSync(join(d, "notes.txt"), "fixture notes\n");

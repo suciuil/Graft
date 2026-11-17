@@ -80,6 +80,10 @@ export async function symbolsIn(rel: string, source: string): Promise<CodeSymbol
   try {
     await warmGrammarsFor([rel]);
     const { lang, container, generic } = tierOf(rel);
+    // Plain-text chunks (graph/text.ts) are passages of prose, not declarations a
+    // teammate's change could collide with — and chunking here would skip the
+    // repo's `indexText` opt-in. A text file has no symbols for this check.
+    if (lang === "text") return [];
     const nodes = lang
       ? extractFile(rel, source, lang).nodes
       : container

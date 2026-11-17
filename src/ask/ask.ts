@@ -1273,21 +1273,47 @@ function parseSpan(pointer: string): { path: string; from: number; to: number } 
 }
 
 /** Read the source lines [from, to] (1-indexed, inclusive) of `path` under `root`,
- * capped at {@link MAX_SPAN_LINES}. Returns null if the file can't be read. */
-function sliceSpan(root: string, path: string, from: number, to: number): string | null {
+ * capped at {@link MAX_SPAN_LINES}. Returns null if the file can't be read.
+ * `cache` keeps each file's text across one answer's hits: several chunks of one
+ * large indexed text file (up to 50 MB) would otherwise each re-read it. The file
+ * is never split into lines: the span is found by walking its newlines, so a hit
+ * in a large file costs the lines before and inside the span, not a line array
+ * of the whole file. Lines are cut exactly as `split("\n")` would cut them. */
+export function sliceSpan(root: string, path: string, from: number, to: number, cache: Map<string, string | null>): string | null {
   try {
-    const source = readSourceFile(join(root, path));
-    if (source === null) return null; // unsupported encoding (e.g. UTF-16BE)
-    const lines = source.split("\n");
-    const start = Math.max(1, from);
-    const end = Math.min(lines.length, to);
-    const slice = lines.slice(start - 1, end);
-    if (slice.length > MAX_SPAN_LINES) {
-      const head = slice.slice(0, MAX_SPAN_LINES);
-      head.push(`… (+${slice.length - MAX_SPAN_LINES} more lines; open ${path}:L${start}-L${end})`);
-      return head.join("\n");
+    let source = cache.get(path);
+    if (source === undefined) {
+      source = readSourceFile(join(root, path)); // null: unsupported encoding (e.g. UTF-16BE)
+      cache.set(path, source);
     }
-    return slice.join("\n");
+    if (source === null) return null;
+    const start = Math.max(1, from);
+    // `pos` is where the next line starts, or -1 past the last line.
+    let pos = 0;
+    for (let line = 1; line < start; line++) {
+      const nl = source.indexOf("\n", pos);
+      if (nl < 0) return ""; // the span starts past the end of the file
+      pos = nl + 1;
+    }
+    const out: string[] = [];
+    let line = start;
+    while (line <= to && pos >= 0 && out.length < MAX_SPAN_LINES) {
+      const nl = source.indexOf("\n", pos);
+      out.push(nl < 0 ? source.slice(pos) : source.slice(pos, nl));
+      pos = nl < 0 ? -1 : nl + 1;
+      line++;
+    }
+    if (line <= to && pos >= 0) {
+      // Capped: count what the span still holds, up to its end or the file's.
+      let end = line - 1;
+      while (line <= to && pos >= 0) {
+        const nl = source.indexOf("\n", pos);
+        pos = nl < 0 ? -1 : nl + 1;
+        end = line++;
+      }
+      out.push(`… (+${end - (start + MAX_SPAN_LINES - 1)} more lines; open ${path}:L${start}-L${end})`);
+    }
+    return out.join("\n");
   } catch {
     return null;
   }
@@ -1304,6 +1330,7 @@ function inlineSource(root: string, hits: AskHit[], graph: GraphV1 | null, full:
     for (const n of graph.nodes)
       if (n.crux?.code) cruxByPointer.set(`${n.path}:${n.span}`, n.crux.code);
   }
+  const sources = new Map<string, string | null>();
   for (const h of hits) {
     const s = parseSpan(h.pointer);
     if (!s) continue;
@@ -1312,7 +1339,7 @@ function inlineSource(root: string, hits: AskHit[], graph: GraphV1 | null, full:
       h.code = `${crux}\n… (crux — full definition at ${h.pointer}; rerun with --full)`;
       continue;
     }
-    const code = sliceSpan(root, s.path, s.from, s.to);
+    const code = sliceSpan(root, s.path, s.from, s.to, sources);
     if (code) h.code = code;
   }
 }

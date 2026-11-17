@@ -26,7 +26,7 @@ import type { NativeFallback } from "./native.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { decodeSource, packageHash, readSourceFile } from "../util/source.js";
-import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs, readTextScope } from "../util/state.js";
 import {
   emptyExtractCache,
   readExtractCache,
@@ -35,7 +35,7 @@ import {
 } from "./extract-cache.js";
 import { writeFingerprint } from "./fingerprint.js";
 import { seedGraph, type SeedResult } from "./seed.js";
-import { filterByOnlyDirs, listSourceStats } from "./source-files.js";
+import { filterByOnlyDirs, listSourceStats, useTextExtensions } from "./source-files.js";
 import { resolveEdges, type GoModule } from "./resolve.js";
 import { enrichGraph, type EnrichStats, type SourceLookup } from "./enrich.js";
 import { readGraph, writeGraph, wiringPath } from "./write.js";
@@ -233,7 +233,10 @@ export async function buildGraph(
   const outDir = contextDirFor(root, opts.contextDir);
   // Enumerate once: source extraction, scope discovery, and Go module
   // resolution must agree on the same Git-ignore-aware working-tree view —
-  // including the repo's persisted directory and submodule choices.
+  // including the repo's persisted directory and submodule choices. The repo's
+  // added text extensions are set first, so the walk keeps a big `.log` under the
+  // plain-text size limit and the parse below reads it as text.
+  useTextExtensions(readTextScope(root).exts);
   const walked = walkDir(root, readIncludeDirs(root), {
     followSubmodules: readFollowSubmodules(root),
     excludes: readExcludeDirs(root),

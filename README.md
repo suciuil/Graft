@@ -745,6 +745,9 @@ trail build --follow-submodules      # include initialized submodules; persist t
 trail build --no-follow-submodules   # exclude submodules again and persist that choice (the default)
 trail build --follow-nested-repos    # include nested git clones the index doesn't track; persist the choice
 trail build --no-follow-nested-repos # exclude nested clones again and persist that choice (the default)
+trail build --index-text             # also index plain-text .txt files, cut into chunks with their own line spans; persist the choice
+trail build --no-index-text          # leave .txt files out again and persist that choice (the default)
+trail build --index-text-dir docs/specs  # index .txt files only under this folder (repeatable; turns --index-text on; code is still indexed everywhere)
 
 trail staleness [dir]                # what % of summaries are out of date (changed + new code), whether `trail build --deep` is due against the threshold, and the worst files ($0, no LLM)
 trail staleness --top 20 --json      # more files, as JSON for scripts (`recommended`, `pct`, `totals`, per-repo split in a workspace)
@@ -772,6 +775,9 @@ trail config include-dirs add build vendor    # index built-in skipped dirs anyw
 trail config include-dirs remove vendor       # also `list` and `clear`
 trail config follow-submodules on|off         # omit the value to show it; same as build --[no-]follow-submodules
 trail config follow-nested-repos on|off       # same as build --[no-]follow-nested-repos
+trail config index-text on|off                # same as build --[no-]index-text
+trail config index-text add .log .out         # also index these extensions as plain text, like .txt (turns index-text on; not ones trail parses); also `list`, `remove`, `clear`
+trail config index-text-dirs add docs/specs   # take plain-text files from these folders only (turns index-text on); also `list`, `remove`, `clear`
                                      # every command takes --repo <dir>; a change applies at the next build or query refresh
 
 trail prices update                  # fetch LiteLLM's public model price catalog (one anonymous GET) into ~/.graft/prices.json,

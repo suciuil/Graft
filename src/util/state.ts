@@ -15,6 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { join, dirname, isAbsolute } from 'node:path';
 import { mapDirFor } from '../context/map-dir.js';
 import { renameReplacing } from './rename-replacing.js';
+import { normalizeTextDir, normalizeTextExtension, PLAIN_TEXT_EXTENSIONS, TEXT_EXTENSION_SHAPE } from './plain-text.js';
 import { isOutside, noteProfileRepo, profileConfigPathFor } from '../context/profile-store.js';
 
 export interface Stats {
@@ -131,6 +132,29 @@ export interface BuildConfig {
    * checkout someone parked in the tree. Absent/false keeps the historical
    * boundary. */
   followNestedRepos?: boolean;
+  /** Whether plain-text `.txt` files are indexed: each one cut into chunks of a
+   * few hundred lines (at its headings where it has any, else at blank lines),
+   * every chunk a node with its own line span, so a query can point at the part
+   * of a huge log, spec or dump that matters instead of the whole file. Opt-in,
+   * because most `.txt` files in a code repo (requirements.txt, LICENSE.txt,
+   * test fixtures) are noise to a code map, and a large text file costs index
+   * space. Absent/false indexes no `.txt` file, as before. Never summarized by
+   * `graft build --deep`. */
+  indexText?: boolean;
+  /** Folders, relative to the repo root (posix, no trailing `/`), that
+   * {@link indexText} indexes `.txt` files from: each with its whole subtree, so
+   * a repo can index its specs or logs without every `requirements.txt` and
+   * fixture elsewhere. Absent or empty = the whole repo. Has no effect while
+   * `indexText` is off, and is kept then, so turning it back on restores the
+   * same scope. Code is indexed everywhere either way. */
+  indexTextDirs?: string[];
+  /** Extensions, lower case with their dot (`.log`, `.out`), that {@link indexText}
+   * treats as plain text on top of `.txt`, which always is (`graft config
+   * index-text add|remove`). Only extensions no parser claims: an entry graft
+   * already parses (`.md`, `.json`, `.c`, ...) or that is malformed is ignored,
+   * so a hand edit cannot turn code into text. Absent or empty = `.txt` only. Has
+   * no effect while `indexText` is off, and is kept then. */
+  indexTextExtensions?: string[];
   /** Percent (0–100) of node summaries that must be out of date — the code
    * changed, or is new, since the last `graft build --deep` — before queries
    * carry the `--deep` nudge. 0 = anything out of date; 100 = never. Set by
@@ -209,6 +233,9 @@ const DEFAULT_BUILD_CONFIG: Required<Omit<BuildConfig, 'deepStaleThreshold' | 'a
   excludeDirs: [],
   followSubmodules: false,
   followNestedRepos: false,
+  indexText: false,
+  indexTextDirs: [],
+  indexTextExtensions: [],
 };
 
 /** One-line orientation, since a JSON file cannot carry a comment. Read back as
@@ -305,6 +332,50 @@ export function readFollowSubmodules(d: string): boolean {
 /** Missing and explicit false both retain the backwards-compatible default. */
 export function readFollowNestedRepos(d: string): boolean {
   return readBuildConfig(d)?.followNestedRepos === true;
+}
+
+/** Which plain-text files a repo indexes: none while `on` is false; else those
+ * under `dirs` (repo-relative folders), or every one when `dirs` is empty. A
+ * plain-text file is a `.txt` one, or one with an extension in `exts` (the
+ * repo's additions, in their stored form; graph/source-files.ts drops any a
+ * parser claims). */
+export interface TextScope {
+  on: boolean;
+  dirs: string[];
+  exts: string[];
+}
+
+/** Repo `d`'s {@link TextScope}, from {@link BuildConfig.indexText} (missing and
+ * false both keep `.txt` out, as before the option existed),
+ * {@link BuildConfig.indexTextDirs} and {@link BuildConfig.indexTextExtensions}.
+ * Read wherever the source set is enumerated (graph/source-files.ts,
+ * search/ignored-code.ts, the build's heap estimate in cli.ts), so a build, a
+ * later no-flag rebuild and the hooks/refresh fingerprint all agree. */
+export function readTextScope(d: string): TextScope {
+  const c = readBuildConfig(d);
+  return { on: c?.indexText === true, dirs: textDirsOf(c), exts: textExtensionsOf(c) };
+}
+
+/** `c`'s {@link BuildConfig.indexTextExtensions}, each in its stored form
+ * ({@link normalizeTextExtension}), de-duplicated, without malformed entries and
+ * without `.txt`, which is plain text anyway. Whether a parser claims one is
+ * checked where the parsers are loaded (graph/source-files.ts). */
+export function textExtensionsOf(c: BuildConfig | null | undefined): string[] {
+  if (!Array.isArray(c?.indexTextExtensions)) return [];
+  const exts = c.indexTextExtensions
+    .filter((x): x is string => typeof x === 'string')
+    .map(normalizeTextExtension)
+    .filter((x) => TEXT_EXTENSION_SHAPE.test(x) && !PLAIN_TEXT_EXTENSIONS.includes(x));
+  return [...new Set(exts)];
+}
+
+/** `c`'s {@link BuildConfig.indexTextDirs}, each entry in its stored form
+ * ({@link normalizeTextDir}), so a hand-edited `"docs/"` or `"docs\\specs"` scopes
+ * a normal build and an `--all-parts` build alike. Entries that reduce to nothing
+ * (`"."`) are dropped: the repo root is what an empty list already means. */
+export function textDirsOf(c: BuildConfig | null | undefined): string[] {
+  if (!Array.isArray(c?.indexTextDirs)) return [];
+  return c.indexTextDirs.filter((x): x is string => typeof x === 'string').map(normalizeTextDir).filter((x) => x !== '');
 }
 
 /** See {@link BuildConfig.deepStaleThreshold}. */

@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { MAX_SIMULINK_PACKAGE_BYTES, SIMULINK_PACKAGE } from "../util/simulink-package.js";
+import { isPlainTextPath, MAX_TEXT_FILE_BYTES } from "../util/plain-text.js";
 
 /** Directories that are dependency/build output, never source. */
 export const SKIP_DIRS = new Set([
@@ -28,10 +29,15 @@ export const SKIP_DIRS = new Set([
 /** Files above this size are generated/vendored in practice, not hand-written code. */
 export const MAX_FILE_BYTES = 1_000_000;
 
+/** Re-exported for callers that already read the walker's limits from here. */
+export { MAX_TEXT_FILE_BYTES };
+
 /** Whether a file of `size` bytes is too big to index. MATLAB and Simulink packages
  * (`.slx`, `.sldd`, `.mlx`) are compressed archives of hand-built work, and a `.mdl`
- * model is text that grows with the model, so they get their own, larger limit. */
+ * model is text that grows with the model, so they get their own, larger limit;
+ * so does plain text ({@link MAX_TEXT_FILE_BYTES}). */
 export function tooBigToIndex(path: string, size: number): boolean {
+  if (isPlainTextPath(path)) return size > MAX_TEXT_FILE_BYTES;
   return size > (SIMULINK_PACKAGE.test(path) || /\.mdl$/i.test(path) ? MAX_SIMULINK_PACKAGE_BYTES : MAX_FILE_BYTES);
 }
 

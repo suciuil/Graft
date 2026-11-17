@@ -16,12 +16,13 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { walkDir } from "../ingest/fs.js";
-import { filterByOnlyDirs } from "../graph/source-files.js";
+import { filterByOnlyDirs, useTextExtensions } from "../graph/source-files.js";
 import { readFingerprint } from "../graph/fingerprint.js";
 import { contentHash } from "../util/id.js";
 import { relPosix } from "../util/paths.js";
 import { readSourceFile } from "../util/source.js";
-import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs } from "../util/state.js";
+import { isPlainTextPath } from "../util/plain-text.js";
+import { readExcludeDirs, readFollowNestedRepos, readFollowSubmodules, readIncludeDirs, readTextScope } from "../util/state.js";
 import type { Summarizer } from "../ai/summarize.js";
 import { LlmFailureGate } from "../ai/failure.js";
 import type { FileSummary, SynthNode, Synthesizer } from "../ai/synthesize.js";
@@ -138,12 +139,18 @@ export function listContextFiles(
   exts: readonly string[],
   explicitOnlyDirs?: readonly string[],
 ): string[] {
+  // The repo's added text extensions (`graft config index-text add`) are text
+  // here too, so the filter below leaves them out like `.txt`.
+  useTextExtensions(readTextScope(root).exts);
   const walked = walkDir(root, readIncludeDirs(root), {
     followSubmodules: readFollowSubmodules(root),
     followNestedRepos: readFollowNestedRepos(root),
     excludes: readExcludeDirs(root),
   })
     .filter((f) => exts.some((e) => f.toLowerCase().endsWith(e)))
+    // Plain text is never summarized, even when `-e .txt` names it: indexed text
+    // is chunks for search, and its promise is that it costs no AI tokens.
+    .filter((f) => !isPlainTextPath(f))
     .filter((f) => !f.startsWith(outDir));
   return filterByOnlyDirs(walked, root, resolveOnlyDirs(outDir, explicitOnlyDirs));
 }

@@ -18,7 +18,8 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { contextDirFor, ensureGitignored } from "../context/node-file.js";
 import { normalizeExcludeEntry } from "../ingest/fs.js";
-import { patchBuildConfig, readBuildConfig, type BuildConfig } from "../util/state.js";
+import { normalizeTextDir } from "../util/plain-text.js";
+import { patchBuildConfig, readBuildConfig, textDirsOf, textExtensionsOf, type BuildConfig } from "../util/state.js";
 import { allPartsPlan, GraphTooLargeError } from "./size-guard.js";
 import { clearParentGraft, isPartsWorkspace, isSafePart, readWorkspace, writeWorkspace } from "./workspace.js";
 
@@ -56,8 +57,10 @@ export interface PartsBuildResult {
 /**
  * The repository's own build settings as they apply to one of its parts: the
  * folder names to include, the exclusions (a name or glob anywhere, a path only
- * when it is inside the part, made relative to it), and the submodule and
- * nested-clone choices. Empty when the repository has none of them.
+ * when it is inside the part, made relative to it), the submodule and
+ * nested-clone choices, and the plain-text choice with its folders re-rooted
+ * the same way and its added extensions as they are. Empty when the repository
+ * has none of them.
  */
 export function partConfig(root: BuildConfig | null, part: string): BuildConfig {
   const out: BuildConfig = {};
@@ -74,6 +77,29 @@ export function partConfig(root: BuildConfig | null, part: string): BuildConfig 
   }
   if (root.followSubmodules !== undefined) out.followSubmodules = root.followSubmodules;
   if (root.followNestedRepos !== undefined) out.followNestedRepos = root.followNestedRepos;
+  if (root.indexText !== undefined) out.indexText = root.indexText;
+  if (root.indexText !== undefined || root.indexTextDirs !== undefined) {
+    // Text folders re-rooted at the part: none at all, or one holding the whole
+    // part, leaves its text unscoped there; one inside it is made relative to it;
+    // a part none of them reaches indexes no text. Always written, even as [],
+    // because the part's config is patched, not replaced: a list the part kept
+    // from an earlier, narrower root scope must not outlive it.
+    const dirs = textDirsOf(root);
+    const p = normalizeTextDir(part);
+    const prefix = `${p}/`;
+    let whole = dirs.length === 0;
+    const inside: string[] = [];
+    for (const d of dirs) {
+      if (!p) inside.push(d);
+      else if (d === p || prefix.startsWith(`${d}/`)) whole = true;
+      else if (d.startsWith(prefix)) inside.push(d.slice(prefix.length));
+    }
+    out.indexTextDirs = whole ? [] : inside;
+    if (!whole && !inside.length) out.indexText = false;
+  }
+  // The added text extensions apply in every part alike. Always written once the
+  // root has the setting, even as [], for the same reason as the folders above.
+  if (root.indexTextExtensions !== undefined) out.indexTextExtensions = textExtensionsOf(root);
   return out;
 }
 

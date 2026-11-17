@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isZip, renderSimulinkPackage, SIMULINK_PACKAGE } from "./simulink-package.js";
+import { isPlainTextPath } from "./plain-text.js";
 
 /** Read source text, decoding Windows tooling's common UTF-16LE output. UTF-16BE
  * is rare and unsupported by Node's built-in decoders, so callers silently skip it.
@@ -19,6 +20,9 @@ export function decodeSource(path: string, bytes: Buffer): string | null {
   if (/\.mdl$/i.test(path) && bytes.subarray(0, 8192).includes(0)) return null;
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return null;
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString("utf16le");
+  // A plain-text file holding NUL bytes (with no UTF-16 mark, handled above) is
+  // binary data saved under a text name: chunking it would index noise, so it is skipped.
+  if (isPlainTextPath(path) && bytes.subarray(0, 8192).includes(0)) return null;
   return bytes.toString("utf8");
 }
 

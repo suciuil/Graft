@@ -8,8 +8,10 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { extname, join } from "node:path";
-import { supportedExtensions } from "../graph/source-files.js";
+import { supportedExtensions, useTextExtensions } from "../graph/source-files.js";
 import { shouldSkipDir } from "../ingest/fs.js";
+import { inTextScope, isPlainTextPath, plainTextExtensions } from "../util/plain-text.js";
+import { readTextScope } from "../util/state.js";
 
 /** Most entries one ignored folder's walk looks at before giving up on it. */
 const WALK_CAP = 2000;
@@ -48,12 +50,38 @@ export function ignoredCode(root: string, limit = 20): string[] {
     windowsHide: true,
   });
   if (r.status !== 0 || typeof r.stdout !== "string") return [];
-  const exts = new Set(supportedExtensions());
+  // Plain text counts only where the map would index it: with `indexText` on, and
+  // under its `indexTextDirs` when it lists any. Otherwise an ignored folder of
+  // logs or dumps is not code the map would index. Plain text is `.txt` plus the
+  // extensions the repo added (`graft config index-text add`).
+  const scope = readTextScope(root);
+  useTextExtensions(scope.exts);
+  const textExts = new Set(plainTextExtensions());
+  const exts = new Set(supportedExtensions().filter((e) => !textExts.has(e)));
+  const codeOrText = new Set([...exts, ...textExts]);
+  /** The folders under an ignored entry whose plain-text files would be indexed. */
+  const textUnder = (rel: string): string[] => {
+    if (!scope.on) return [];
+    if (inTextScope(rel, scope.dirs)) return [rel];
+    return scope.dirs.filter((d) => d.startsWith(`${rel}/`));
+  };
   const out: string[] = [];
   for (const entry of r.stdout.split("\n")) {
     if (!entry) continue;
-    if (entry.replace(/\/$/, "").split("/").some((p) => shouldSkipDir(p))) continue;
-    const code = entry.endsWith("/") ? holdsCode(join(root, entry), exts) : exts.has(extname(entry).toLowerCase());
+    const rel = entry.replace(/\/$/, "");
+    if (rel.split("/").some((p) => shouldSkipDir(p))) continue;
+    let code: boolean;
+    if (entry.endsWith("/")) {
+      // Text counts in the whole folder: one walk for both. Otherwise only in the
+      // text folders under it, walked for text alone.
+      const under = textUnder(rel);
+      code =
+        under.length === 1 && under[0] === rel
+          ? holdsCode(join(root, entry), codeOrText)
+          : holdsCode(join(root, entry), exts) || under.some((d) => holdsCode(join(root, d), textExts));
+    } else {
+      code = exts.has(extname(entry).toLowerCase()) || (isPlainTextPath(entry) && textUnder(rel).length > 0);
+    }
     if (code) out.push(entry);
     if (out.length >= limit) break;
   }

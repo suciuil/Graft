@@ -32,8 +32,6 @@
   .panel table.counts td:first-child, .panel table.counts th:first-child { text-align: left; }
   .panel table.counts tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
   .panel table.counts a { color: var(--improvement); text-decoration: none; cursor: pointer; }
-  .panel ul.rules { margin: 6px 0 0 18px; padding: 0; }
-  .panel ul.rules li { padding: 2px 0; }
   code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; background: #eef0f4; padding: 1px 5px; border-radius: 4px; }
   .toolbar { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 10px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
   .toolbar input[type=search] { flex: 1 1 240px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
@@ -72,7 +70,7 @@
 <body>
 <header>
   <h1>Graft fork changelog</h1>
-  <p>Features, fixes, improvements and change requests in the <code>suciuil/Graft</code> fork that the upstream <code>NanoNets/Graft</code> project does not provide, newest first.</p>
+  <p>Features, fixes, improvements and change requests in the <code>suciui/Graft</code> fork that the upstream <code>NanoNets/Graft</code> project does not provide, newest first.</p>
   <p class="links">Download the Windows offline installer kit: <a href="https://github-ct.int.automotive-wan.com/suciui/Graft/releases/latest">latest release</a> · <a href="https://github-ct.int.automotive-wan.com/suciui/Graft/releases">every published build</a> · Report a bug or request a feature: <a href="https://github-ct.int.automotive-wan.com/suciui/graft/issues">issues</a></p>
 </header>
 <main>
@@ -80,10 +78,10 @@
 <div class="stats">
 <!-- stats:start -->
   <div class="stat feature"><b>85</b><span>New features</span></div>
-  <div class="stat improvement"><b>83</b><span>Improvements</span></div>
-  <div class="stat fix"><b>39</b><span>Bug fixes</span></div>
+  <div class="stat improvement"><b>85</b><span>Improvements</span></div>
+  <div class="stat fix"><b>44</b><span>Bug fixes</span></div>
   <div class="stat change"><b>21</b><span>Change requests</span></div>
-  <div class="stat"><b>228</b><span>Items in total</span></div>
+  <div class="stat"><b>235</b><span>Items in total</span></div>
 <!-- stats:end -->
 </div>
 
@@ -93,32 +91,21 @@
     <thead><tr><th>Area</th><th>Features</th><th>Fixes</th><th>Improvements</th><th>Changes</th><th>Total</th></tr></thead>
     <tbody>
 <!-- counts:start -->
-      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>37</td><td>8</td><td>35</td><td>1</td><td>81</td></tr>
+      <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>37</td><td>13</td><td>36</td><td>1</td><td>87</td></tr>
       <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>5</td><td>10</td><td>5</td><td>31</td></tr>
       <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>11</td><td>12</td><td>16</td><td>3</td><td>42</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>3</td><td>6</td><td>6</td><td>2</td><td>17</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>15</td><td>6</td><td>10</td><td>1</td><td>32</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>5</td><td>7</td></tr>
-      <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>11</td><td>2</td><td>7</td><td>6</td><td>26</td></tr>
-      <tr class="total"><td>Total</td><td>85</td><td>39</td><td>83</td><td>21</td><td>228</td></tr>
+      <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>11</td><td>2</td><td>8</td><td>6</td><td>27</td></tr>
+      <tr class="total"><td>Total</td><td>85</td><td>44</td><td>85</td><td>21</td><td>235</td></tr>
 <!-- counts:end -->
     </tbody>
   </table>
 </div>
 
-<div class="panel">
-  <h3>How this list is made</h3>
-  <ul class="rules">
-    <li>Every item is a line of the fork's commit messages, as written there: lines that start with <b>Feature:</b>, <b>Bug-Fix:</b>, <b>Improvement:</b> or <b>Change request:</b>. Commits without such a line are not listed. Such lines added later to a commit as a git note (<code>refs/notes/changelog</code>) count as part of its message.</li>
-    <li>The items of the hand-written report that came before this page was generated are kept too (<code>changelog-legacy.json</code>), each in the group it was listed in. A commit-message line one of them already covers is left out, so nothing is listed twice.</li>
-    <li>Changes to languages and parsing are listed as one item per language and build, such as "The C grammar has been updated." or "Bash support has been added."; its <b>details</b> link opens the changes themselves. They include the changes made in the fork's own tree-sitter grammar repositories graft builds its language support from: the same kind of commit-message lines, as written in that repository, so a few are about its own tests, builds or files rather than about graft. Those sit under the build that first brought them into graft; a line the graft commit that did so already says is left out. A change that names several languages is listed under each, and one that names none under "Other changes to language support and parsing". The type of such an item is the most important type among its changes, and the type buttons also find it by the others. A search also finds the text of the details.</li>
-    <li>Items sit under the package build (<code>npm run pack:bundle</code>) that first shipped their commit, newest first. "Not yet bundled" items go into the next build. Items from before build dates were recorded sit under the date of their commit. A build made on Windows is named by its offline kit version <code>a.b.c.d</code> (the kit <code>graft-a.b.c.d-win-x64.zip</code>): <code>a.b.c</code> is the graft version inside it and <code>d</code> counts the kits of that graft version, starting at 0.</li>
-    <li>The area of an item only serves the filter below and is derived from words in its text. Items about the installer are also listed under "Packaging, installer, updates &amp; CI", so the area counts can add up to more than the total.</li>
-  </ul>
-</div>
-
 <div class="toolbar">
-  <input type="search" id="q" placeholder="Filter items (e.g. Kotlin, savings, Databricks)">
+  <input type="search" id="q" placeholder="Filter items (e.g. C++, savings, Databricks)">
   <button data-f="all" class="on">All</button>
   <button data-f="feature">Features</button>
   <button data-f="fix">Bug fixes</button>
@@ -144,12 +131,19 @@
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <ul>
+    <li data-type="improvement" data-area="lang"><span class="tag">Improvement</span><span><span class="area">Languages</span>The CSS grammar has been updated. <details class="more"><summary>details: 1 change</summary><ul class="details"><li data-type="improvement"><span class="tag">Improvement</span><span>Stylesheets copied out of HTML pages and Microsoft Word exports now parse: &lt;!-- and --&gt; between rules, &lt;style&gt; and &lt;/style&gt; tags around the rules, at-rules such as @list l0:level1, and values that start with an escape, such as \F0B7 or \5B8B\4F53.</span></li></ul></details></span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The C grammar has been updated. <details class="more"><summary>details: 13 changes</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>The interrupt, register bank, trap and alignment qualifiers of the Tasking compiler, such as void _interrupt(1) _bisr_(osdSystemLevel) osDispatcher(void), void __trap_fast(0) f(void) or T x __align(4);, no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>The at-sign qualifiers of the Cosmic compiler, such as @interrupt void isr(void) or char @far *p;, no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A Ctrl-Z character, the end-of-file mark old DOS editors leave at the end of a file, no longer causes a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A stray control character in C code, such as a 0x02 byte an old editor left after a comment, no longer causes a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A #pragma, #error or #warning line in the middle of an expression or an argument list, or after the last element of an initializer, no longer causes a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A variable whose whole head is a macro call, such as M(IF0, ST_YMR_A) = { 0xff, 0xff };, and an unnamed struct after memory class macros, such as volatile __saddr struct { UINT f:1; };, no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A #define between alternative function heads and the function body, an initializer value that comes from an #include line, and a memory class macro before the star of a function name, such as static void MEMORY_HUGE *f(void *d), no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>Parameters with several macros around their type, such as f(NMH_FIRST V_MEMROM1 tType V_MEMROM2 event), or a macro that brings its own star, such as memcpy_sc(void SC_FAR_POINTER const s1), no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A function pointer parameter after a type name, such as uint16 f(uint8 (*const cb)(void));, no longer causes a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>Braces in comments inside an asm block, and one-line CodeWarrior assembly such as __asm JMP main;, no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>Loops whose body follows a preprocessor block, and loop heads made of macro names between commas, such as for (i = 0, All_wheels, ++i), no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>Macros in front of casts, sums and names in arguments and initializers, such as f(CHANNEL_FIRST (const T *)p), f(TP_CHANNEL_INDEX a+1), f(CONTEXT_FIRST(c) value), s.x = BIT_CAST value; or { V_MEMROM0 (V_MEMROM1 vuint8 * V_MEMROM2)0 }, a macro with its own star in a cast, such as (const void SC_FAR_POINTER)Key, and padding macros after an initializer element no longer cause a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A macro in front of a cast and a sum in an argument, such as vSetTpNew(TP_CHANNEL_INDEX (word)rub_SepTime+1, s), no longer causes a parse error.</span></li></ul></details></span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The C++ grammar has been updated. <details class="more"><summary>details: 4 changes</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>The interrupt, register bank, trap and alignment qualifiers of the Tasking compiler, such as void _interrupt(1) _bisr_(osdSystemLevel) osDispatcher(void) or T x __align(4);, no longer cause a parse error in C++ files.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>The at-sign qualifiers of the Cosmic compiler, such as @interrupt void isr(void), no longer cause a parse error in C++ files.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A Ctrl-Z character, the end-of-file mark old DOS editors leave at the end of a file, no longer causes a parse error in C++ files.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>In C++ files too, a function pointer parameter after a type name, such as uint16 f(uint8 (*const cb)(void));, a variable whose whole head is a macro call, an unnamed struct after memory class macros, a memory class macro before the star of a function name, one-line CodeWarrior assembly and an initializer value from an #include line no longer cause a parse error.</span></li></ul></details></span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The HTML grammar has been updated. <details class="more"><summary>details: 3 changes</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>End tags with no open element, such as the &lt;/div&gt;&lt;/body&gt;&lt;/html&gt; that close a page footer kept in its own file, are now read as stray end tags, as browsers do, instead of causing parse errors</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>An &lt;?xml ...?&gt; declaration at the top of an XHTML page, and the &lt;![if ...]&gt; and &lt;![endif]&gt; markers that Microsoft Word writes, are now read as comments, as browsers do, instead of breaking the rest of the document</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>A stray quote after an attribute value, as in &lt;p class="a""&gt;, is now read as an attribute name, as browsers do, instead of causing a parse error</span></li></ul></details></span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The Make grammar has been updated. <details class="more"><summary>details: 2 changes</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>A bare "else" followed by blanks before the end of the line no longer joins the next line's ifdef/ifeq into an "else ifdef", which left an endif over and caused a parse error.</span></li><li data-type="fix"><span class="tag">Bug fix</span><span>Braces in variable names, targets and variable references, such as the {{{COMPONENT}}}_FLAGS := and $({{{COMPONENT}}}DIR) of makefile templates, are now accepted, as make does. ${VAR} references still work.</span></li></ul></details></span></li>
+    <li data-type="fix" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>The Perl grammar has been updated. <details class="more"><summary>details: 1 change</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>A here-document whose statement goes on after its body now parses, such as return &lt;&lt;EOT inside a subroutine with the closing } after the end word, or print $fh &lt;&lt;EOT without a semicolon on the same line. Before, the end word was reported as missing and the rest of the file failed to parse.</span></li></ul></details></span></li>
   </ul>
 </div>
 
 <div class="group" data-group="bundle" data-date="2026-11-15" data-version="0.28.0.5">
   <h2>2026-11-15 <small>kit 0.28.0.5, graft 0.28.0</small></h2>
   <ul>
+    <li data-type="improvement" data-area="packaging"><span class="tag">Improvement</span><span><span class="area">Packaging &amp; installer</span>A new offline installer kit build (0.28.0.5) has been recorded, and the online list of changes now lists the download-link fix under it.</span></li>
     <li data-type="fix" data-area="packaging"><span class="tag">Bug fix</span><span><span class="area">Packaging &amp; installer</span>The download links on the fork's changelog page (latest offline installer kit and the list of all published builds) now open the correct releases location instead of an outdated one.</span></li>
   </ul>
 </div>

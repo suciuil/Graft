@@ -7,8 +7,12 @@
  * applies, so a value accepted by one is accepted by the other.
  */
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { cmd } from "./brand.js";
 import { SKIP_DIRS, normalizeExcludeEntry } from "./ingest/fs.js";
+import { normalizePathPrefix } from "./util/paths.js";
+import { claimedByParser } from "./graph/source-files.js";
+import { normalizeTextDir, normalizeTextExtension, PLAIN_TEXT_EXTENSIONS, TEXT_EXTENSION_SHAPE } from "./util/plain-text.js";
 import {
   DEFAULT_DEEP_STALE_THRESHOLD,
   buildConfigPath,
@@ -18,8 +22,22 @@ import {
   resolveDeepStaleThreshold,
 } from "./util/state.js";
 
-export type DirListKey = "excludeDirs" | "includeDirs";
-export type FlagKey = "followSubmodules" | "followNestedRepos";
+export type DirListKey = "excludeDirs" | "includeDirs" | "indexTextDirs";
+/** Every list setting: the folder lists, and the extensions indexText treats as text. */
+export type ListKey = DirListKey | "indexTextExtensions";
+export type FlagKey = "followSubmodules" | "followNestedRepos" | "indexText";
+
+/** Why `entry` cannot be an `indexTextExtensions` entry (an extension indexed as
+ * plain text on top of `.txt`), or null when it can. One extension; not `.txt`,
+ * which is text anyway; and not one graft parses, which stays with its parser. */
+export function indexTextExtensionProblem(entry: string): string | null {
+  const ext = normalizeTextExtension(entry);
+  if (ext === ".") return "expected a file extension, like .log";
+  if (!TEXT_EXTENSION_SHAPE.test(ext)) return "expected one file extension, like .log — no path, wildcard or second dot";
+  if (PLAIN_TEXT_EXTENSIONS.includes(ext)) return `${ext} files are plain text already — \`${cmd("graft config index-text on")}\` indexes them`;
+  if (claimedByParser(ext)) return `graft already parses ${ext} files as code or data, so they cannot be indexed as plain text`;
+  return null;
+}
 
 /** Why `name` cannot be an `includeDirs` entry, or null when it can. */
 export function includeDirProblem(name: string): string | null {
@@ -43,46 +61,91 @@ export function excludeDirProblem(name: string): string | null {
   return null;
 }
 
-/** The stored form of an entry: excludes are normalised (`\` → `/`, no leading
- * `./`, no trailing `/`); include names are stored as given. */
-export function normalizeDirEntry(key: DirListKey, entry: string): string {
-  return key === "excludeDirs" ? normalizeExcludeEntry(entry) : entry.trim();
+/** Why `path` cannot be an `indexTextDirs` entry (a folder `.txt` files are
+ * indexed from), or null when it can. A folder path from the repo root, like
+ * `--only-dir`: no globs, nothing absolute, nothing outside the repo. */
+export function indexTextDirProblem(path: string): string | null {
+  const raw = normalizePathPrefix(path.trim());
+  if (/^[a-zA-Z]:/.test(raw) || raw.startsWith("/")) return "expected a path relative to the repo root, not an absolute one";
+  const value = normalizeTextDir(raw);
+  if (!value)
+    return "expected a folder path relative to the repo root (the repo root itself is the default: leave index-text-dirs empty to index every folder)";
+  if (value.split("/").includes("..")) return '".." cannot appear — the folder must be inside the repo';
+  if (value.includes("*") || value.includes("?")) return "wildcards are not supported here — name one folder";
+  return null;
 }
 
-export function dirProblem(key: DirListKey, entry: string): string | null {
-  return key === "excludeDirs" ? excludeDirProblem(entry) : includeDirProblem(entry);
+/** The stored form of an entry: excludes and text folders are normalised (`\` →
+ * `/`, no leading `./`, no trailing `/`), text extensions lower-cased with their
+ * dot; include names are stored as given. */
+export function normalizeDirEntry(key: ListKey, entry: string): string {
+  if (key === "excludeDirs") return normalizeExcludeEntry(entry);
+  if (key === "indexTextDirs") return normalizeTextDir(entry);
+  if (key === "indexTextExtensions") return normalizeTextExtension(entry);
+  return entry.trim();
 }
 
-export function readDirList(repo: string, key: DirListKey): string[] {
+export function dirProblem(key: ListKey, entry: string): string | null {
+  if (key === "excludeDirs") return excludeDirProblem(entry);
+  if (key === "indexTextDirs") return indexTextDirProblem(entry);
+  if (key === "indexTextExtensions") return indexTextExtensionProblem(entry);
+  return includeDirProblem(entry);
+}
+
+/** Why a stored `indexTextExtensions` entry is ignored (a hand edit can store
+ * anything), for `list` to show; null for an entry that is used. */
+export function textExtensionNote(entry: string): string | null {
+  const problem = indexTextExtensionProblem(entry);
+  return problem ? `ignored: ${problem}` : null;
+}
+
+/** How an entry will match, for `list` and `add` to show; null when there is nothing to add. */
+export function dirEntryNote(key: DirListKey, entry: string, repo: string): string | null {
+  if (key === "excludeDirs") return describeExcludeEntry(entry);
+  if (key === "includeDirs") return includeEntryNote(entry);
+  return existsSync(join(repo, entry)) ? "folder, with its subtree" : "no such folder in the repo yet — nothing is indexed from it";
+}
+
+export function readDirList(repo: string, key: ListKey): string[] {
   const v = readBuildConfig(repo)?.[key];
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
+/** A saved entry as it is compared with what the user types. The build reads the
+ * text keys normalized (`textDirsOf`, `textExtensionsOf`), so a hand-written
+ * `LOG` or `docs/` is in use, and `add`/`remove` must see it as `.log` / `docs`
+ * too; the other lists are compared as stored. */
+function comparable(key: ListKey, stored: string): string {
+  return key === "indexTextDirs" || key === "indexTextExtensions" ? normalizeDirEntry(key, stored) : stored;
+}
+
 /** Add entries not already present, in order. Never writes when nothing is new. */
-export function addDirEntries(repo: string, key: DirListKey, entries: string[]): { added: string[]; present: string[] } {
+export function addDirEntries(repo: string, key: ListKey, entries: string[]): { added: string[]; present: string[] } {
   const list = readDirList(repo, key);
+  const have = list.map((v) => comparable(key, v));
   const added: string[] = [];
   const present: string[] = [];
   for (const raw of entries) {
     const value = normalizeDirEntry(key, raw);
-    if (list.includes(value) || added.includes(value)) present.push(value);
+    if (have.includes(value) || added.includes(value)) present.push(value);
     else added.push(value);
   }
   if (added.length) patchBuildConfig(repo, { [key]: [...list, ...added] });
   return { added, present };
 }
 
-/** Remove entries, compared in their stored form. Never writes when nothing matched. */
-export function removeDirEntries(repo: string, key: DirListKey, entries: string[]): { removed: string[]; missing: string[] } {
+/** Remove entries, compared in their stored form (the text keys normalized, as
+ * the build reads them). Never writes when nothing matched. */
+export function removeDirEntries(repo: string, key: ListKey, entries: string[]): { removed: string[]; missing: string[] } {
   const list = readDirList(repo, key);
   const wanted = entries.map((e) => normalizeDirEntry(key, e));
-  const removed = list.filter((v) => wanted.includes(v));
-  const missing = wanted.filter((v) => !list.includes(v));
-  if (removed.length) patchBuildConfig(repo, { [key]: list.filter((v) => !wanted.includes(v)) });
+  const removed = list.filter((v) => wanted.includes(comparable(key, v)));
+  const missing = wanted.filter((w) => !list.some((v) => comparable(key, v) === w));
+  if (removed.length) patchBuildConfig(repo, { [key]: list.filter((v) => !wanted.includes(comparable(key, v))) });
   return { removed, missing };
 }
 
-export function clearDirEntries(repo: string, key: DirListKey): string[] {
+export function clearDirEntries(repo: string, key: ListKey): string[] {
   const list = readDirList(repo, key);
   if (list.length) patchBuildConfig(repo, { [key]: [] });
   return list;
@@ -129,7 +192,7 @@ export function formatConfigList(repo: string, home?: string): string {
   lines.push(existsSync(path) ? `settings in ${path}` : `no ${path} yet — every setting is at its default`);
   lines.push("");
 
-  const dirList = (key: DirListKey, cmdName: string, meaning: string, detail: (e: string) => string | null) => {
+  const dirList = (key: ListKey, cmdName: string, meaning: string, detail: (e: string) => string | null) => {
     const list = readDirList(repo, key);
     lines.push(`${key}: ${list.length ? `${list.length} entr${list.length === 1 ? "y" : "ies"}` : "none (default)"}`);
     for (const e of list) {
@@ -165,6 +228,23 @@ export function formatConfigList(repo: string, home?: string): string {
     "followNestedRepos",
     "follow-nested-repos",
     "Index nested Git clones this repo's index does not track (a multi-repo manifest checkout, a clone parked in the tree).",
+  );
+  flag(
+    "indexText",
+    "index-text",
+    "Index plain-text files (.txt, plus indexTextExtensions), each cut into chunks with their own line spans, so a query points at the right part of a large text file. Never summarized by --deep.",
+  );
+  dirList(
+    "indexTextDirs",
+    "index-text-dirs",
+    "Folders indexText takes plain-text files from, each with its subtree; none = the whole repo. No effect while indexText is off.",
+    (e) => dirEntryNote("indexTextDirs", e, repo),
+  );
+  dirList(
+    "indexTextExtensions",
+    "index-text",
+    "Extensions indexText also indexes as plain text, on top of .txt (.log, .out, ...); only ones graft does not parse. No effect while indexText is off.",
+    textExtensionNote,
   );
 
   const t = resolveDeepStaleThreshold(repo, home);
