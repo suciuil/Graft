@@ -34,7 +34,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateChangelog, htmlText, TYPES } from "./changelog.mjs";
+import { generateChangelog, htmlText, SCOPES, scopeOf, TYPES } from "./changelog.mjs";
 import { kitFileName, kitVersion, parseKitName, parseKitRecord, parseKitVersion } from "./kit-build.mjs";
 import { FORK_REPO, pagesUrl, publishChangelog } from "./publish-changelog.mjs";
 
@@ -67,11 +67,18 @@ export function releaseNotes({ kit, version, graftVersion, build, arch, groups, 
   if (sha256) lines.push(`SHA-256 of \`${kit}\`: \`${sha256}\``, "");
   const group = (groups ?? []).find((g) => g.kind === "bundle" && g.version === version);
   if (group && group.entries.length > 0) {
-    lines.push("### Changes in this build", "");
-    for (const e of group.entries) {
-      const tag = TYPES.find((t) => t.key === e.type)?.tag ?? e.type;
-      lines.push(`- **${tag}:** ${e.html !== undefined ? htmlText(e.html) : e.text}`);
+    // Graft's own changes apart from those of the third-party tree-sitter grammars it bundles
+    for (const s of SCOPES) {
+      const entries = group.entries.filter((e) => scopeOf(e) === s.key);
+      if (!entries.length) continue;
+      lines.push(s.key === "graft" ? "### Changes to graft in this build" : `### Changes to the ${s.title.toLowerCase()} in this build`, "");
+      for (const e of entries) {
+        const tag = TYPES.find((t) => t.key === e.type)?.tag ?? e.type;
+        lines.push(`- **${tag}:** ${e.html !== undefined ? htmlText(e.html) : e.text}`);
+      }
+      lines.push("");
     }
+    lines.pop();
   } else {
     lines.push("No changes of its own are listed for this build: it repackages the previous one.");
   }

@@ -54,6 +54,37 @@ test("parseCommitMessage takes every typed line, word for word, and splits sever
   ]);
 });
 
+test("parseCommitMessage reads a graft or tree-sitter mark from the label's note", () => {
+  assert.deepEqual(
+    parseCommitMessage(
+      "- Bug-Fix (tree-sitter): Grammar fix.\n- Improvement (tree-sitter-c): C grammar.\n- Feature (Grammar): Also.\n" +
+        "- Change request (third-party): Too.\n- Bug-Fix (graft): Graft's own.\n- Feature (docs follow-up): No mark.",
+    ),
+    [
+      { type: "fix", text: "Grammar fix.", scope: "tree-sitter" },
+      { type: "improvement", text: "C grammar.", scope: "tree-sitter" },
+      { type: "feature", text: "Also.", scope: "tree-sitter" },
+      { type: "change", text: "Too.", scope: "tree-sitter" },
+      { type: "fix", text: "Graft's own.", scope: "graft" },
+      { type: "feature", text: "No mark." },
+    ],
+  );
+});
+
+test("a tree-sitter entry is filed under Languages and listed in the grammars' section", () => {
+  const groups = groupCommits(
+    [{ hash: "a", date: "2026-11-04", entries: [{ type: "improvement", text: "Rebuilt the prebuilt binaries for the Windows installer.", scope: "tree-sitter" }, { type: "fix", text: "Savings fix." }] }],
+    { unrecorded: new Set(), builds: [] },
+  );
+  const [ts] = groups[0].entries.filter((e: any) => e.scope === "tree-sitter");
+  assert.deepEqual(ts.areas, ["lang", "packaging"]);
+  const html = renderChangelog(shell, groups);
+  assert.match(html, /<div class="scope" data-scope="graft">\n  <h3>Graft <small>[^<]*<\/small><\/h3>\n  <ul>\n    <li data-type="fix"[^\n]*Savings fix\.[^\n]*\n  <\/ul>\n  <\/div>\n  <div class="scope" data-scope="tree-sitter">\n  <h3>Bundled tree-sitter grammars/);
+  // A group with no entries keeps one empty list
+  const empty = renderChangelog(shell, groupCommits([], { unrecorded: new Set(), builds: [] }));
+  assert.ok(empty.includes('<div class="group" data-group="pending">\n  <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>\n  <div class="scope" data-scope="graft">\n  <ul>\n  </ul>\n  </div>\n</div>'));
+});
+
 test("parseCommitMessage skips commits without a typed line and text before the first one", () => {
   assert.deepEqual(parseCommitMessage("- add more tests\n- remove file"), []);
   assert.deepEqual(parseCommitMessage("Merge work\n\n- Feature: Kept."), [{ type: "feature", text: "Kept." }]);
@@ -311,7 +342,7 @@ test("attachGrammarEntries files grammar entries under the fork commit that ship
   );
   assert.deepEqual(
     { ...out[2].entries[0], details: undefined },
-    { type: "improvement", text: "The C grammar has been updated.", area: "lang", grammar: "tree-sitter-c", details: undefined },
+    { type: "improvement", text: "The C grammar has been updated.", area: "lang", scope: "tree-sitter", grammar: "tree-sitter-c", details: undefined },
   );
   assert.deepEqual(out[2].entries[0].details[0], { type: "feature", text: "Old work." });
   assert.equal(attachGrammarEntries(commits, [], vendorLog).length, 3);
@@ -351,6 +382,21 @@ test("attachGrammarEntries files grammar entries under the fork commit that ship
   assert.deepEqual(attachGrammarEntries(unnamed, [grammar, cpp], [{ hash: "e1", time: 2, files: ["vendor/tree-sitter-c-1.0.0.tgz"] }])[0].entries.map(show), [
     "Other files no longer report syntax errors.",
     ["The C grammar has been updated.", [grammar.commits[0].entries[0].text, minus]],
+  ]);
+  // A mark wins over the guess: "(graft)" lines stay in graft's list, "(tree-sitter)" lines naming a grammar move
+  const marked = [
+    {
+      hash: "f1",
+      date: "2026-11-07",
+      entries: [
+        { type: "fix", text: "C files no longer report parse errors in the index.", scope: "graft" },
+        { type: "improvement", text: "The C grammar package is smaller.", scope: "tree-sitter" },
+      ],
+    },
+  ];
+  assert.deepEqual(attachGrammarEntries(marked, [repos[0]], [])[1].entries.map(show), [
+    "C files no longer report parse errors in the index.",
+    ["The C grammar has been updated.", ["The C grammar package is smaller."]],
   ]);
 });
 
@@ -410,7 +456,7 @@ test("grammar items of one group merge into one, render with a details link and 
   assert.ok(html.includes('<div class="stat"><b>2</b><span>Items in total</span></div>'));
 });
 
-test("groupLanguages puts every Languages entry behind one item per language and build", () => {
+test("groupLanguages puts every Languages entry behind one item per language, part and build", () => {
   const lang = (type: string, text: string, extra = {}) => ({ type, text, areas: areasOf(text, "lang"), ...extra });
   const groups = [
     {
@@ -418,36 +464,75 @@ test("groupLanguages puts every Languages entry behind one item per language and
       date: "2026-11-05",
       version: "0.28.0.0",
       entries: [
-        lang("improvement", "The C grammar has been updated.", { grammar: "tree-sitter-c", details: [{ type: "fix", text: "C bit-fields parse." }] }),
+        lang("improvement", "The C grammar has been updated.", { scope: "tree-sitter", grammar: "tree-sitter-c", details: [{ type: "fix", text: "C bit-fields parse." }] }),
         lang("feature", "C and C++ templates with embedded Ruby are now indexed."),
         lang("feature", "MATLAB and Simulink support. Scripts are indexed."),
         lang("fix", "The grammar build found no grammars."),
         lang("feature", "Breadth-tier support for CSS, HTML and C# Razor.", { html: "<b>Breadth-tier</b> support for CSS, HTML and C# Razor.", legacy: true }),
+        // Unmarked, about how a fork grammar parses: the grammar's change
+        lang("fix", "Unnamed bit-fields in a C struct no longer cause a parse error.", { legacy: true }),
+        // Marked: the mark wins over the guess
+        lang("fix", "C files no longer report parse errors in the index.", { scope: "graft" }),
+        lang("improvement", "Rebuilt every grammar package for arm64.", { scope: "tree-sitter" }),
         { type: "fix", text: "A CLI fix.", areas: ["cli"] },
       ],
     },
   ];
   const repos = ["tree-sitter-c", "tree-sitter-cpp", "tree-sitter-c-sharp", "tree-sitter-css", "tree-sitter-html", "tree-sitter-razor", "tree-sitter-matlab"];
   const [g] = groupLanguages(groups, repos);
-  const byName = new Map(g.entries.filter((e: any) => e.language).map((e: any) => [e.language, e]));
-  assert.deepEqual([...byName.keys()], ["C", "C++", "CSS", "HTML", "MATLAB", "Razor", "Ruby", OTHER_LANGUAGE]);
-  // Entries of other areas stay, before the language items of their type
-  assert.deepEqual(g.entries.slice(-2).map((e: any) => e.text), ["A CLI fix.", "Other changes to language support and parsing."]);
-  const c = byName.get("C");
-  assert.equal(c.text, "The C grammar has been updated.");
+  const items = g.entries.filter((e: any) => e.language);
+  const byName = new Map(items.map((e: any) => [`${e.scope}:${e.language}`, e]));
+  assert.deepEqual(
+    [...byName.keys()].sort(),
+    [
+      "graft:C",
+      "graft:C++",
+      "graft:CSS",
+      "graft:HTML",
+      "graft:MATLAB",
+      `graft:${OTHER_LANGUAGE}`,
+      "graft:Razor",
+      "graft:Ruby",
+      "tree-sitter:C",
+      `tree-sitter:${OTHER_LANGUAGE}`,
+    ].sort(),
+  );
+  // Entries of other areas stay and are graft's
+  assert.ok(g.entries.some((e: any) => e.text === "A CLI fix." && e.scope === undefined));
+  const grammarC = byName.get("tree-sitter:C");
+  assert.equal(grammarC.text, "The C grammar has been updated.");
+  assert.deepEqual(grammarC.details.map((d: { text: string }) => d.text), ["C bit-fields parse.", "Unnamed bit-fields in a C struct no longer cause a parse error."]);
+  const c = byName.get("graft:C");
+  assert.equal(c.text, "C support has been updated.");
   assert.equal(c.type, "feature");
   assert.deepEqual(c.types, ["feature", "fix"]);
-  assert.deepEqual(c.details.map((d: { text: string }) => d.text), ["C and C++ templates with embedded Ruby are now indexed.", "C bit-fields parse."]);
-  assert.equal(byName.get("C++").text, "C++ support has been updated.");
-  assert.equal(byName.get("MATLAB").text, "MATLAB support has been added.");
-  assert.equal(byName.get("CSS").text, "CSS support has been added.");
-  assert.equal(byName.get("CSS").details[0].html, "<b>Breadth-tier</b> support for CSS, HTML and C# Razor.");
-  assert.ok(!byName.has("C#"));
-  assert.equal(byName.get(OTHER_LANGUAGE).text, "Other changes to language support and parsing.");
-  assert.equal(groups[0].entries.length, 6);
+  assert.deepEqual(c.details.map((d: { text: string }) => d.text), ["C and C++ templates with embedded Ruby are now indexed.", "C files no longer report parse errors in the index."]);
+  assert.equal(byName.get("graft:C++").text, "C++ support has been updated.");
+  assert.equal(byName.get("graft:MATLAB").text, "MATLAB support has been added.");
+  assert.equal(byName.get("graft:CSS").text, "CSS support has been added.");
+  assert.equal(byName.get("graft:CSS").details[0].html, "<b>Breadth-tier</b> support for CSS, HTML and C# Razor.");
+  assert.ok(!byName.has("graft:C#"));
+  assert.equal(byName.get(`graft:${OTHER_LANGUAGE}`).text, "Other changes to language support and parsing.");
+  assert.equal(byName.get(`tree-sitter:${OTHER_LANGUAGE}`).text, "Other changes to the bundled tree-sitter grammars.");
+  assert.equal(groups[0].entries.length, 9);
   const html = renderChangelog(shell, [g]);
   assert.ok(html.includes('<li data-type="feature" data-types="feature fix" data-area="lang">'));
   assert.ok(html.includes("<span><b>Breadth-tier</b> support for CSS, HTML and C# Razor.</span>"));
+  // Graft's section comes first, then the grammars', each with only its own items
+  const graft = html.indexOf('<div class="scope" data-scope="graft">');
+  const grammars = html.indexOf('<div class="scope" data-scope="tree-sitter">');
+  assert.ok(graft >= 0 && grammars > graft);
+  assert.ok(html.indexOf("C support has been updated.") < grammars);
+  assert.ok(html.indexOf("The C grammar has been updated.") > grammars);
+  assert.match(html, /<div class="stat scope"><b>9<\/b><span>Graft itself<\/span><\/div>\n  <div class="stat scope"><b>2<\/b><span>Tree-sitter grammars<\/span><\/div>/);
+  assert.match(html, /<tr class="scope"><td><a data-scope="tree-sitter">Bundled tree-sitter grammars<\/a><\/td><td>0<\/td><td>1<\/td><td>1<\/td><td>0<\/td><td>2<\/td><\/tr>/);
+  // Languages & parsing holds both parts, so its row is followed by one row per part
+  assert.match(
+    html,
+    /<tr><td><a data-area="lang">Languages &amp; parsing<\/a><\/td>[^\n]*\n      <tr class="sub"><td><a data-area="lang" data-scope="graft">of which Graft<\/a><\/td>[^\n]*\n      <tr class="sub"><td><a data-area="lang" data-scope="tree-sitter">of which Bundled tree-sitter grammars<\/a><\/td><td>0<\/td><td>1<\/td><td>1<\/td><td>0<\/td><td>2<\/td><\/tr>/,
+  );
+  // An area with only one part gets no such rows
+  assert.ok(!html.includes('data-area="cli" data-scope'));
 });
 
 test("readGrammarRepos reads sibling grammar repositories and falls back to the snapshot", () => {

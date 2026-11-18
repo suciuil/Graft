@@ -1403,6 +1403,33 @@
               "text": "Closure parameters that mix typed and untyped names and default values (`{ String a = \"\", String b -> }`, `{ String a, b = 2 -> }`, `{ a, b = 2 -> }`) now parse correctly."
             }
           ]
+        },
+        {
+          "hash": "1886760c0a95d120eb23b9927c78df8f95e33ada",
+          "time": 1794999407,
+          "date": "2026-11-18",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "Additions, subtractions and multiplications written with spaces around the operator (`a + b`, `x - 1`, `n * 2`) are now read as binary operations instead of a command call with a signed argument, so `return a + b` and `x = a - b` no longer split into separate statements."
+            },
+            {
+              "type": "fix",
+              "text": "A line break now ends a statement before a line that starts with a name, a number or a string (`x = y` followed by `f(x)` on the next line), instead of reading the second line as an argument of the first. Lines that continue a statement (`else`, `catch`, `finally`, `in`, `as`, `instanceof`, `extends`, `implements`, `throws`, `while`) are not affected."
+            },
+            {
+              "type": "fix",
+              "text": "A call written right after a name inside call arguments, compound assignments used as arguments (`f(x += 1)`), generic methods without modifiers at the start of a line (`<T> T f()`) and for-each loops with an all-capitals type (`for (URI u in uris)`) now parse correctly."
+            },
+            {
+              "type": "fix",
+              "text": "Long chains of calls in deeply nested blocks no longer make the parser run out of memory or stop with an error."
+            },
+            {
+              "type": "improvement",
+              "text": "The grammar now has an external scanner (`src/scanner.c`), compiled by the Node, Rust, Go, Swift and Python bindings."
+            }
+          ]
         }
       ]
     },

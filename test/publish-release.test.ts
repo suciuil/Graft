@@ -49,6 +49,7 @@ test("release notes say how to install the kit and list the entries of its build
       version: "0.28.0.2",
       entries: [
         { type: "feature", text: "`graft about web` opens the fork homepage" },
+        { type: "improvement", text: "The C grammar has been updated.", scope: "tree-sitter" },
         { type: "fix", html: "Fixed <code>x</code> &amp; y", legacy: true },
       ],
     },
@@ -58,6 +59,11 @@ test("release notes say how to install the kit and list the entries of its build
   assert.match(notes, /START-HERE-install-graft\.cmd/);
   assert.match(notes, /- \*\*Feature:\*\* `graft about web` opens the fork homepage/);
   assert.match(notes, /- \*\*Bug fix:\*\* Fixed x & y/);
+  // Graft's own changes first, then those of the bundled grammars, each under its own heading
+  assert.match(
+    notes,
+    /### Changes to graft in this build\n\n- \*\*Feature:\*\*[^\n]*\n- \*\*Bug fix:\*\*[^\n]*\n\n### Changes to the bundled tree-sitter grammars in this build\n\n- \*\*Improvement:\*\* The C grammar has been updated\.\n\nEvery change/,
+  );
   assert.ok(!notes.includes("Not shipped yet"));
   assert.ok(notes.includes(FORK_HOMEPAGE_URL));
 });

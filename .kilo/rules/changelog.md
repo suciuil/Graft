@@ -23,15 +23,27 @@ builds from (the `file:../tree-sitter-*` dependencies of `package.json` and
 their own) as one short item per grammar and build (`The C grammar has been
 updated.`) whose `details` link opens those lines word for word. They are filed
 under the first fork commit after them that changes that grammar's files in
-`vendor/`; lines a fork commit there already says are left out. Every entry about
-languages and parsing (the Languages filter area), including the legacy items,
-is listed the same way: one short item per language and build (`Bash support has
-been added.`, `The C grammar has been updated.`) whose `details` link opens the
-entries; one naming several languages is under each, one naming none under
-"Other changes to language support and parsing" (`groupLanguages` in
-`scripts/changelog.mjs`). The generator
+`vendor/`; lines a fork commit there already says are left out. The generator
 keeps them in `changelog-grammars.json` for clones without those repositories:
 commit that file whenever it changes, with `docs/changelog.html`.
+
+Each build lists its entries in two separate parts (`SCOPES` in
+`scripts/changelog.mjs`), and so do the stats, the counts table, the page's
+"Graft only / Bundled tree-sitter grammars only" filter and the release notes:
+**Graft** (changes to graft itself: its code, commands, settings, output,
+extractors, savings, installer, packaging, agent instructions) and **Bundled
+tree-sitter grammars** (changes to the third-party tree-sitter grammars graft
+builds its parsers from and ships under `vendor/`: what they parse, their
+rebuilt packages and prebuilt binaries). Every entry about languages and
+parsing (the Languages filter area), including the legacy items, is listed
+as one short item per language, part and build whose `details` link opens the
+entries: `Bash support has been added.` or `C support has been updated.` under
+Graft, `The C grammar has been updated.` under the grammars; one naming
+several languages is under each, one naming none under "Other changes to
+language support and parsing" or "Other changes to the bundled tree-sitter
+grammars" (`groupLanguages`). The Languages area thus holds
+entries of both parts, and the counts table splits it (and any other area
+holding both) into one row per part.
 
 1. **Commit messages are the source.** Every line of a fork commit message
    that starts with `- Feature:`, `- Bug-Fix:`, `- Improvement:` or
@@ -52,14 +64,31 @@ commit that file whenever it changes, with `docs/changelog.html`.
    `git notes --ref=changelog append -m "- Feature: …" <commit>`, which
    counts as part of that commit's message (share it with
    `git push origin refs/notes/changelog`).
-2. **Regenerate after every prompt that changed files.** When a task you
+2. **Graft or a bundled tree-sitter grammar.** The generator files these
+   under the grammars: every typed line of the grammar repositories, a fork
+   line about how a grammar the fork builds parses its language (it names
+   that language and its first sentence is about parsing, syntax or parse
+   errors, recognised code or rebuilt parsers: `isParsingEntry`), and a line
+   marked `(tree-sitter)` after its type. Everything else, and every line
+   marked `(graft)`, is filed under Graft. When you write a commit message,
+   mark each line whose part that guess would get wrong:
+   `- Bug-Fix (tree-sitter): …` for a change that is only in a bundled
+   grammar (`(grammar)`, `(third-party)` or `(tree-sitter-c)` work too), and
+   `- Improvement (graft): …` for a change in graft's own code that only
+   mentions parsing (for example how graft picks a parser, retries `#if`
+   branches or reports syntax errors). A change that touches both gets one
+   line for each part. Lines of the grammar repositories are always the
+   grammars'; do not mark them. Any other note in brackets
+   (`- Change request (docs): …`) marks nothing. A legacy item may carry
+   `"scope": "tree-sitter"` or `"scope": "graft"` for the same purpose.
+3. **Regenerate after every prompt that changed files.** When a task you
    finish changed files or made commits, run
    `node scripts/changelog.mjs --quiet` before your final reply. It rewrites
    the page only when its content changes (new commits, a new build); work
    that is not committed yet appears once it is committed. In Kilo the plugin
    `.kilo/plugin/fork-changelog.ts` runs it automatically whenever a session
    goes idle after the repository changed.
-3. **Builds.** The page groups entries by the `npm run pack:bundle` run that
+4. **Builds.** The page groups entries by the `npm run pack:bundle` run that
    first shipped their commit ("Not yet bundled" first, then one group per
    build, then commits from before builds were recorded, by commit date).
    Each pack records its build (date and build version) in
@@ -72,14 +101,16 @@ commit that file whenever it changes, with `docs/changelog.html`.
    which starts at 0, goes up by 1 with each pack of the same graft version
    and restarts at 0 for a new one (`scripts/kit-build.mjs`). Elsewhere it is
    the package version.
-4. **The page.** Only edit its static parts (header, panels, CSS, script).
+5. **The page.** Only edit its static parts (header, panels, CSS, script).
    The regions between `<!-- stats:start/end -->`, `<!-- counts:start/end -->`,
    `<!-- areas:start/end -->` and `<!-- changes:start/end -->` are generated;
    keep those markers. The filter area of an entry is guessed from keywords
    in its text (`AREAS` in `scripts/changelog.mjs`); add or adjust areas
-   there, not in the page. After changing the generator, run
+   there, not in the page. The two parts are `SCOPES` there; each group holds
+   one `<div class="scope" data-scope="graft|tree-sitter">` per part, which
+   the page's script filters on. After changing the generator, run
    `node --import tsx --test test/changelog.test.ts`.
-5. **Report it.** When a task changed files, end your final reply with one
+6. **Report it.** When a task changed files, end your final reply with one
    line saying whether `docs/changelog.html` was regenerated or was already up
    to date. Tasks that change no files need no such line.
 <!-- changelog:end -->

@@ -34,7 +34,17 @@
  * The fork's own lines about parsing one of those languages (see isParsingEntry) are moved behind
  * the same details link. Then every entry of the Languages area, legacy items included, goes
  * behind one short item per language and group (see groupLanguages), so the main list keeps one
- * line per language and build. What was read is kept in changelog-grammars.json, so
+ * line per language and build.
+ *
+ * Every entry belongs to one of two parts of the page (SCOPES), listed separately in each group:
+ *   - "graft": graft itself (its code, commands, settings, output, packaging, agent instructions);
+ *   - "tree-sitter": the third-party tree-sitter grammars graft builds its parsers from and ships.
+ * The grammar repositories' lines, the fork's lines about how one of those grammars parses (see
+ * isParsingEntry) and lines marked "(tree-sitter)" ("- Bug-Fix (tree-sitter): …"; "(grammar)",
+ * "(third-party)" and "(tree-sitter-<name>)" work too) are tree-sitter entries; everything else,
+ * and lines marked "(graft)", are graft entries (see scopeOfNote and groupLanguages).
+ *
+ * What was read is kept in changelog-grammars.json, so
  * the page comes out the same on a machine that has only graft checked out (the snapshot is used
  * for every grammar repo that is not there); commit it with the changelog.
  *
@@ -129,8 +139,33 @@ export const AREAS = [
 ];
 const AREAS_BY_RANK = [...AREAS].sort((a, b) => a.rank - b.rank);
 
+/**
+ * The two parts of the page, in display order: graft's own changes, then those of the third-party
+ * tree-sitter grammars graft builds its parsers from. Each group lists its entries in two sections.
+ */
+export const SCOPES = [
+  { key: "graft", title: "Graft", stat: "Graft itself", note: "graft's own code, commands, settings and packaging" },
+  {
+    key: "tree-sitter",
+    title: "Bundled tree-sitter grammars",
+    stat: "Tree-sitter grammars",
+    note: "the third-party grammars graft builds its parsers from",
+  },
+];
+
 const TYPE_LABEL =
-  /(?:^|\s)-\s*(feature|bug[\s-]?fix|bugfix|improvement|change[\s-]?request)s?\s*(?:\([^)\n]*\))?\s*:\s*/gi;
+  /(?:^|\s)-\s*(feature|bug[\s-]?fix|bugfix|improvement|change[\s-]?request)s?\s*(?:\(([^)\n]*)\))?\s*:\s*/gi;
+
+/**
+ * The scope a type label's note in brackets names: "(tree-sitter)", "(grammar)", "(third-party)" or
+ * "(tree-sitter-c)" → "tree-sitter", "(graft)" → "graft"; any other note ("(docs)") names none.
+ */
+export function scopeOfNote(note) {
+  const n = String(note ?? "").trim().toLowerCase();
+  if (/^(?:tree[\s-]?sitter(?:-[\w-]+)?|grammars?|third[\s-]party)$/.test(n)) return "tree-sitter";
+  if (n === "graft") return "graft";
+  return null;
+}
 
 function typeKey(label) {
   const l = label.toLowerCase();
@@ -152,7 +187,10 @@ function entryText(raw) {
   return text ? text[0].toUpperCase() + text.slice(1) : "";
 }
 
-/** The labelled entries of one commit message, in message order: [{ type, text }]. */
+/**
+ * The labelled entries of one commit message, in message order: [{ type, text, scope? }]; `scope`
+ * only when the label's note names one (see scopeOfNote).
+ */
 export function parseCommitMessage(body) {
   const msg = String(body).replace(/\r\n?/g, "\n");
   const marks = [...msg.matchAll(TYPE_LABEL)];
@@ -161,7 +199,8 @@ export function parseCommitMessage(body) {
     const start = m.index + m[0].length;
     const end = i + 1 < marks.length ? marks[i + 1].index : msg.length;
     const text = entryText(msg.slice(start, end));
-    if (text) entries.push({ type: typeKey(m[1]), text });
+    const scope = scopeOfNote(m[2]);
+    if (text) entries.push({ type: typeKey(m[1]), text, ...(scope ? { scope } : {}) });
   });
   return entries;
 }
@@ -233,7 +272,8 @@ export function groupCommits(commits, { unrecorded, builds }) {
       }
       // The same sentence committed twice is listed once, where it first shipped (oldest wins below)
       const key = `${e.type}\u0000${e.text.toLowerCase()}`;
-      group.entries.push({ ...e, areas: areasOf(e.text, area), key });
+      // A grammar's change is about languages and parsing, whatever other words it uses
+      group.entries.push({ ...e, areas: areasOf(e.text, e.scope === "tree-sitter" ? "lang" : area), key });
     }
   }
   // By type; within a type the grammar items come last, by language
@@ -278,14 +318,15 @@ export function htmlText(html) {
  *     otherwise the commit group of its `date` (created when no commit of that date has entries).
  * Within a type, legacy items come before generated entries. Commit groups left empty are dropped.
  * @param {ReturnType<typeof groupCommits>} groups
- * @param {{ date: string, version?: string, type: string, area: string, html: string, replaces?: string[] }[]} legacy
+ * @param {{ date: string, version?: string, type: string, area: string, scope?: string, html: string, replaces?: string[] }[]} legacy
  * @returns {{ groups: ReturnType<typeof groupCommits>, unmatched: string[] }}  unmatched: `replaces`
  *   texts no generated entry has (a commit message or note was changed, or the entry is gone)
  */
 export function mergeLegacy(groups, legacy) {
   const items = legacy.map((item) => {
     const text = htmlText(item.html);
-    return { type: item.type, text, html: item.html, areas: areasOf(text, item.area), legacy: true, item };
+    const scope = item.scope ? { scope: item.scope } : {};
+    return { type: item.type, text, html: item.html, areas: areasOf(text, item.scope === "tree-sitter" ? "lang" : item.area), ...scope, legacy: true, item };
   });
   const replaced = new Set(legacy.flatMap((item) => item.replaces ?? []));
   const same = new Set(items.map((e) => `${e.type}\u0000${e.text.toLowerCase()}`));
@@ -327,25 +368,42 @@ function detailsHtml(details) {
   return `<details class="more"><summary>details: ${n} change${n === 1 ? "" : "s"}</summary><ul class="details">${items}</ul></details>`;
 }
 
-function renderGroup(g) {
-  const items = g.entries
-    .map((e) => {
-      const t = TYPES.find((x) => x.key === e.type);
-      const labels = e.areas.map((k) => `<span class="area">${esc(AREAS.find((x) => x.key === k).label)}</span>`).join("");
-      const body = (e.html ?? entryHtml(e.text)) + (e.details?.length ? ` ${detailsHtml(e.details)}` : "");
-      const types = e.types?.length > 1 ? ` data-types="${e.types.join(" ")}"` : "";
-      return `    <li data-type="${e.type}"${types} data-area="${e.areas.join(" ")}"><span class="tag">${t.tag}</span><span>${labels}${body}</span></li>\n`;
-    })
+/** The part of the page an entry is listed in: "tree-sitter" or, by default, "graft". */
+export function scopeOf(entry) {
+  return entry.scope === "tree-sitter" ? "tree-sitter" : "graft";
+}
+
+function renderItem(e) {
+  const t = TYPES.find((x) => x.key === e.type);
+  const labels = e.areas.map((k) => `<span class="area">${esc(AREAS.find((x) => x.key === k).label)}</span>`).join("");
+  const body = (e.html ?? entryHtml(e.text)) + (e.details?.length ? ` ${detailsHtml(e.details)}` : "");
+  const types = e.types?.length > 1 ? ` data-types="${e.types.join(" ")}"` : "";
+  return `    <li data-type="${e.type}"${types} data-area="${e.areas.join(" ")}"><span class="tag">${t.tag}</span><span>${labels}${body}</span></li>\n`;
+}
+
+/** A group's entries in one section per part of the page (SCOPES) that has any; one empty list when none has. */
+function renderSections(entries) {
+  const sections = SCOPES.map((s) => ({ s, items: entries.filter((e) => scopeOf(e) === s.key) })).filter((x) => x.items.length);
+  if (!sections.length) return `  <div class="scope" data-scope="graft">\n  <ul>\n  </ul>\n  </div>\n`;
+  return sections
+    .map(
+      ({ s, items }) =>
+        `  <div class="scope" data-scope="${s.key}">\n  <h3>${esc(s.title)} <small>${esc(s.note)}</small></h3>\n  <ul>\n${items.map(renderItem).join("")}  </ul>\n  </div>\n`,
+    )
     .join("");
+}
+
+function renderGroup(g) {
+  const items = renderSections(g.entries);
   if (g.kind === "pending") {
-    return `<div class="group" data-group="pending">\n  <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>\n  <ul>\n${items}  </ul>\n</div>\n`;
+    return `<div class="group" data-group="pending">\n  <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>\n${items}</div>\n`;
   }
   if (g.kind === "bundle") {
     const kit = parseKitVersion(g.version);
     const label = kit ? `kit ${g.version}, graft ${kit.version}` : `package build ${g.version}`;
-    return `<div class="group" data-group="bundle" data-date="${g.date}" data-version="${esc(g.version)}">\n  <h2>${g.date} <small>${esc(label)}</small></h2>\n  <ul>\n${items}  </ul>\n</div>\n`;
+    return `<div class="group" data-group="bundle" data-date="${g.date}" data-version="${esc(g.version)}">\n  <h2>${g.date} <small>${esc(label)}</small></h2>\n${items}</div>\n`;
   }
-  return `<div class="group" data-group="commit" data-date="${g.date}">\n  <h2>${g.date} <small>first committed; build date not recorded</small></h2>\n  <ul>\n${items}  </ul>\n</div>\n`;
+  return `<div class="group" data-group="commit" data-date="${g.date}">\n  <h2>${g.date} <small>first committed; build date not recorded</small></h2>\n${items}</div>\n`;
 }
 
 function replaceRegion(html, name, body) {
@@ -357,16 +415,35 @@ function replaceRegion(html, name, body) {
 /** Fills the generated regions (stats, counts, changes) of the changelog page. */
 export function renderChangelog(html, groups) {
   const all = groups.flatMap((g) => g.entries);
-  const n = (type, area) => all.filter((e) => (!type || e.type === type) && (!area || e.areas.includes(area))).length;
+  const n = (type, area, scope) =>
+    all.filter((e) => (!type || e.type === type) && (!area || e.areas.includes(area)) && (!scope || scopeOf(e) === scope)).length;
   const stats =
     TYPES.map((t) => `  <div class="stat ${t.key}"><b>${n(t.key)}</b><span>${t.stat}</span></div>\n`).join("") +
-    `  <div class="stat"><b>${all.length}</b><span>Items in total</span></div>\n`;
+    `  <div class="stat"><b>${all.length}</b><span>Items in total</span></div>\n` +
+    SCOPES.map((s) => `  <div class="stat scope"><b>${n(null, null, s.key)}</b><span>${esc(s.stat)}</span></div>\n`).join("");
   const cols = ["feature", "fix", "improvement", "change"];
+  // An area holding entries of both parts (Languages & parsing: graft's language support and the
+  // grammars' changes) gets one row per part under its own, so the overlap shows
   const counts =
-    AREAS.map(
-      (a) =>
-        `      <tr><td><a data-area="${a.key}">${esc(a.title)}</a></td>${cols.map((c) => `<td>${n(c, a.key)}</td>`).join("")}<td>${n(null, a.key)}</td></tr>\n`,
-    ).join("") + `      <tr class="total"><td>Total</td>${cols.map((c) => `<td>${n(c)}</td>`).join("")}<td>${all.length}</td></tr>\n`;
+    AREAS.map((a) => {
+      const row = `      <tr><td><a data-area="${a.key}">${esc(a.title)}</a></td>${cols.map((c) => `<td>${n(c, a.key)}</td>`).join("")}<td>${n(null, a.key)}</td></tr>\n`;
+      const parts = SCOPES.filter((s) => n(null, a.key, s.key) > 0);
+      if (parts.length < 2) return row;
+      return (
+        row +
+        parts
+          .map(
+            (s) =>
+              `      <tr class="sub"><td><a data-area="${a.key}" data-scope="${s.key}">of which ${esc(s.title)}</a></td>${cols.map((c) => `<td>${n(c, a.key, s.key)}</td>`).join("")}<td>${n(null, a.key, s.key)}</td></tr>\n`,
+          )
+          .join("")
+      );
+    }).join("") +
+    `      <tr class="total"><td>Total</td>${cols.map((c) => `<td>${n(c)}</td>`).join("")}<td>${all.length}</td></tr>\n` +
+    SCOPES.map(
+      (s) =>
+        `      <tr class="scope"><td><a data-scope="${s.key}">${esc(s.title)}</a></td>${cols.map((c) => `<td>${n(c, null, s.key)}</td>`).join("")}<td>${n(null, null, s.key)}</td></tr>\n`,
+    ).join("");
   // "All areas" comes first: the browser selects the first option, so the page opens unfiltered
   const areas =
     `    <option value="all" selected>All areas</option>\n` + AREAS.map((a) => `    <option value="${a.key}">${esc(a.title)}</option>\n`).join("");
@@ -386,7 +463,7 @@ export function readBuilds(repoRoot) {
   return data;
 }
 
-/** Reads changelog-legacy.json ({ items: [{ date, version?, type, area, html, replaces? }] }); empty when absent. */
+/** Reads changelog-legacy.json ({ items: [{ date, version?, type, area, scope?, html, replaces? }] }); empty when absent. */
 export function readLegacy(repoRoot) {
   const path = join(repoRoot, LEGACY_RELATIVE);
   if (!existsSync(path)) return [];
@@ -395,6 +472,7 @@ export function readLegacy(repoRoot) {
   for (const item of data.items) {
     if (!TYPES.some((t) => t.key === item.type)) throw new Error(`${path}: unknown type "${item.type}"`);
     if (!AREAS.some((a) => a.key === item.area)) throw new Error(`${path}: unknown area "${item.area}"`);
+    if (item.scope !== undefined && !SCOPES.some((s) => s.key === item.scope)) throw new Error(`${path}: unknown scope "${item.scope}"`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date ?? "") || typeof item.html !== "string") throw new Error(`${path}: an item lacks its date or html`);
   }
   return data.items;
@@ -658,11 +736,14 @@ function firstSentence(text) {
  * so the main list keeps one line per language and build whose details link lists them: the
  * grammar items of attachGrammarEntries, the commit-message entries and the legacy items about
  * that language. An entry naming several languages is listed under each, and one naming none
- * under OTHER_LANGUAGE. The item says "<Language> support has been added." when a feature in it
- * announces the language's support, "The <Language> grammar has been updated." when it holds
- * grammar or parsing changes of a fork grammar, and "<Language> support has been updated."
- * otherwise. Its type is the first of TYPES among its details, and `types` lists all of them for
- * the type filter. Details come by type, in the order they were listed within a type.
+ * under OTHER_LANGUAGE. Graft's entries and the grammars' entries (see SCOPES) get separate
+ * items: an entry is a grammar's ("tree-sitter") when it is a grammar item, is marked so, or is
+ * about how one of the grammars graft builds parses its language (see isParsingEntry); otherwise,
+ * or when marked "(graft)", it is graft's. A grammar item says "The <Language> grammar has been
+ * updated."; a graft item says "<Language> support has been added." when a feature in it
+ * announces the language's support and "<Language> support has been updated." otherwise. Its
+ * type is the first of TYPES among its details, and `types` lists all of them for the type
+ * filter. Details come by type, in the order they were listed within a type.
  * @param {ReturnType<typeof groupCommits>} groups
  * @param {string[]} repos  the grammar repositories (for the language names)
  */
@@ -674,9 +755,10 @@ export function groupLanguages(groups, repos) {
   const typeIndex = (type) => TYPES.findIndex((t) => t.key === type);
   return groups.map((g) => {
     const buckets = new Map();
-    const bucket = (name, repo) => {
-      if (!buckets.has(name)) buckets.set(name, { name, repo, details: [], also: new Set() });
-      return buckets.get(name);
+    const bucket = (scope, name, repo) => {
+      const key = `${scope}\u0000${name}`;
+      if (!buckets.has(key)) buckets.set(key, { scope, name, repo, details: [], also: new Set() });
+      return buckets.get(key);
     };
     const rest = [];
     for (const e of g.entries) {
@@ -685,14 +767,16 @@ export function groupLanguages(groups, repos) {
         continue;
       }
       if (e.grammar) {
-        const b = bucket(grammarName(e.grammar), e.grammar);
-        b.details.push(...e.details.map((d) => ({ ...d, grammar: true, fromGrammar: true })));
+        const b = bucket("tree-sitter", grammarName(e.grammar), e.grammar);
+        b.details.push(...e.details.map((d) => ({ ...d, fromGrammar: true })));
         continue;
       }
-      const detail = { type: e.type, text: e.text, ...(e.html ? { html: e.html } : {}), grammar: isParsingEntry(e.text, e.type) };
+      const detail = { type: e.type, text: e.text, ...(e.html ? { html: e.html } : {}) };
       const named = languages.filter((l) => (l.repo ? namesGrammar(e.text, l.repo) : namesLanguage(e.text, l.name)));
+      // Unmarked lines about how a grammar the fork builds parses are that grammar's changes
+      const scope = e.scope ?? (named.some((l) => l.repo) && isParsingEntry(e.text, e.type) ? "tree-sitter" : "graft");
       for (const l of named.length ? named : [{ name: OTHER_LANGUAGE, repo: null }]) {
-        const b = bucket(l.name, l.repo);
+        const b = bucket(scope, l.name, l.repo);
         b.details.push(detail);
         for (const a of e.areas.slice(1)) b.also.add(a);
       }
@@ -703,21 +787,23 @@ export function groupLanguages(groups, repos) {
         .filter((d) => !seen.has(d.text) && seen.add(d.text))
         .map((d, i) => ({ d, i }))
         .sort((x, y) => typeIndex(x.d.type) - typeIndex(y.d.type) || x.i - y.i)
-        .map(({ d: { grammar, fromGrammar, ...d } }) => d);
+        .map(({ d: { fromGrammar, ...d } }) => d);
       const types = TYPES.map((t) => t.key).filter((t) => details.some((d) => d.type === t));
       // Only graft's own entries announce a language, not the lines of its grammar repository
       const announced = b.details.some(
         (d) => !d.fromGrammar && d.type === "feature" && /^[^.]{0,40}\bsupport\b/i.test(firstSentence(d.text)) && namesLanguage(firstSentence(d.text), b.name),
       );
       const text =
-        b.name === OTHER_LANGUAGE
-          ? "Other changes to language support and parsing."
-          : announced
-            ? `${b.name} support has been added.`
-            : b.repo && b.details.some((d) => d.grammar)
-              ? `The ${b.name} grammar has been updated.`
+        b.scope === "tree-sitter"
+          ? b.name === OTHER_LANGUAGE
+            ? "Other changes to the bundled tree-sitter grammars."
+            : `The ${b.name} grammar has been updated.`
+          : b.name === OTHER_LANGUAGE
+            ? "Other changes to language support and parsing."
+            : announced
+              ? `${b.name} support has been added.`
               : `${b.name} support has been updated.`;
-      return { type: types[0], types, text, areas: ["lang", ...b.also], language: b.name, details };
+      return { type: types[0], types, text, areas: ["lang", ...b.also], scope: b.scope, language: b.name, details };
     });
     // By type; within a type the language items come last, by language, "Other" last
     const rank = (e) => typeIndex(e.type) * 3 + (e.language ? 2 : e.legacy ? 0 : 1);
@@ -752,8 +838,9 @@ export function isParsingEntry(text, type = "fix") {
  * front. Each fork commit gets one short item per grammar ("The C grammar has been updated.",
  * filed under "lang") whose `details` are that grammar's lines, word for word, oldest first,
  * followed by the fork commit's own entries about parsing that language (see namesGrammar and
- * isParsingEntry), which leave the main list; an entry naming several such languages is listed
- * under each. A grammar line the fork commits that change the same vendored package already say
+ * isParsingEntry, or marked "(tree-sitter)"; never those marked "(graft)"), which leave the main
+ * list; an entry naming several such languages is listed under each. The items are tree-sitter
+ * entries (scope "tree-sitter"), listed in the grammars' part of the page. A grammar line the fork commits that change the same vendored package already say
  * (see alreadySaid) is left out, and a grammar with no line left gets no item.
  * @param {{ hash: string, date: string, entries: object[] }[]} commits  the fork's commits, newest first
  * @param {ReturnType<typeof readGrammarRepos>["repos"]} repos
@@ -769,7 +856,7 @@ export function attachGrammarEntries(commits, repos, vendorLog) {
   const itemFor = (target, repo) => {
     const key = `${target.hash}\u0000${repo}`;
     if (!items.has(key)) {
-      const item = { type: "improvement", text: `The ${grammarName(repo)} grammar has been updated.`, area: "lang", grammar: repo, details: [] };
+      const item = { type: "improvement", text: `The ${grammarName(repo)} grammar has been updated.`, area: "lang", scope: "tree-sitter", grammar: repo, details: [] };
       items.set(key, item);
       target.entries.push(item);
     }
@@ -792,10 +879,11 @@ export function attachGrammarEntries(commits, repos, vendorLog) {
   }
   // The grammar repositories' own lines per commit and grammar, before fork lines join them
   const grammarLines = new Map([...items].map(([key, item]) => [key, item.details.map((d) => d.text)]));
-  // The fork commits' own lines about parsing a language one of the grammars parses
+  // The fork commits' own lines about parsing a language one of the grammars parses, and those
+  // marked as a grammar's change; not those marked as graft's own
   for (const commit of out) {
     for (const e of own.get(commit.hash)) {
-      if (!isParsingEntry(e.text, e.type)) continue;
+      if (e.scope === "graft" || (e.scope !== "tree-sitter" && !isParsingEntry(e.text, e.type))) continue;
       let named = repos.map((r) => r.repo).filter((repo) => namesGrammar(e.text, repo));
       // A line naming no language goes with the grammar lines of this commit that mostly say it
       if (!named.length) {
@@ -877,8 +965,9 @@ async function main(argv) {
     if (changed || !quiet) {
       const all = groups.flatMap((g) => g.entries);
       const old = all.filter((e) => e.legacy).length;
+      const grammarItems = all.filter((e) => scopeOf(e) === "tree-sitter").length;
       console.log(
-        `${changed ? "✓ regenerated" : "✓ unchanged:"} ${CHANGELOG_RELATIVE} — ${all.length} entries (${all.length - old} from commit messages, ${old} from the earlier hand-written report), ${pending} not yet bundled`,
+        `${changed ? "✓ regenerated" : "✓ unchanged:"} ${CHANGELOG_RELATIVE} — ${all.length} entries (${all.length - grammarItems} about graft, ${grammarItems} about the bundled tree-sitter grammars; ${all.length - old} from commit messages, ${old} from the earlier hand-written report), ${pending} not yet bundled`,
       );
     }
     return 0;
