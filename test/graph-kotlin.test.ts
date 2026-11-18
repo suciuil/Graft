@@ -21,6 +21,7 @@
  *  - `--deep`: every Kotlin symbol (`.kt` and `.kts`) is summarized, and `.kts`
  *    scripts are part of the concept map.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

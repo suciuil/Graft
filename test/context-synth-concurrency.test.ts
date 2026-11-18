@@ -9,6 +9,7 @@
  * their calls landed would get wrong: same nodes, same slugs, same bytes, but a
  * first-wins tie broken by network timing instead of by batch order.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

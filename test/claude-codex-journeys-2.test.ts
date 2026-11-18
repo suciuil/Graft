@@ -4,6 +4,7 @@
  * prompt that is Trail's own Stop reason is never read as the person's, and J13's leg: a gated step of a live
  * block is denied and printed in every permission mode, never asked and never allowed. Made-up repo and prompts.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';

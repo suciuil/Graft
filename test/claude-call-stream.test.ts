@@ -3,6 +3,7 @@
  * written all of it, so init can show the first learning seconds in instead
  * of when the whole answer is done. The answer itself is the same.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -6,6 +6,7 @@
  * gone), and SessionStart never scanning a CLI's source. Synthetic repos
  * (acme/webshop, acme-cli) and commands only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

@@ -3,6 +3,7 @@
  * runners' FAIL lines count as failures, and `errorLine` picks the one line
  * that says what went wrong, for a skill's "If it fails" section.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { errorLine, failedText } from "../src/trace/failure.js";

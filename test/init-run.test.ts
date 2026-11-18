@@ -6,6 +6,7 @@
  * `--yes` keeping only their own words, and the person's screen naming,
  * showing and keeping. Synthetic sessions only (b5's acme/shop world).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -3,6 +3,7 @@
  * under the Trail home it is given, never process.env's. A test home, or the
  * lab's, must not reach the real `~/.trail/repos/index.json`. Made-up repos.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -4,6 +4,7 @@
  * entrypoint; a session with no rollout (ephemeral) folds nothing and learns nothing; Codex stays tier B (fold on,
  * learning off) unless a test home sets TRAIL_TIER_CODEX=A. Synthetic rollouts only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

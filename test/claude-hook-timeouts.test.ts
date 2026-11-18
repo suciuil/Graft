@@ -6,6 +6,7 @@
  * a hard total budget of its own: the learnings first, the graph ask only
  * inside what is left (a large repo's ask took 13 s at p95).
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

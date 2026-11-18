@@ -4,6 +4,7 @@
  * They assert that CREATE TABLE/VIEW definitions are emitted with names,
  * including schema-qualified Oracle DDL recovered past its parse errors.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

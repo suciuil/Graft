@@ -6,6 +6,7 @@
  * with a `path`/`kind`/`span` so directory grouping and hub ranking have
  * something to chew on.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildRepoMap, formatRepoMap } from "../src/graph/map.js";

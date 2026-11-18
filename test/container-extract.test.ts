@@ -12,6 +12,7 @@
  * expected line numbers are the array indices + 1 and can be read off the source
  * rather than counted by hand.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";

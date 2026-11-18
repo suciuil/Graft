@@ -4,6 +4,7 @@
  * always; the 200 MB one (a real transcript passed 233 MB) runs with
  * TRAIL_PERF=1 and deletes its file after.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, closeSync, mkdtempSync, openSync, rmSync, statSync, writeSync } from "node:fs";

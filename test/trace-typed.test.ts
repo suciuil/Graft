@@ -5,6 +5,7 @@
  * and reminder tags around a real prompt are stripped, not a reason to drop it.
  * One filter serves every learning path, cold start's included.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";

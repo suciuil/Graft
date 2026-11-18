@@ -6,6 +6,7 @@
  * recite. Made-up offers, skill and repo.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

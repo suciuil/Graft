@@ -9,6 +9,7 @@
  * indexed. That also keeps the query-path freshness probe honest: the excluded
  * files must not read as phantom "added" drift on every query.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

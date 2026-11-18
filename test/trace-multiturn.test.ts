@@ -11,6 +11,7 @@
  * fold stays the same folded at once or a piece at a time; offsets and the
  * compaction cut keep working. Made-up repos and prompts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkedSuccess } from "../src/trace/runs.js";

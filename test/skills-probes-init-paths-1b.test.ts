@@ -6,6 +6,7 @@
  * a record made for another checkout. Real temp repos, made-up names, and one
  * real `trail init` run with its HOME and Trail home passed in.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

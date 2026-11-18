@@ -11,6 +11,7 @@
  * itself. Commit dates are set explicitly so the recency weighting is testable at
  * all: `now` is passed in, and the fixture's commits sit at known distances from it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

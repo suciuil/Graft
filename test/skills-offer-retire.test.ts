@@ -5,6 +5,7 @@
  * itself: 1a's forget with ledger reason retire-offer, a busy store moving
  * nothing. Made-up acme/shop only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";

@@ -6,6 +6,7 @@
  * These cover what the client does with each answer it can get back, since that
  * is what decides whether a week of events survives or is thrown away.
  */
+import "./isolate.js";
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';

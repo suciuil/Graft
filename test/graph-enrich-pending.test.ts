@@ -6,6 +6,7 @@
  * The #127 gate already catches thrown provider errors; this covers the silent
  * empty-success path that left CI stuck on an unresolvable check note.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { enrichGraph } from "../src/graph/enrich.js";

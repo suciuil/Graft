@@ -3,6 +3,7 @@
  * a `trail skills` command that writes to ~/.trail says Codex's sandbox may ask first; a save held because Trail
  * couldn't find the conversation names the host it came from. Synthetic names only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CODEX_COPY, withCodexSandbox } from '../src/hosts/codex-trust.js';

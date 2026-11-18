@@ -4,6 +4,7 @@
  * reads only: no process, no network, no cache. Each test builds a synthetic
  * checkout (acme/webshop, acme-cli) with its own git folder files.
  */
+import "./isolate.js";
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";

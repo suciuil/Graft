@@ -7,6 +7,7 @@
  * same run, verdict and skill. Synthetic data only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { copyFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";

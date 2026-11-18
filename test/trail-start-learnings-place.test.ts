@@ -3,6 +3,7 @@
  * `.trail/learnings/`, the person's own in the Trail home. A preference kept
  * just for the person is never counted as the repo's.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

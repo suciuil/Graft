@@ -3,6 +3,7 @@
  * (`$HOME/.trail-lab`) with TRAIL_LAB_INTERACTIVE=1, never on the person's own Trail home. Either half alone, or
  * neither, still skips them as headless. Synthetic sessions only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { statSync, writeFileSync } from "node:fs";

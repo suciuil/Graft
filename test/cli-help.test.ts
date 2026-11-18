@@ -3,6 +3,7 @@
  * configure a command and never run anything alone, and the LLM options belong
  * to `build --deep`. `graft --model x` used to dump the whole help as an error.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { helpExamples, missingCommandHint } from "../src/cli-help.js";

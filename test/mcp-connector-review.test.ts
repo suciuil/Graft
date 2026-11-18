@@ -6,6 +6,7 @@
  * a short back-off after a failure, and the small answers (a refused token,
  * an empty prompt, a repo tool's old name).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

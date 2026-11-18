@@ -4,6 +4,7 @@
  * update in the transcript under the receipt's tool_use id and re-decides from the transcript, and every pin must be
  * the receipt's too. Synthetic sessions only (acme/shop, acme-cli).
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";

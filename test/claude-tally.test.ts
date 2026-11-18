@@ -5,6 +5,7 @@
  * read, never count one reply twice, and count NEITHER total for a turn we
  * cannot observe.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';

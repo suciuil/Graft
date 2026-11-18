@@ -4,6 +4,7 @@
  * never a skill kept on this machine, never one that points outside the repo,
  * and only one git tracks: not an untracked or gitignored one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

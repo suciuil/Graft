@@ -6,6 +6,7 @@
  * halves, through the real fold, session lock and receipts.
  * Synthetic sessions only (acme/shop, acme-cli).
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";

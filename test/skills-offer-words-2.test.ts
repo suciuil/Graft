@@ -4,6 +4,7 @@
  * post-tool text around them, and the directives on each answer. Made-up
  * skills and repos only (release-npm, acme-cli).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

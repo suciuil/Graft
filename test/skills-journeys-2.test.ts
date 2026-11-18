@@ -7,6 +7,7 @@
  * The planner is the stand-in in skills-moments-2-fixtures.ts. Made-up
  * acme/shop only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";

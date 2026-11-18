@@ -6,6 +6,7 @@
  * count, and nothing else is denied. Skills off: no deny. Made-up repo,
  * session ids and commands only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

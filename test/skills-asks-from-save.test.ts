@@ -6,6 +6,7 @@
  * Synthetic: the made-up acme/shop.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

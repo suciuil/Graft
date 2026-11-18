@@ -2,6 +2,7 @@
  * A note from a session that only read code still touches the files it names,
  * so `trail check` and the ranked search can find it by file.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

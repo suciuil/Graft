@@ -8,6 +8,7 @@
  * "a call defines a symbol" shape (setClass/setMethod), and S3's genuinely
  * ambiguous name.Class dispatch detection (read.csv is NOT an S3 method).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

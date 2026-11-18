@@ -6,6 +6,7 @@
  * without re-running the parity check, would change parse trees under extract.ts
  * with nothing failing. These tests are what fails instead.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

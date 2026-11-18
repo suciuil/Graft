@@ -4,6 +4,7 @@
  * output never; what Claude finds in it is kept only when its quotes are
  * really there, and saved as the team's learnings with a plain title.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

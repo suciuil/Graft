@@ -7,6 +7,7 @@
  * to put an exclude list until someone knew the file existed. init writing it once
  * makes the settings self-evident; it must never overwrite an edited one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";

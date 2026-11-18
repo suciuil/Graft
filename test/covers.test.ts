@@ -3,6 +3,7 @@
  * graph. After a wiring build, each concept node's frontmatter should list the
  * symbols (with `path:span`) in the files it cites, and re-runs stay stable.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";

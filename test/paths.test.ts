@@ -16,6 +16,7 @@
  * can't corrupt such a name (and so it is provably the identity on posix, which
  * is what keeps existing Mac/Linux graphs byte-identical across this change).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join, sep } from "node:path";

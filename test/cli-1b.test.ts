@@ -8,6 +8,7 @@
  * made-up repos and commands only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

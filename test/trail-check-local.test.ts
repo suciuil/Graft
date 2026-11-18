@@ -4,6 +4,7 @@
  * tests' (trail_check_test.go), less the ones about the model and approved
  * brain rules, which only the server has.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

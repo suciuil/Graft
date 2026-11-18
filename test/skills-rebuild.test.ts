@@ -4,6 +4,7 @@
  * round-trips byte for byte; a hand-edited file is read loosely, for a
  * proposal beside it (4.6), never for a write.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

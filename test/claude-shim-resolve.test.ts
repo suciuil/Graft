@@ -12,6 +12,7 @@
  * lives in the trail home, written by `rememberInstall`, and these tests write it
  * the same way so the writer and the shim can't disagree on where or how.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';

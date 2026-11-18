@@ -11,6 +11,7 @@
  * (e), the tamper routes, is in trace-d59-tamper.test.ts.
  * Synthetic repos, prompts, ids and output only, shaped like the real ones.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyCheck, classifyToolCheck, isDeployTool, type RunFacts } from "../src/trace/checks.js";

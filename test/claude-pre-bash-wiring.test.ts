@@ -6,6 +6,7 @@
  * one is written once however often init runs, goes again with uninstall, and
  * never takes a PreToolUse hook the person wrote themselves with it.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

@@ -7,6 +7,7 @@
  * the host's or the shell's own files drops the repair. Synthetic data only
  * (acme/shop under /home/dev).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

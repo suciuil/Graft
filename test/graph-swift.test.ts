@@ -13,6 +13,7 @@
  *  - call edges at all — the breadth tier's swift query had NO @reference.call
  *    captures, so every Swift repo had symbols and zero wiring.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -4,6 +4,7 @@
  * `context/price.ts` — a measured rate where the host billed us, a labelled list
  * rate where it didn't, and tokens alone where nothing prices the model.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';

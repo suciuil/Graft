@@ -4,6 +4,7 @@
  * session-wide mark. The 1b lab's release job lost all 16 days to two sessions that once ran a hook by hand.
  * Synthetic transcripts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, statSync } from "node:fs";

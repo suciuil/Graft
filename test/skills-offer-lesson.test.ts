@@ -5,6 +5,7 @@
  * lines goes through. Synthetic transcripts and a made-up acme/shop.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

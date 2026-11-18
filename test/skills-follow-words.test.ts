@@ -6,6 +6,7 @@
  * copy constants) and on the lines as they come out. A directive opens with
  * who it is from; a block's lines never open a `[trail]` line of their own.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FOLLOW_COPY, followAtSave, markLines, recallMarks, stepLearningOf, stepNote, whose, withFollowLine } from "../src/skills/follow-learnings.js";

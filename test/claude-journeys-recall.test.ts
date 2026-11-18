@@ -7,6 +7,7 @@
  * The box has no `graft/INDEX.md`: recall never needs one. Made-up repo and
  * prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

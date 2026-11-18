@@ -8,6 +8,7 @@
  * is stood in for (its moment 6 is built beside this one); J14a's two
  * corrections are stood in for by the needs-fix mark. Synthetic data only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';

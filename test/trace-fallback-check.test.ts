@@ -6,6 +6,7 @@
  * save, and compile never takes such a call as the check. Made-up repo and
  * commands.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -2,6 +2,7 @@
  * Codex rollouts into Trail's trace events (design 4.15, P30, P34, P39, P40):
  * synthetic rollouts only, built from codex-cli 0.150's line shapes.
  */
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";

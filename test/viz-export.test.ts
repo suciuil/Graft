@@ -11,6 +11,7 @@
  *     tag back into the page that way;
  *   - `</script>` inside graph data cannot close the data element.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

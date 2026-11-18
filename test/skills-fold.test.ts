@@ -4,6 +4,7 @@
  * no new step that can't be undone, the result checked and size-gated.
  * Pure. Synthetic runs of a made-up acme-cli release.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyFold, driftDiff, foldDiff, planFold, replaceWith, type FoldInput } from "../src/skills/fold.js";

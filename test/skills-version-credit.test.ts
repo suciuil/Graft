@@ -6,6 +6,7 @@
  * publish makes any version shown look new). With no literal version, the
  * fold's reading decides, as before. Synthetic: the made-up acme-cli.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { creditRun } from '../src/skills/ledger.js';

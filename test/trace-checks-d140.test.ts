@@ -6,6 +6,7 @@
  * `gcloud run services list`, a curl without --fail, a POST, a health read with no push or deploy before it, and
  * `gh run watch` without --exit-status (it exits 0 on a failed run). Made-up services and URLs.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { RunCall } from "../src/trace/types.js";

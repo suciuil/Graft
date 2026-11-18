@@ -15,6 +15,7 @@
  * The uniqueness rule is what made it fire, so the guard cannot live there — a
  * rarer collision was a *more* confident wrong answer. It has to be the language.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveEdges } from "../src/graph/resolve.js";

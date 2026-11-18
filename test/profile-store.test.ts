@@ -3,6 +3,7 @@
  * them in the user's profile, keyed by the repo's path. A map or settings file
  * already in the repo always wins, and with the store off nothing changes.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

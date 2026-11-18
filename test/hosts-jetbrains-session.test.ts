@@ -6,6 +6,7 @@
  * (TC_STRING keys and values, `java.lang.Long` timestamps with a class
  * descriptor or a back-reference), turns interleaved with session documents.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

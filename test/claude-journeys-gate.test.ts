@@ -4,6 +4,7 @@
  * and, when let through, g5's CLI half, as `trail skills add` runs it; none
  * reaches `skills/`. Made-up repo and prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';

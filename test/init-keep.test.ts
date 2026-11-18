@@ -4,6 +4,7 @@
  * of the list as `{n}.` and its name words, and the command's numbers within
  * what was typed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";

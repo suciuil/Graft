@@ -5,6 +5,7 @@
  * unit tests, and the turns that go wrong: interrupted, compacted, a moved
  * repo, a lesson that worked again. Made-up repos, prompts and commands.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';

@@ -3,6 +3,7 @@
  * reciprocal-rank fusion. No fs, no graph build: these pin the fusion math
  * that keeps a big sub-project from drowning a small one in `graft ask`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

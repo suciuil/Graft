@@ -5,6 +5,7 @@
  * guard keeps the person's own switches (skills on, offers on, keep) and
  * Trail's hook scripts out of the agent's hands.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

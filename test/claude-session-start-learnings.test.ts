@@ -3,6 +3,7 @@
  * `graft/` is git-ignored, so a teammate's first session in a fresh clone has
  * no INDEX.md, and that is exactly the session the repo's learnings are for.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync } from 'node:fs';

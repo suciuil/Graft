@@ -9,6 +9,7 @@
  * iteration + regex/line logic) plus real files on disk, since they don't
  * need any symbol/edge structure.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';

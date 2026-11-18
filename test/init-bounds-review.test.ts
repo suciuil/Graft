@@ -3,6 +3,7 @@
  * left out: thousands of preference-shaped lines, one session with 100,000
  * typed lines, and the time cap. Synthetic lines and sessions only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";

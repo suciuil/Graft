@@ -3,6 +3,7 @@
  * one agent's calls apart from another's in the same repo, for
  * `graft savings --last` and the turn's model mix in the savings footer.
  */
+import "./isolate.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';

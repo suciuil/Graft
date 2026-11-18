@@ -3,6 +3,7 @@
  * a sandbox Trail home, a real webshop checkout and a transcript that grows
  * between prompts, as Claude Code writes it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

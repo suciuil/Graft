@@ -3,6 +3,7 @@
  * learning lists, through the hooks on its own Read, Edit and shell calls, so it
  * arrives without the agent ever choosing to run trail. Once a session each.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync } from 'node:fs';

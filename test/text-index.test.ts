@@ -2,6 +2,7 @@
  * Opt-in plain-text indexing (graph/text.ts): `.txt` files cut into line chunks,
  * each a node with its own span, only when the repo sets `indexText`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

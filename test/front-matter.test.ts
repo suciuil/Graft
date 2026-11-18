@@ -3,6 +3,7 @@
  * learnings, skills and graft/ cards all come from repos, a teammate's pushed
  * branch included.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matter, textList } from "../src/util/front-matter.js";

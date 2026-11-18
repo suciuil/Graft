@@ -9,6 +9,7 @@
  * this, every one of those calls was unconditionally unresolvable, since
  * viaMember:false calls used to only ever match kind "function".
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

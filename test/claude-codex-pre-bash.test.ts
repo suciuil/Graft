@@ -4,6 +4,7 @@
  * fails the hook and lets the command run (D17, D133). Trail never answers `allow` on Codex (an allow without
  * `updatedInput` drops the whole output), and a deny is the only thing in the output. Made-up repo, skill and ids.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

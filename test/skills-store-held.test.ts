@@ -6,6 +6,7 @@
  * TTYs, no CLAUDECODE and no claude CLI or pty wrapper among the command's
  * ancestors (a `ps` stub here).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";

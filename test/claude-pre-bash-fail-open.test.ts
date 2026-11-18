@@ -7,6 +7,7 @@
  * These tests run the exact command strings the installs write, through the
  * shell a host runs them in (sh, or Git Bash for Claude Code on Windows).
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -11,6 +11,7 @@
  * Runs the real CLI through a real git repo (the command reads git, so a fake diff
  * would prove nothing about the parsing).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

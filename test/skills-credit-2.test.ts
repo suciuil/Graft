@@ -5,6 +5,7 @@
  * blocks (last 10, a not-followed one reported to the caller), and a skill
  * retired while its block was live changes no state. Made-up acme/shop.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";

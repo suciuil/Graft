@@ -8,6 +8,7 @@
  * results. A local server standing in for that gateway is the only way to pin the
  * exit code down, since the failure lives in the CLI's reporting, not in a unit.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";

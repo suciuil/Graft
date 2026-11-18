@@ -4,6 +4,7 @@
  * seen on 2+ days and still true, typed preferences, and the five the
  * screen shows. Synthetic transcripts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

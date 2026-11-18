@@ -4,6 +4,7 @@
  * start without lessons, retired or replaced ones. Each test has its own
  * TRAIL_HOME.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";

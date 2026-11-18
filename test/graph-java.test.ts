@@ -15,6 +15,7 @@
  *   - `new Foo()` targets a TYPE, so a constructor call resolved against the
  *     function index would vanish too.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

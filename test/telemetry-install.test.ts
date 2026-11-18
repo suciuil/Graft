@@ -3,6 +3,7 @@
  * is ever recorded — not on a fresh install, not on an upgrade, not on a machine
  * that had opted in under an older graft.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';

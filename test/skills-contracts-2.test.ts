@@ -5,6 +5,7 @@
  * declaration of it (merged by TypeScript), and widens a union in place only
  * where a union can't merge.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

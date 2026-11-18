@@ -5,6 +5,7 @@
  * build). Trail only reads it: it never writes the table. A form it doesn't know is `unknown`, never a guess.
  * Temp CODEX_HOME only; nothing here reads the real one.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';

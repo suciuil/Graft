@@ -5,6 +5,7 @@
  * and how the update offer proposes the change. Made-up acme/shop only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -6,6 +6,7 @@
  * credit matches the skill's steps and check against the literal sha the run
  * used, and the other way round. Synthetic: the made-up acme/webshop.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CheckHit, RunCall, SkillInjection } from "../src/trace/types.js";

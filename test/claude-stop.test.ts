@@ -5,6 +5,7 @@
  * while the turn-end bookkeeping (the cost of the turn, the background graph
  * sync) still runs.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';

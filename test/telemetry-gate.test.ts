@@ -2,6 +2,7 @@
  * Telemetry is permanently off: no stamped key, saved setting, or environment
  * variable can turn it on, so nothing is ever recorded to the local queue or sent.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

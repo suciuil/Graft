@@ -4,6 +4,7 @@
  * keep as it is (each line's number, name and kind) and why (the numbers the person types point at those lines),
  * with no order to recite or say anything word for word (D101, D115). Made-up items.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RELAY_LINE } from "../src/init/relay.js";

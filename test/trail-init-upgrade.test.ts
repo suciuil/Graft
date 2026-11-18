@@ -6,6 +6,7 @@
  * entry fails open with its timeout in seconds, and each event is wired once.
  * Made-up repo and home folders only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

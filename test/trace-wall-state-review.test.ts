@@ -5,6 +5,7 @@
  * run in a capped child so a hang fails instead of stopping the suite.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -5,6 +5,7 @@
  * gives statement macros their semicolon, and the `#if` views of the text a C
  * compiler sees.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { erbView, isErbTemplate } from "../src/graph/erb.js";

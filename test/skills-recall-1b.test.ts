@@ -5,6 +5,7 @@
  * skill unused for 60 days left out while its cue still fires. Synthetic
  * skills (acme-cli's release, acme/webshop's ship).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

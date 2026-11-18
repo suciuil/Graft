@@ -5,6 +5,7 @@
  * pinned by the offer's skillSha. Any other phase 2 offer's yes is no yes to
  * an add. Synthetic sessions (acme/shop).
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";

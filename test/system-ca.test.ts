@@ -5,6 +5,7 @@
  * read until a request), additive (Node's defaults stay), run-once, opt-out,
  * and harmless on a Node that lacks the API.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSystemCaTrust, installSystemCaFetch, systemCaEnabled, type CaApi } from "../src/util/system-ca.js";

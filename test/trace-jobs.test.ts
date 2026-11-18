@@ -5,6 +5,7 @@
  * are status or history questions, problem reports, or too long to be a job.
  * All phrasings are made up, shaped like the ones people type.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

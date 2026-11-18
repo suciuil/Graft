@@ -3,6 +3,7 @@
  * force-closed, or live — is never rolled up into an event, and its file is left
  * exactly as it was.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';

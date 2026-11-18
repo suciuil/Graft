@@ -5,6 +5,7 @@
  * Made-up homes, a made-up acme/shop checkout and made-up skills only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

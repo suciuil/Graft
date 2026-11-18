@@ -7,6 +7,7 @@
  * file 1b wrote reads as it did.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

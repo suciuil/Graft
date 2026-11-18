@@ -7,6 +7,7 @@
  * machine is never asked to add a repo. Every case below hands the code a fake
  * Trail that records each request, so "nothing was sent" is checked, not assumed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -4,6 +4,7 @@
  * answers, fail open, the session-start budget, the keep and lesson gates,
  * and every [trail] line's shape. Made-up repos, prompts and commands.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';

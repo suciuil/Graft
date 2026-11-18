@@ -6,6 +6,7 @@
  * goes against a step wins at the offer, at the save and at recall, where
  * the update offer then proposes the change. Made-up repo and prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

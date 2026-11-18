@@ -3,6 +3,7 @@
  * here, read back strictly (the file is the agent's to edit), a phase 0 file
  * upgraded with its quotes and titles dropped (R33), and nothing typed in it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

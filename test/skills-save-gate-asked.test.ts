@@ -7,6 +7,7 @@
  * repo and transcript; "out of sight" writes name no file in a tool call.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

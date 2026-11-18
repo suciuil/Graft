@@ -3,6 +3,7 @@
  * quotes inside it (the person typed them) become single ones, as moment 3's
  * line 2 does. Made-up skill and words.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { correctionLines } from "../src/skills/offer-lines.js";

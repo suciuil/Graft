@@ -4,6 +4,7 @@
  * it tells the savings tally. No test touches the network or the user's real
  * installer answers: every fetch is a fake and every path a scratch file.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';

@@ -7,6 +7,7 @@
  * ship. Synthetic repos, prompts and output only, shaped like the real case:
  * the push to prod was refused by the host, then a side branch was pushed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkedSuccess } from "../src/trace/runs.js";

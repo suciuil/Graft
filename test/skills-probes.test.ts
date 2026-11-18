@@ -3,6 +3,7 @@
  * allowlisted forms only, run without a shell, 300 ms in all, cached 10
  * minutes. Real temp repos and files; a stubbed git for the time cap.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

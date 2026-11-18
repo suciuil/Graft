@@ -3,6 +3,7 @@
  * random, both are stable, and neither is derived from anything about the user,
  * the machine, or the repository.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

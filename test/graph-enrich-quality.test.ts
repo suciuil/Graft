@@ -5,6 +5,7 @@
  * files. Content-quality misses must stay failed (and uncached), but must not
  * trip the gate the way quota/auth does.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { enrichGraph } from "../src/graph/enrich.js";

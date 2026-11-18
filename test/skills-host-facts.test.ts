@@ -3,6 +3,7 @@
  * switches that may change it: honoured only in a test home (a `.trail-lab`
  * marker in $HOME, or a TRAIL_HOME of its own), never in a real one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, symlinkSync } from "node:fs";

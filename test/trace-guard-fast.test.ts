@@ -5,6 +5,7 @@
  * would fail anyway. Everything else is allowed, and a bad or missing file
  * allows. Each test has its own TRAIL_HOME and HOME; PATH is a made-up one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";

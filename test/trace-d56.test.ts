@@ -11,6 +11,7 @@
  *     2,000 characters (a heredoc body, an inline edit) as a work marker.
  * Synthetic repos, prompts and output only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";

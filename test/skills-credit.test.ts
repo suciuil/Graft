@@ -6,6 +6,7 @@
  * sheet. A job a compaction cut and the agent carried on is one use. The
  * person's correction within 2 prompts is one `corrected` line.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CheckHit, CreditState, RunCall, RunState, SkillInjection, SkillSessionState } from "../src/trace/types.js";

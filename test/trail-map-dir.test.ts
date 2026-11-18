@@ -3,6 +3,7 @@
  * trail, kept out of git by `.trail/.gitignore` so the repo's own ignore files
  * are never touched. A map already in `graft/` moves the first time it's asked for.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

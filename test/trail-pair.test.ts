@@ -6,6 +6,7 @@
  * review before uploading, so a learning dropped on the review page stays
  * dropped.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

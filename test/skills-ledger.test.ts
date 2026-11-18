@@ -4,6 +4,7 @@
  * that ran (4.8), pure, with D57's calls from the run sheet once a closed
  * run's calls are gone from the session.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";

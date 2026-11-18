@@ -9,6 +9,7 @@
  * npm, node and the like, `false` only where the window is the point (opening
  * the browser or a file the person asked for).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";

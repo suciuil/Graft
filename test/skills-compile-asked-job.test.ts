@@ -7,6 +7,7 @@
  * are a ship). A run with no job keeps the first-step name. Synthetic runs.
  */
 process.env.TZ = 'UTC';
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compileRun, type CompileOpts, type CompileResult } from '../src/skills/compile.js';

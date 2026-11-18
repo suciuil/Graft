@@ -3,6 +3,7 @@
  * only what the owner approved, honours the database's kill switch, keeps what
  * it could not deliver, and never needs a real database here (a fake driver).
  */
+import "./isolate.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';

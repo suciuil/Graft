@@ -6,6 +6,7 @@
  * holds a workspace file, its folders are what get wired. With several files,
  * the user picks one (or none: wire the directory itself, as before).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";

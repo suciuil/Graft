@@ -4,6 +4,7 @@
  * unusable (stored as null). And `cleanLine`, which drops any one-line text
  * with a secret in it before it reaches a session file, a run sheet or a skill.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cleanLine, redactSecrets } from "../src/trace/redact.js";

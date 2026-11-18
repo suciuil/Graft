@@ -3,6 +3,7 @@
  * first, not just the newest's. The 1b lab's ship job read "one-step" while its other run was refused for a
  * multi-line step, which hid the refusal that mattered. Synthetic transcripts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";

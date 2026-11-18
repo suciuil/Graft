@@ -5,6 +5,7 @@
  * person kept both, and only for a preference just for them in this repo.
  * The schema example's words; made-up repo only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, mkdirSync } from "node:fs";

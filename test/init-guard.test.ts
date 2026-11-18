@@ -3,6 +3,7 @@
  * other folder outside git it still sets up, but says the learnings stay on
  * this machine instead of telling the person to commit them.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

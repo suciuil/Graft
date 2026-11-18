@@ -1,4 +1,5 @@
 // @cloud-sending-test: needs data sent to a cloud, which this fork disables. Skipped by scripts/run-tests.mjs unless CLOUD_TESTS=1.
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { claimLoginCode } from "../src/cloud/workspace.js";

@@ -3,6 +3,7 @@
  * `~/.trail/state/typed-key`, never `~/.trail/key` (that file belongs to
  * another feature and may predate skills). Synthetic homes only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';

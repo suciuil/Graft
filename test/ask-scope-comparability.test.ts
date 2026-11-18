@@ -17,6 +17,7 @@
  * Deliberately free of benchmark-specific assumptions: the fixtures are raw
  * lexical scores, not files, languages, or repository shapes.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rankScopesAndFuse, PARTICIPATION_RATIO, type ScopeRankOps } from "../src/ask/fuse.js";

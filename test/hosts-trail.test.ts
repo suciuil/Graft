@@ -7,6 +7,7 @@
  * MCP server as `trail`. A repo moving from graft's names to trail's ends up
  * with trail's files only, and uninstall removes either.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

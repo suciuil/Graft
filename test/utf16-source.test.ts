@@ -14,6 +14,7 @@
  * this branch — to prove the routing is general-purpose, not tied to any one
  * source language.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

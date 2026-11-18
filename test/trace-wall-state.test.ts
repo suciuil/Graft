@@ -5,6 +5,7 @@
  * command or its output. Every test writes inside its own TRAIL_HOME.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";

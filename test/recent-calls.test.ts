@@ -2,6 +2,7 @@
  * The recent-calls log behind `graft savings --last` and the short savings
  * nudge, plus the stderr copy of the savings line for a piped stdout.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';

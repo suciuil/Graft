@@ -2,6 +2,7 @@
  * D117 (3), J16 wins: outside a repo Trail knows (it has `.trail/`, or its key is in `~/.trail/repos/index.json`),
  * the global hooks keep no pool and make no offers; walls and guardrails still apply everywhere. Made-up repos only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

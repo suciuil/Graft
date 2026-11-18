@@ -4,6 +4,7 @@
  * The held item keeps the holding session's hash. Real save gate, real SessionStart part, made-up repo.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

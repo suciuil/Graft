@@ -11,6 +11,7 @@
  * hand-written `.git` files, because the whole feature rests on an assumption about
  * git's on-disk layout and a fixture can't falsify that.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

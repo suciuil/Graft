@@ -9,6 +9,7 @@
  * carried by `.svelte`, which is the same SFC shape and the natural next request —
  * the day someone adds it, this file is where the substitution happens again.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { supportedExtensions, unsupportedExtensions } from "../src/graph/source-files.js";

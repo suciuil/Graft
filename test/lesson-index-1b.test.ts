@@ -3,6 +3,7 @@
  * 1,000 files. The index is written at Stop and session start only (R34: PostToolUseFailure writes nothing), and a
  * stale entry (an edit in place, a new file, a removed one, a link) is read again from the file. Synthetic data only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';

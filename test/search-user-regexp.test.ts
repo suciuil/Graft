@@ -3,6 +3,7 @@
  * itself for every pattern with metacharacters a grep takes, the same SyntaxError for an invalid one, and a refusal
  * only for a repeat of a group that repeats inside. Made-up files only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';

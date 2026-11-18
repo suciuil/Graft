@@ -3,6 +3,7 @@
  * standing or corrective line, clusters of the same words across days, one
  * 8 h sitting refused, and where a preference applies. Made-up lines only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

@@ -4,6 +4,7 @@
  * Codex typed line is the person's only by its keyed hash (P30). Synthetic
  * rollouts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';

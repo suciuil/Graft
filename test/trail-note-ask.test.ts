@@ -4,6 +4,7 @@
  * hook blocks the stop with the reason. Each sign once, at most three a
  * session, and a saved learning starts the signs over.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';

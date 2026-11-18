@@ -9,6 +9,7 @@
  * TTL, cap), and none of the ways a filesystem can misbehave may reach the
  * caller as an exception.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";

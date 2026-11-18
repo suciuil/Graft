@@ -5,6 +5,7 @@
  * of the learnings it showed. The use is counts and learning names: no word of
  * the prompt in the activity outbox, anywhere under ~/.trail, or in the repo.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

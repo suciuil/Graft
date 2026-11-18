@@ -8,6 +8,7 @@
  * patterns, cat) they are only words, and Trail's own repo is full of them.
  * Made-up repos and paths only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

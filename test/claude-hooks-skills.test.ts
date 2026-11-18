@@ -4,6 +4,7 @@
  * is the whole answer; a notice is what the person reads; context is what
  * the agent reads.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emitHook } from '../src/claude/hook-io.js';

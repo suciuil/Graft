@@ -7,6 +7,7 @@
  * such an endpoint produces, and records what went out on the wire, so the
  * recovery ladder is asserted step by step.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type OpenAI from "openai";

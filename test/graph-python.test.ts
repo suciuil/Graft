@@ -21,6 +21,7 @@
  * silent while a function matches, and never guesses between two same-named
  * classes.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

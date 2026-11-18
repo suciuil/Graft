@@ -3,6 +3,7 @@
  * `timeout-missing` lesson counts as worked when the next timeout-free run of the same program passes.
  * Made-up repos and commands only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';

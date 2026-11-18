@@ -4,6 +4,7 @@
  * unless it is the active SQL dialect. They assert that packages, package
  * sub-programs, standalone procedures/functions, and tables are emitted.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

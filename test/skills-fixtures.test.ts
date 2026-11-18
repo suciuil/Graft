@@ -7,6 +7,7 @@
  * After changing what Trail writes, refresh them:
  *   UPDATE_SKILL_FIXTURES=1 node --import tsx --test test/skills-fixtures.test.ts
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

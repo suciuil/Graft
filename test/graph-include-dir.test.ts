@@ -7,6 +7,7 @@
  * per-repo state file that later no-flag builds — and the fingerprint probe,
  * which never sees CLI flags at all — read identically.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";

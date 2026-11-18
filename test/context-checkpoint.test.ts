@@ -4,6 +4,7 @@
  * files it already did. That rests on the phase-1 summary cache being flushed to
  * disk *during* the pass, not only at the end.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";

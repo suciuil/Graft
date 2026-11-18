@@ -4,6 +4,7 @@
  * `trail skills update`, Codex's tier B and ephemeral lines (D137) said once in the intro, and the rollout's
  * first line kept in `st.codex.meta`. Made-up repo and offers only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

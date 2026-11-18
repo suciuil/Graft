@@ -2,6 +2,7 @@
  * An empty `trail grep` names the git-ignored code it never searched, instead
  * of saying all the code was searched.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

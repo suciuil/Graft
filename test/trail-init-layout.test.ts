@@ -4,6 +4,7 @@
  * Personal, never in git: the status line, allowlist and (under --no-global)
  * the other hooks in `.claude/settings.local.json`, and the skill in ~/.claude.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -5,6 +5,7 @@
  * `$(...)` forms, before the command runs, whatever the settings say; 1a's
  * plain `trail skills restore <name>` (a forgotten skill back) stays open.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { agentGuard } from "../src/skills/risk.js";

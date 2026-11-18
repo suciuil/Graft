@@ -11,6 +11,7 @@
  * session record can, and return null — never a guess — in every other case,
  * because the alternative to a wrong price is no price, not a plausible one.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, utimesSync, symlinkSync, realpathSync } from 'node:fs';

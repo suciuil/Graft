@@ -10,6 +10,7 @@
  * skills-version-credit.test.ts). Synthetic runs of the made-up acme-cli.
  */
 process.env.TZ = 'UTC';
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compileRun, refusalWords, type CompileOpts, type CompileResult } from '../src/skills/compile.js';

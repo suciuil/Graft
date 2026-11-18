@@ -4,6 +4,7 @@
  * is another skill's plain name. The words point at what actually looks
  * again (`trail init --look-back`). A `claude` stand-in on PATH only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

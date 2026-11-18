@@ -5,6 +5,7 @@
  * sent or set up; this runs them against a fake Trail over real HTTP to prove
  * nothing reaches it. Without them, init sends nothing anywhere, as always.
  */
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

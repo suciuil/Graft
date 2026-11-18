@@ -6,6 +6,7 @@
  * Real gate, fold and session lock; a made-up acme/shop.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";

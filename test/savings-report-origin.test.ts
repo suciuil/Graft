@@ -4,6 +4,7 @@
  * assistant or editor started graft with, and the editor's own product.json.
  * Product names and versions only; anything graft cannot tell is null.
  */
+import "./isolate.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';

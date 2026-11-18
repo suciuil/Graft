@@ -5,6 +5,7 @@
  * in the guardrail file, long commands, and the system folders. Each test
  * has its own TRAIL_HOME and HOME; PATH is a made-up one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

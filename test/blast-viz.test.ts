@@ -6,6 +6,7 @@
  * two — and that its edges point the way the viewer words them: the affected area
  * depends on the changed one, never the reverse.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -3,6 +3,7 @@
  * with more runs the line says the sum as a sum ("ran 3 times, 6 failed commands in all") and drops the one run's
  * count, which read as worse than it was. Pure: valueWords on made-up counts.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { valueWords, type SkillWeek } from '../src/skills/value-line.js';

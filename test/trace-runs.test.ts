@@ -4,6 +4,7 @@
  * of the fold's table on synthetic transcripts shaped like Claude Code's,
  * folded the way the hooks fold them: a little at a time, into one state.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { typedSha } from "../src/trace/typed.js";

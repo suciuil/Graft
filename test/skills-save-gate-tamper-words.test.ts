@@ -4,6 +4,7 @@
  * the save gate (the session's tamper mark in PreToolUse, the transcript's tail in the CLI). Made-up repo.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";

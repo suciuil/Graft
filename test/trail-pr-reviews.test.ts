@@ -5,6 +5,7 @@
  * that `trail init` reads them with `gh` when it can and stays quiet when it
  * can't.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

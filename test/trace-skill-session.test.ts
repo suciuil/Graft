@@ -4,6 +4,7 @@
  * `~/.trail/sessions/<id>.json`, with the transcript catch-up (whose cursor
  * is the `trace` key of the same file) inside the same lock.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

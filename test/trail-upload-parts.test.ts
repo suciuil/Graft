@@ -1,5 +1,6 @@
 // @cloud-sending-test: needs data sent to a cloud, which this fork disables. Skipped by scripts/run-tests.mjs unless CLOUD_TESTS=1.
 /** A big set of learnings (skills bring their folders) goes up in parts, each under the request limit. */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRAND_ENV } from "../src/brand.js";

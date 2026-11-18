@@ -6,6 +6,7 @@
  * unsigned delivery does nothing, a valid one is acknowledged fast and worked on
  * afterwards, and a page is only readable with its token.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync } from "node:crypto";

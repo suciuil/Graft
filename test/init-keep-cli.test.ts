@@ -5,6 +5,7 @@
  * once, and keeps a relayed skill only when its source compiles again to the
  * same sha. Synthetic sessions only (b5's acme/shop world).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

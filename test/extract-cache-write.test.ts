@@ -3,6 +3,7 @@
  * ASCII: a single non-ASCII character used to make V8 hold a whole file, read back,
  * as a two-byte string (on assign, ~300 MB more for the cache, ~100 MB for the graph).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

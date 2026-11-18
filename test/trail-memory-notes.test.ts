@@ -4,6 +4,7 @@
  * remote), how a note reads as a learning, which are offered for the team, and
  * that each is offered once.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

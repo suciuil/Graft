@@ -6,6 +6,7 @@
  * runs in a child process with a timeout, so a blocking open fails the test
  * instead of hanging the runner. Made-up sessions only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';

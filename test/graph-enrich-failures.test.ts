@@ -9,6 +9,7 @@
  *   - the failure is reported as DATA (`failedFiles`/`skippedFiles`/`fatal`), which
  *     is what lets the CLI exit non-zero without parsing message strings.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { enrichGraph } from "../src/graph/enrich.js";

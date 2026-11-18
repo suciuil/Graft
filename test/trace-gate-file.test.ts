@@ -6,6 +6,7 @@
  * and the shell lexer, and finds the session's file exactly where phase 0's
  * session state lives.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

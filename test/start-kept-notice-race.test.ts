@@ -4,6 +4,7 @@
  * that set it shows the line (fix-lab5; the 1b lab saw it twice in 29 of 30 trials). The 50 ms SessionStart wait
  * stays: a start that can't get the lock in time shows nothing, and a later start names it. Synthetic repo key.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

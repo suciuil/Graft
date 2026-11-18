@@ -4,6 +4,7 @@
  * says how to fix it, and saves it with `--anyway`. `--replaces` takes over
  * from an earlier learning without editing it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

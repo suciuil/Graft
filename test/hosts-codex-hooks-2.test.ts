@@ -4,6 +4,7 @@
  * matcher gains `clear`. Codex keys a hook's trust by the file, the event, the group's index and the handler's index,
  * so an entry that moves or changes stops running until the person trusts it again.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,4 +1,5 @@
 /** The per-prompt hint brings in learnings earlier sessions left, each once a session. */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { notesForPrompt, type AskJson } from "../src/claude/format.js";

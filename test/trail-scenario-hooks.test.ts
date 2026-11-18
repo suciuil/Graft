@@ -5,6 +5,7 @@
  * for a deploy step fixed, and the workspace link when a hook just put a
  * teammate's learning in front of the agent.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

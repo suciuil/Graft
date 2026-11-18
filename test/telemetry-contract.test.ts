@@ -3,6 +3,7 @@
  * site cannot send something the published `TELEMETRY.md` does not list, even if
  * it tries.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';

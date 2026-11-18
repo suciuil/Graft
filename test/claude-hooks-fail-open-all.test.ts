@@ -10,6 +10,7 @@
  * payload like the host's. The next `trail init` repairs older wiring.
  * Made-up folders only; every run gets its own HOME and TRAIL_HOME.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

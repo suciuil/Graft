@@ -2,6 +2,7 @@
  * The test run's slack for the hooks' wall-clock limits (TRAIL_TEST_PROBE_SCALE):
  * only in a test home, and never under TRAIL_PERF=1, which times the real limits.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";

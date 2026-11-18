@@ -4,6 +4,7 @@
  * changed around it (an env var, a flag, a wrapper from a fixed list, a step
  * that enabled it). Synthetic runs only (acme/shop under /home/dev).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { detectRepairs, fixDelta, ignoredFailure } from "../src/trace/repairs.js";

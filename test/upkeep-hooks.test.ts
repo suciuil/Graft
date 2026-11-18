@@ -3,6 +3,7 @@
  * wiring an older graft wrote, surface a cached upgrade nudge, and — critically —
  * never touch the network, because it runs inside Claude Code's hook timeout.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';

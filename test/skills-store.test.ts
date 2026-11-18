@@ -6,6 +6,7 @@
  * covered by a live skill or an unshown held item; forget and restore move
  * folders to and from `.retired/` and keep what the skill was.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";

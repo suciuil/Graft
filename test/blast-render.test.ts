@@ -9,6 +9,7 @@
  * real ones, and a repo with a test per module then reported 31 impacted modules,
  * 24 of them a single test file. Both are asserted against here.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

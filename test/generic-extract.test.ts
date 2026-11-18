@@ -4,6 +4,7 @@
  * for a language with NO hand-written extractor, and (b) the EXISTING resolver
  * resolves its bare-name call edges with zero language-specific code.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

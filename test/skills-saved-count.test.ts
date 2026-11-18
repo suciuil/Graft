@@ -5,6 +5,7 @@
  * once, as a step. Made-up skills only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { savedLines } from "../src/skills/save-gate.js";

@@ -3,6 +3,7 @@
  * more learnings are committed on HEAD than at the last session in that clone,
  * and nothing when the count is the same.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

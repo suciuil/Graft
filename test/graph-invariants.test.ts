@@ -8,6 +8,7 @@
  * silently. Uses the shared `checkGraphInvariants` so the gate and any future
  * `graft check --invariants` cannot drift apart.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

@@ -7,6 +7,7 @@
  * through commander, sandbox Trail homes, made-up skills and runs only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

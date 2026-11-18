@@ -4,6 +4,7 @@
  * `graft build --lsp` is a safe no-op when no server applies (never a crash,
  * never a mutated graph), which is the contract the build relies on.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pickServer, LSP_SERVERS } from "../src/graph/lsp/registry.js";

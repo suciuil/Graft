@@ -4,6 +4,7 @@
  * short to ask the graph about, and an ask that fails or runs out of time
  * must not take the learnings down with it.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';

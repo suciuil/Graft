@@ -7,6 +7,7 @@
  * Real fold, real session lock, a made-up repo and transcript.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

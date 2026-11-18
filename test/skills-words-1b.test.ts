@@ -9,6 +9,7 @@
  * checks the old kind words stay out of the copy). The copy constants are checked by value
  * too, and anchors.ts and anchors-git.ts never start a process.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";

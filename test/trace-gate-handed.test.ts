@@ -2,6 +2,7 @@
  * D137 (c8): the gate file's hand-offs (a gated step denied and printed for the person to run) and credit's reading
  * of them. Temp homes and made-up acme-cli steps only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';

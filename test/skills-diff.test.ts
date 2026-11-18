@@ -3,6 +3,7 @@
  * 4.3): pure, bounded, and the one printer phase 3 prints a new file through
  * (`printDiff` with an empty first text). Synthetic skills only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FOLD_MAX_CHARS, FOLD_MAX_SHARE, lineDiff, printDiff, runLinesChanged, sizeGate } from "../src/skills/skill-diff.js";

@@ -4,6 +4,7 @@
  * the three ways out (enter, n, esc/q/Ctrl-C). The screen never keeps
  * anything itself: it says what the person picked.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";

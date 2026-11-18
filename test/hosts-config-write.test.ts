@@ -4,6 +4,7 @@
  * fresh create, a plain object is merged into, and anything else is left exactly
  * as the user wrote it (never clobbered).
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';

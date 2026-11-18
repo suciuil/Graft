@@ -7,6 +7,7 @@
  * before. Telemetry: `wall_hit{class, had_lesson}`. Synthetic repo, made-up
  * commands and error text only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

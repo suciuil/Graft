@@ -7,6 +7,7 @@
  * test/graphrank.test.ts) rather than a built repo, so the resolution
  * contract can be pinned down precisely without touching the filesystem.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";

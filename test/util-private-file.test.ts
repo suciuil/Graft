@@ -5,6 +5,7 @@
  * Trail's; a real folder is tightened through a handle that refuses a link.
  * Made-up folders under the system temp dir only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";

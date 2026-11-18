@@ -6,6 +6,7 @@
  * and the next run replays it rather than re-issuing the LLM calls. These tests exercise
  * that with a fake summarizer, no real model.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { enrichGraph } from "../src/graph/enrich.js";

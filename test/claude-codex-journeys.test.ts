@@ -3,6 +3,7 @@
  * and a rollout that grows as Codex writes it, with TRAIL_TIER_CODEX=A in the test home (4.18: the learning half on
  * Codex before the flip). Recording a Codex prompt's keyed hash is the prompt hook's own (c8). Made-up repo, prompts and output only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

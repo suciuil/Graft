@@ -4,6 +4,7 @@
  * it. The 1b lab found all 9 real Docker hits piped like this. 1b's precision safeguards stay: planted echo or cat
  * text and a log file being read are no hit, and a retry that hits the wall again is no fix. Made-up repo and output.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { detectRepairs } from "../src/trace/repairs.js";

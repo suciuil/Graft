@@ -3,6 +3,7 @@
  * from was about a tool that started sending without saying so, which makes
  * these the tests that protect the project rather than the user's data.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

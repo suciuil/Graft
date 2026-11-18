@@ -3,6 +3,7 @@
  * held items said once, the epoch a compaction or a clear starts, and the
  * block a compaction cut short.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

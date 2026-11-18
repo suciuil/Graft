@@ -11,6 +11,7 @@
  * Made-up skill, run ids and prompts.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

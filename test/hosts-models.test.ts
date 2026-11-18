@@ -9,6 +9,7 @@
  * 5.x (the VS Code extension's `secrets.json`, whose model list is a
  * JSON-encoded string nested inside the outer JSON).
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

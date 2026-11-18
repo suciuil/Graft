@@ -6,6 +6,7 @@
  * `build.ts` still needs for the sidecar is untouched, and every other field
  * round-trips exactly as before.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";

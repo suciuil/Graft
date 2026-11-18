@@ -5,6 +5,7 @@
  * line, with the telemetry each journey queues, in order. Made-up acme/shop
  * and acme-cli only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';

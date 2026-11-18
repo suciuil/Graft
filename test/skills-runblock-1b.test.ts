@@ -4,6 +4,7 @@
  * thing cut on overflow), and the out-of-date line that opens it. Synthetic
  * skills (acme-cli's release, acme/webshop's ship) in sandbox folders.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

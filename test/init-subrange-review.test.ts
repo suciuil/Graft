@@ -5,6 +5,7 @@
  * that failed after the check, or a question) or two runs glued together
  * must not compile to a skill the session never checked. Synthetic files only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";

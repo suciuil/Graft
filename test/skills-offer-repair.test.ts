@@ -5,6 +5,7 @@
  * and synthetic transcripts.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";

@@ -5,6 +5,7 @@
  * through, and never renamed into the real file's place. Made-up folders
  * under the system temp dir only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

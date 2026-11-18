@@ -3,6 +3,7 @@
  * teammate's title with a newline in it must never become a line of its own
  * that looks like trail talking.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";

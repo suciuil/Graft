@@ -4,6 +4,7 @@
  * of any shape (escapes, line breaks, a very long line) prints as one plain
  * line on the screen and in the relay. Synthetic items only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";

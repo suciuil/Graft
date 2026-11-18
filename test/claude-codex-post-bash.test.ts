@@ -5,6 +5,7 @@
  * unknown shape) writes no mark: the rollout's result is then the only one. Context goes out only where Codex's
  * facts say PostToolUse context reaches the model (`postToolContext`, off until HC1). Synthetic output only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

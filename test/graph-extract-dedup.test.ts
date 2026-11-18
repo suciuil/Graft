@@ -18,6 +18,7 @@
  * invariants are: every id unique, the first occurrence keeps the bare id, and
  * ordinals follow document order.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { extractFile, mintId } from "../src/graph/extract.js";

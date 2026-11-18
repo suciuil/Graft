@@ -4,6 +4,7 @@
  * a line "this repo"; only the person's own lines count, never a quoted
  * block or a pasted one. Made-up lines only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

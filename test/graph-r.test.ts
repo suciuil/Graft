@@ -8,6 +8,7 @@
  * way it looks like it should (see describeR's doc comment) — get it wrong and
  * every right-assigned function in a real R codebase silently disappears.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

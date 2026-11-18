@@ -9,6 +9,7 @@
  * `inherit =` — is used in 25 files, 11 of which were entirely invisible to
  * the graph (zero extracted symbols) without this.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

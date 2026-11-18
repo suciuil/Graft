@@ -5,6 +5,7 @@
  * every push to a draft is the fastest way to be uninstalled — so the narrowing
  * is behaviour, not plumbing, and is pinned here.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { jobKey, reviewJobFor } from "../src/app/events.js";

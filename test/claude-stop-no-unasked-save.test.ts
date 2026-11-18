@@ -4,6 +4,7 @@
  * is due at the same Stop, the offer is the one answer; the sign stays unasked, so #663's ask comes at a later Stop.
  * Made-up repo, prompts and commands.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

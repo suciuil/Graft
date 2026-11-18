@@ -4,6 +4,7 @@
  * Synthetic skills (acme/webshop ship, acme-cli release) and made-up prompts
  * shaped like the real misses and near misses.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchCue, normalizePrompt, type Candidate } from "../src/skills/recall.js";

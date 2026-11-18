@@ -3,6 +3,7 @@
  * strings at ~536.8M characters) stops early with a list of its parts to build with
  * --only-dir, instead of parsing for half an hour and dying on "Invalid string length".
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

@@ -3,6 +3,7 @@
  * trust record is on for each) and, while Codex is tier B, that Trail keeps nothing new there yet. `trail init`
  * prints the trust line after it wires Codex. Temp homes only; the real ~/.codex is never read.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

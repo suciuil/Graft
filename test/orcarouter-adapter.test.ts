@@ -6,6 +6,7 @@
  * base URL, and `/v1/models` auto-discovery. Stub clients mean no key and no
  * network.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type OpenAI from "openai";

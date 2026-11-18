@@ -3,6 +3,7 @@
  * a structured exit never given to the wrong call, forked rollouts read as nothing, a FIFO never waited on,
  * apply_patch run through the shell and keystrokes into a shell seen as what they write. Synthetic rollouts only.
  */
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";

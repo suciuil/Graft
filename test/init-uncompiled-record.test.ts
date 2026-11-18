@@ -3,6 +3,7 @@
  * count and refusal codes (no text), and `trail init --verbose` prints them. Without --verbose nothing is said.
  * Synthetic sessions only (b5's acme/shop world); an agent run, so no model is started.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

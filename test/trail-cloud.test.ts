@@ -6,6 +6,7 @@
  * branch changes show as overlap. Trail cloud is permanently off, so nothing
  * of it is ever uploaded or recorded to send, even with a connection in hand.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

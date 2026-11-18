@@ -1,3 +1,4 @@
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { instructionBody, cursorRule, kiloRule, kiroSteering, windsurfRule } from '../src/hosts/instructions.js';

@@ -5,6 +5,7 @@
  * `replan` is the stand-in from skills-moments-2-fixtures.ts. Made-up
  * acme/shop and acme-cli only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

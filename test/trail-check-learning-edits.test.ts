@@ -4,6 +4,7 @@
  * rewrote Maya's "keep 4" learning to say "reversed: now 10" and the check
  * then had nothing to hold the change against.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -4,6 +4,7 @@
  * both directions of the translation (neutral → wire, wire → neutral) with no
  * key and no network.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";

@@ -4,6 +4,7 @@
  * person's own script gets without the agent line (B9), the lines after a
  * keep in each case (J09's offers-off form), `--yes`'s line, and pickFive.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pickFive } from "../src/init/candidates.js";

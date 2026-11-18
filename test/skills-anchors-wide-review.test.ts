@@ -4,6 +4,7 @@
  * through a link, and checks that ran past their caps. Synthetic checkouts
  * (acme/shop, acme-cli) in sandbox folders, each with its own Trail home.
  */
+import "./isolate.js";
 import { after, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";

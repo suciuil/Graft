@@ -7,6 +7,7 @@
  * so these tests exercise the actual process boundary: exit codes, stdout vs
  * stderr, and --json shape.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';

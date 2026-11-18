@@ -4,6 +4,7 @@
  * Not a cloud-sending test: it checks that reaching out stays off by default,
  * so it runs.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fetchDisabled, lookBackDisabled } from "../src/util/privacy-switches.js";

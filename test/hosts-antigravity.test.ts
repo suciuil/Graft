@@ -3,6 +3,7 @@
  * in Antigravity's OWN config path (not Gemini CLI's), and the shared skill. Detection
  * keys off Antigravity-specific markers so a plain Gemini-CLI user isn't dragged in.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';

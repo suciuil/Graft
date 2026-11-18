@@ -5,6 +5,7 @@
  * skill on its 3rd session-day in 45 days (4th under the governor), at least
  * 2 of them costly.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";

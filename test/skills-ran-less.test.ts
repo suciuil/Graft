@@ -3,6 +3,7 @@
  * `--no-...` flag the step lacked, or a trailing `; exit 0`, `|| true` or `|| :` that hides its failure. Fidelity
  * agrees (never a step done another way, never an extra step to fold). Made-up acme-cli calls only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { creditRun, ranAs } from '../src/skills/ledger.js';

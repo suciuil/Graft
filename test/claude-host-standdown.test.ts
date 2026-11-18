@@ -7,6 +7,7 @@
  * is worked out from the payload first, and only a host that runs the
  * ~/.claude copy lets the repo copy stand down.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

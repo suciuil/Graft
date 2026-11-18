@@ -4,6 +4,7 @@
  * first, host refusals (never ran), and the tamper rules that stop a session
  * from saving after the agent wrote Trail's or the host's files.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import { resolve, sep } from "node:path";
 import assert from "node:assert/strict";

@@ -8,6 +8,7 @@
  * run, which is why identity is captured at the handshake rather than inferred
  * from a config file happening to exist on the machine.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

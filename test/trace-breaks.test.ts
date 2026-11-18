@@ -5,6 +5,7 @@
  * processes at once, and the modes of every file the skills code writes.
  * Synthetic repos, prompts and output only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

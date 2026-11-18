@@ -5,6 +5,7 @@
  * task restarted once passed the "typed on two different days" rule and
  * started ticked.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

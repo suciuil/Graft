@@ -4,6 +4,7 @@
  * background ..."), and a `run_in_background` call's result says only that it started. Neither says the tests
  * passed, whichever way the result arrives (the transcript or a PostToolUse mark). Made-up repo and ids.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { wentToBackground } from "../src/trace/run-calls.js";

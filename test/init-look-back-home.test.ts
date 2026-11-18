@@ -4,6 +4,7 @@
  * theirs, so a test home never reaches the person's (b7, found by the b6
  * review). Made-up folders only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync } from "node:fs";

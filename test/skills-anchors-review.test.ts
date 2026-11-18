@@ -6,6 +6,7 @@
  * targets, a sparse checkout, an unreadable nearest file, reftable), or the
  * time and the env the check runs with. Synthetic checkouts only.
  */
+import "./isolate.js";
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";

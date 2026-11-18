@@ -3,6 +3,7 @@
  * model-written, with its check and enforcement for no-timeout and text
  * only for push-over-ssh.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { guardrailLearning } from "../src/notes/guardrails.js";

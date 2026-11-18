@@ -5,6 +5,7 @@
  * repo"), not "the team's": team is a scope of its own (every repo of everyone
  * who joined a team).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { notesForPrompt, notesOnTouch, teamNotesDirective, standingDirective, type AskJson } from "../src/claude/format.js";

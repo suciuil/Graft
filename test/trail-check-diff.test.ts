@@ -1,4 +1,5 @@
 /** What `trail check` reads: the branch's changes, without the wiring `trail init` wrote. */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -4,6 +4,7 @@
  * file left as it was written, and from then on only the newer one comes up in
  * `ask` and the prompt hook. Every saved learning also says its id.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

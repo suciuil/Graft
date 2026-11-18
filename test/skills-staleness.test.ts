@@ -5,6 +5,7 @@
  * its sha only; a skill unused for 60 days is said once. Synthetic skills in
  * a sandbox TRAIL_HOME.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";

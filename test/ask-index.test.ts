@@ -8,6 +8,7 @@
  * AND scores), and any way the sidecar can be missing/wrong falls back to the
  * live path rather than crashing or silently drifting.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, readdirSync, unlinkSync } from "node:fs";

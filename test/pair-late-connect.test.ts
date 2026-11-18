@@ -5,6 +5,7 @@
  * link for a day, so the next trail command picks the wait up again, and once
  * the laptop connects the command after says so, once.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

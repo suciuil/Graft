@@ -8,6 +8,7 @@
  * Code runs the command anyway. Each form must also get past the inline
  * prefilter, or the guard never loads. Turning things off stays open.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

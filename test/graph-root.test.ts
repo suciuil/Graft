@@ -6,6 +6,7 @@
  * resolved the context dir as `<cwd>/graft`, found nothing, and reported "no
  * graph — run graft build" while the repo's graph sat two levels up.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";

@@ -4,6 +4,7 @@
  * ticked (#662), the look-back's items ticked only for the person's own typed words (D23). With no screen, #662
  * keeps the team rows itself and the agent is told to ask about the commit, while the look-back is relayed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

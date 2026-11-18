@@ -9,6 +9,7 @@
  * error, and give the fix as a command with the reason it works. They never
  * tell the agent what to say. Synthetic commands and output only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { WALLS, WALL_COPY, lastTimeText, matchWall, sshRemoteFor, wallFixText, type WallCtx } from "../src/trace/walls.js";

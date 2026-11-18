@@ -5,6 +5,7 @@
  * production, staging, live) goes to that remote; the places the person named when the skill was saved count too.
  * Synthetic run sheets only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileRun, type CompileOpts, type CompileResult } from "../src/skills/compile.js";

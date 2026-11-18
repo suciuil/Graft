@@ -4,6 +4,7 @@
  * Trail, never tells the agent to skip asking or to recite, has one `[trail]` marker a line, no em dash and none of
  * the banned words; a quote is one line that can't close early or forge a marker. Made-up names only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';

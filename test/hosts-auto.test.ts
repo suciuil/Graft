@@ -4,6 +4,7 @@
  * agent set up here; laptop settings only for agents installed here plus the
  * one running init.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";

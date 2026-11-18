@@ -6,6 +6,7 @@
  * the ask" was dropped and the check fell back to a package.json read.
  * A new run starts from its own ask again. Made-up repos only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promptSkills, type PromptDeps } from "../src/claude/prompt-skills.js";

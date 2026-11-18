@@ -3,6 +3,7 @@
  * notice (design 4.15, spec 11). Synthetic skills: acme-cli's npm release
  * and acme/webshop's ship.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkLine, injectionFor, RUN_BLOCK_MAX, runBlock, useNotice, withReadyFailed } from "../src/skills/runblock.js";

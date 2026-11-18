@@ -5,6 +5,7 @@
  * `{name}` with a default where one makes sense, so the next run fills them
  * instead of replaying last time's literal.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STABLE_BRANCHES, fillParams, findParams, metaToParams, paramsToMeta, resolveParams } from "../src/skills/params.js";

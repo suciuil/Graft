@@ -2,6 +2,7 @@
  * No em dashes in what the hooks and `trail stats` say to a person or an
  * agent (the copy rule). Each line here is one a person or an agent reads.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';

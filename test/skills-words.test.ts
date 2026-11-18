@@ -9,6 +9,7 @@
  * and identifiers are not strings, so they are not read; module paths and type
  * names are skipped. The scope is read from disk, so files added later count.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";

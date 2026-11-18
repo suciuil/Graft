@@ -6,6 +6,7 @@
  * unknown model, an unbilled session and a zero saving all produce null, and
  * null renders as "tokens only" rather than as "$0.00".
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

@@ -5,6 +5,7 @@
  * and the hooks/refresh path, which never sees CLI flags. These tests pin the
  * round-trip and merge contracts independently of the CLI wiring.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

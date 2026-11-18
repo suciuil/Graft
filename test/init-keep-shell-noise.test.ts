@@ -4,6 +4,7 @@
  * CLI's own arguments). A chained second command that runs `trail init` or another `trail keep` is still denied
  * where 1b denied it. Synthetic repo, list and session.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";

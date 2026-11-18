@@ -9,6 +9,7 @@
  * exits 1, and Copilot denies every tool call. The command must run the shim with
  * the right argv under each shell, and stay silent when the shim is missing.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';

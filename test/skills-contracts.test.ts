@@ -4,6 +4,7 @@
  * the one way Trail writes its private files, the lock that gives up rather
  * than run twice, and the static rules about who may import what.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

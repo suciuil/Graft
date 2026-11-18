@@ -5,6 +5,7 @@
  * the person, and a run of status questions inside one epoch. A sandbox
  * Trail home, a real webshop-like checkout, made-up prompts.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";

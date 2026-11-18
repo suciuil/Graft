@@ -2,6 +2,7 @@
  * The regexes hooks run on agent-written commands stay linear (CodeQL js/redos, js/polynomial-redos):
  * a slow regex in a hook is a fail-open bypass, so each pump CodeQL found must finish at once.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { commandKind } from "../src/trace/shell.js";

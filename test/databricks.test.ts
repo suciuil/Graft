@@ -3,6 +3,7 @@
  * mapping, model listing, and the `build --deep` key check + model choice.
  * Network-free: listings and SDK clients are stubs.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";

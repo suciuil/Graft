@@ -5,6 +5,7 @@
  * or none; the command keeps only within it; and an allowed keep leaves a
  * receipt, once, for the CLI half.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync, mkdtempSync, mkdirSync } from "node:fs";

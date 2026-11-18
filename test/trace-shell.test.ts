@@ -5,6 +5,7 @@
  * step. And the helpers built on it: what a command runs, what kind of call
  * it is, and whether a skill's step matches a command that ran.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

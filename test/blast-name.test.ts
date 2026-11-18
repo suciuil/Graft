@@ -10,6 +10,7 @@
  *   - any failure — no key, spent quota, malformed answer — leaves every label as
  *     it was and never throws, since a check must not fail over cosmetics.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

@@ -4,6 +4,7 @@
  * because the one rule they all share leaves it out; and the every-repo
  * folder skips a file too big to be a learning. Synthetic repos and homes.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

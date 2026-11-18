@@ -2,6 +2,7 @@
  * EB tresos code templates: the C views the extractor parses instead of the
  * template, and what a build makes of a template and of a tresos `.m` file.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

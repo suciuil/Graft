@@ -4,6 +4,7 @@
  * `Array.isArray` guard. warnToolChoiceIgnored does not fire — there was a
  * real tool call — so the CLI prints `✓ concepts: 0 nodes`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ChatSynthesizer } from "../src/ai/synthesize.js";

@@ -9,6 +9,7 @@
  * children are independent repos with their own graft state, so the fix
  * persists the include list in EACH CHILD's own state too.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";

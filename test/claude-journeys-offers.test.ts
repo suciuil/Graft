@@ -4,6 +4,7 @@
  * quiets the repo for 2 weeks, and offers turned off stay off while recall
  * keeps working. Made-up repo and prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

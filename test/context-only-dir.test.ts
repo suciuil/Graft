@@ -9,6 +9,7 @@
  * No LLM: a recording summarizer is the queue. Wiring assertions reuse
  * `buildGraph` so this file cannot drift from `graph-only-dir.test.ts`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";

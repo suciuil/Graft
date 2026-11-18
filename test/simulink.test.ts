@@ -4,6 +4,7 @@
  * graph/simulink.ts. The packages are built here, part by part, so the test needs no
  * MATLAB and no binary fixtures.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

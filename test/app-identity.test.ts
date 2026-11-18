@@ -6,6 +6,7 @@
  * fail every request with what looks like a bad key), tokens are cached but
  * renewed before expiry, and a webhook signature is compared in constant time.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";

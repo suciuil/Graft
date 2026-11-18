@@ -6,6 +6,7 @@
  * `graft trail …` group moves to the top level, `check` hands its name to the
  * team check, and the freshness check becomes `build --check`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

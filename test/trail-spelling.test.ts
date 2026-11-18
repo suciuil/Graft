@@ -3,6 +3,7 @@
  * install has no `graft` binary, so a hint that says `graft ask` costs a failed
  * tool call. Under graft the same text is unchanged.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRAND_ENV } from "../src/brand.js";

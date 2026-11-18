@@ -5,6 +5,7 @@
  * second. Never a block and a notice together, never a block in a turn a
  * block continued, never context on Stop. Made-up repo and prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

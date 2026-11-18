@@ -21,6 +21,7 @@
  * the process teardown are all the production ones. Only the graph build is faked,
  * because cloning a repository is not what is being measured.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";

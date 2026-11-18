@@ -3,6 +3,7 @@
  * extractors. Each grammar is an optional, locally-built native dependency; the
  * per-language tests skip when its binding isn't built.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";

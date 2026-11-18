@@ -3,6 +3,7 @@
  * as sources, and the wall hits and repairs past sessions hold, shaped for
  * walls.json with no command text. Synthetic transcripts and runs only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";

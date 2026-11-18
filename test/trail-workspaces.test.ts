@@ -4,6 +4,7 @@
  * workspace, the newest at the top level so an older trail still reads it, and
  * each repo's learnings and uses go to the newest workspace that has the repo.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

@@ -5,6 +5,7 @@
  * closed set or a skill name; anything else is dropped, as phase 0 drops an
  * unknown kind.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

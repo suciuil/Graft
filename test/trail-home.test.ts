@@ -4,6 +4,7 @@
  * its own key for a repo inside another (submodules, nested repos), a key
  * that survives a renamed remote, and a folder of repos that reads them all.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

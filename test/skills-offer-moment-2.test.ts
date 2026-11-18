@@ -5,6 +5,7 @@
  * that ended with the offer's line 2), the words they route to, and the repo
  * of a skill-keyed offer. Synthetic transcripts and acme/shop only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";

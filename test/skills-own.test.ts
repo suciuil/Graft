@@ -6,6 +6,7 @@
  * the front matter the way the reader does (a BOM, spaces after a fence, CRLF
  * line ends), so a rewrite never loses the skill's name or description.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

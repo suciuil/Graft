@@ -5,6 +5,7 @@
  * turn 4: a prior interrupted turn, then a 26-word line ending "publish X now and check it went out". Made-up
  * repos and prompts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkedSuccess } from "../src/trace/runs.js";

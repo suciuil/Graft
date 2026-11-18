@@ -4,6 +4,7 @@
  * moment is 1a's classifyAnswer. The whole message is read, so a pasted
  * block or a second request after the answer is no answer.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import { rmSync } from "node:fs";
 import { dirname } from "node:path";

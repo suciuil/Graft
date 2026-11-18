@@ -3,6 +3,7 @@
  * that nobody committed (or even made through the agent), and it never turns a
  * working query into a failing one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";

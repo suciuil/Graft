@@ -3,6 +3,7 @@
  * init's replay, which folds one in-memory state turn by turn, took about 8 s for a 10,000-turn session. The parsed
  * set is now kept across folds of the same state object, and stays exactly the parse of `st.seen`.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

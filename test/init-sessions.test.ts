@@ -4,6 +4,7 @@
  * folder above it that spent 30% or more of their tool calls in it (only that
  * stretch counts). Counted in session-days, not files.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

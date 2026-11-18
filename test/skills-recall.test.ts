@@ -3,6 +3,7 @@
  * line (design 4.6, 4.7, spec 11). Synthetic skills (acme/webshop ship,
  * acme-cli release) and made-up prompts shaped like the 4.6 tables.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { indexLine, matchCue, normalizePrompt, scoreJobCue, type Candidate } from "../src/skills/recall.js";

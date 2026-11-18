@@ -5,6 +5,7 @@
  * or a JSON string holding the error. The same error as a real line, even an
  * indented one from a test runner, still fires. Synthetic look-alikes only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchWall } from "../src/trace/walls.js";

@@ -3,6 +3,7 @@
  * run of it: the skill's name only, never the task or the prompt, and only
  * for a skill the repo keeps and the workspace already has.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

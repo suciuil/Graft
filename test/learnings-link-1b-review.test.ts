@@ -5,6 +5,7 @@
  * link, a chain of links, a link whose target is made later, and `trail
  * forget` writing through a link. Made-up folders only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";

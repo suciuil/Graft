@@ -3,6 +3,7 @@
  * temp dir and asserts the emitted nodes (funcs, methods, structs, interfaces, type
  * aliases) and edges (calls, intra-module imports) match the AST walk in extract.ts.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

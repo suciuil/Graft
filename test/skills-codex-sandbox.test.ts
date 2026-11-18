@@ -4,6 +4,7 @@
  * can run the same command in their own terminal; run there, the same receipt and transcript decide. Temp homes and
  * made-up acme-cli releases only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

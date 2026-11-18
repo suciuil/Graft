@@ -2,6 +2,7 @@
  * b6 review: the relay, the handover, the screen and the init record under
  * attack. Synthetic items, sessions and lines only (made-up acme repos).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

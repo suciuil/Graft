@@ -2,6 +2,7 @@
  * Where a live session's state lives: ~/.trail/sessions/<id>.json, in a folder
  * only its owner can open, under a name a hook payload can't steer elsewhere.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

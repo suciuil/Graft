@@ -2,6 +2,7 @@
  * `graft where`: names where a repo's map and settings are kept, the profile
  * store above all, and lists the store's folders with the repo each belongs to.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

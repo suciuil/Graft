@@ -13,6 +13,7 @@
  *   Actions folder is never named by its path in copy (P22): the banned word
  *   catches it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";

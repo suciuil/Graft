@@ -4,6 +4,7 @@
  * stay out: 2 days, a question, a job ask, a request for now, too few words, too many. Like every
  * preference, it is pointers: no typed text in the candidate. Synthetic lines only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildCandidates } from "../src/init/candidates.js";

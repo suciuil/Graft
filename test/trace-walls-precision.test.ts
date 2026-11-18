@@ -10,6 +10,7 @@
  *     mv, du, wc, cat, a for-in list, ...) is no hit.
  * The exit-0 rule (P23, D140) and the 1b safeguards stay as they were.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchWall } from "../src/trace/walls.js";

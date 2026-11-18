@@ -3,6 +3,7 @@
  * only when it does (skills on, and the file still says check no-timeout and
  * enforce sure-fail, as the fast path reads it). Made-up homes only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

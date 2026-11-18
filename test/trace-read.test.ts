@@ -5,6 +5,7 @@
  * over when the file shrank or was replaced. Tool calls and their results are
  * paired so a failed command is known as one, even across reads.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";

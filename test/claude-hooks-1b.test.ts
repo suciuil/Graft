@@ -4,6 +4,7 @@
  * sandbox Trail home, the test clock and a synthetic transcript that grows
  * between calls. Made-up repos, prompts and commands only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

@@ -8,6 +8,7 @@
  * lexically-equal node that is wired into the query's cluster, and strongly
  * connected neighbours the query never named are rescued into the results.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

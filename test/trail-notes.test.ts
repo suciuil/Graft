@@ -3,6 +3,7 @@
  * `~/.trail/repos/<repo>/notes/`, read back by `ask` for the next session on
  * the same thing. Never in the repo.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

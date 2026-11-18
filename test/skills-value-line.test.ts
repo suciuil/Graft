@@ -7,6 +7,7 @@
  * Made-up homes, repos (acme/shop) and skills only; no typed words anywhere.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

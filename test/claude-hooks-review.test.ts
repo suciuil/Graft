@@ -3,6 +3,7 @@
  * keeps of a call's output, the fail-open paths, a yes and what it covers,
  * and the run a block belongs to. Made-up repos, sessions and output only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resultText } from '../src/claude/post-bash.js';

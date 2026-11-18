@@ -5,6 +5,7 @@
  * ends: ~43 GB and a silent crash on a ~77k-file C repo. And when init's build
  * does fail, init says why instead of only "failed".
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

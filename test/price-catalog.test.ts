@@ -2,6 +2,7 @@
  * Tests for the local LiteLLM price catalog (`graft prices update`) and how the
  * price table falls back to it.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

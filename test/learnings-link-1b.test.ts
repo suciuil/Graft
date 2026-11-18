@@ -5,6 +5,7 @@
  * person-level learnings: the every-repo writer, init's keep and a wall
  * lesson's save. Made-up folders and repos only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";

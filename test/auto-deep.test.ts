@@ -3,6 +3,7 @@
  * out-of-date summaries reach the deep-threshold — off by default, one run at a
  * time, no retry after a failure, and failures reported on every query.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

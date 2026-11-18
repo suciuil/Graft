@@ -6,6 +6,7 @@
  * and the ways around it (12+ rows on top of 1a's 81). Synthetic data only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";

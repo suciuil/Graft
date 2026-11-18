@@ -5,6 +5,7 @@
  * clock was wrong. Made-up homes, repos (acme/shop) and skills only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

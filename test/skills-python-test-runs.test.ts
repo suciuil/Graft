@@ -4,6 +4,7 @@
  * into the step. Any other shell setup still refuses. Found by a real end-to-end run on pytest-dev/pluggy,
  * where none of these was offered. Synthetic transcripts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";

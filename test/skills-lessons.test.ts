@@ -4,6 +4,7 @@
  * lessons kept as learnings, and the lines a run block ends with. Synthetic
  * corrections and made-up repos only; each test has its own TRAIL_HOME.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";

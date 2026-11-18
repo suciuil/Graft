@@ -14,6 +14,7 @@
  *    through Kilo (MCP) and Copilot (CLI in a VS Code terminal), at every
  *    reasoning effort, because the effort is not part of the model id.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

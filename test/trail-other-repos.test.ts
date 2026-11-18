@@ -4,6 +4,7 @@
  * repos (the ones Claude Code ran in) go to the onboarding page by name, and
  * the ones the person picks are set up and added to the workspace.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

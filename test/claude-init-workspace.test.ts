@@ -7,6 +7,7 @@
  * hooks and no MCP — graft was invisible exactly where the work happens. And a
  * session opened one level deeper (`<child>/src`) found no `graft/` at all.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -2,6 +2,7 @@
  * End-to-end tests for the markdown-graph pipeline (`init` → `check`), driven by
  * offline test doubles so no LLM/network is needed.
  */
+import "./isolate.js";
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, rmSync } from "node:fs";

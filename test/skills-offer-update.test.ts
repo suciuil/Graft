@@ -5,6 +5,7 @@
  * write. c2's `foldInputFor` and `replan` are a thin stand-in here
  * (skills-moments-2-fixtures.ts) until c2 lands. Made-up acme/shop only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

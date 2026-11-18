@@ -4,6 +4,7 @@
  * CODEX_HOME/sessions, read by the hooks (its cursor's inode). Synthetic only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

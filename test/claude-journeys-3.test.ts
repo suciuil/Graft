@@ -4,6 +4,7 @@
  * through `main(event)` with Claude Code's payloads; the telemetry each journey queues is checked in order. Made-up
  * acme/shop and acme-cli only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

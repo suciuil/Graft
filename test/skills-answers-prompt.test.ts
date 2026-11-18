@@ -8,6 +8,7 @@
  * Made-up repo, paths and package.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { answersPrompt } from "../src/skills/answers-prompt.js";

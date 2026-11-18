@@ -3,6 +3,7 @@
  * plain words: not signed in, not installed, too slow, said no, or an error,
  * never just "couldn't read".
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

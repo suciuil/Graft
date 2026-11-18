@@ -4,6 +4,7 @@
  * and arguments, and says nothing when it isn't sure: the near-misses here
  * must match nothing. Made-up commands and repos only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchSteps, rulesOf } from "../src/skills/learning-steps.js";

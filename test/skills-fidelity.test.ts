@@ -3,6 +3,7 @@
  * did against the skill's steps. Counts and 8-hex shas only; never changes a
  * use's outcome. Pure. Synthetic runs of a made-up acme-cli release.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { extraKey, fidelityCounts, fidelityOf } from "../src/skills/fidelity.js";

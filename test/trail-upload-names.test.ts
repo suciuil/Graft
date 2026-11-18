@@ -5,6 +5,7 @@
  * learning's file name carries the first words of its title, so a personal
  * learning, and one not yet committed, stay on this machine name and all.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

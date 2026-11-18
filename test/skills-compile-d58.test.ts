@@ -7,6 +7,7 @@
  * script is a step only when it is one line that starts a program (e).
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileRun, draftText, refusalWords, type CompileOpts, type CompileResult } from "../src/skills/compile.js";

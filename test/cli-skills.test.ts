@@ -7,6 +7,7 @@
  * stub. Synthetic data only (acme/shop, acme/webshop).
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

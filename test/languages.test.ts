@@ -3,6 +3,7 @@
  * extension it lists must be one a parser claims, and a native grammar that will not
  * load must show the level the build falls back to, not the one it would get.
  */
+import "./isolate.js";
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { formatLanguageSupport, languageSupport, SUPPORT_LEVELS, warmLanguageSupport } from "../src/graph/languages.js";

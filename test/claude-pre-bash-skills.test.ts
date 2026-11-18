@@ -7,6 +7,7 @@
  * both copies of the hooks registered: one decision, one receipt. Made-up
  * repo, skill and session ids only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';

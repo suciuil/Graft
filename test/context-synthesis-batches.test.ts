@@ -8,6 +8,7 @@
  * already on disk alone. Tests that count calls in order run the batches one at a
  * time (`synthConcurrency: 1`); the concurrent pass is context-synth-concurrency.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";

@@ -6,6 +6,7 @@
  * about a neighbouring file or matched on words) is a lead: worth a look,
  * never a failure. Replaced and retired learnings aren't read at all.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

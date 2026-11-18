@@ -10,6 +10,7 @@
  * Made-up repo, package and keystrokes; a temp Trail home.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";

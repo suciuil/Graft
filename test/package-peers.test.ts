@@ -7,6 +7,7 @@
  * people installing the package. tree-sitter-swift was that grammar (it asks for
  * ^0.22); it is vendored into dist/ now (scripts/vendor-swift.mjs).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

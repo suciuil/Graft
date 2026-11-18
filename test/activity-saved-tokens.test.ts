@@ -4,6 +4,7 @@
  * connection handed in directly. The saving is still computed once from the pack
  * the caller already rendered (formatAskWithSaved), for the local ledger.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

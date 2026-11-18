@@ -4,6 +4,7 @@
  * and `graft env` lists them and sets one by its name. Run against an in-memory
  * store, so nothing touches the real registry or profile.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";

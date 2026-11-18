@@ -4,6 +4,7 @@
  * sets up, so a payload arriving on a Claude hook is not proof it came from
  * Claude Code. Payloads here are synthetic, shaped after each host's docs.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { detectHost } from "../src/trace/host.js";

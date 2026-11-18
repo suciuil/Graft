@@ -8,6 +8,7 @@
  * for "is it live yet?", and it did; only the gate stopped it.
  * Made-up repos (acme/webshop) only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promptSkills, type PromptDeps } from "../src/claude/prompt-skills.js";

@@ -3,6 +3,7 @@
  * in the build config, it must take effect for the wiring graph the same way
  * `--include-dir` does — verified here by building a repo with an excluded folder.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

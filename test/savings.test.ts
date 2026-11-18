@@ -2,6 +2,7 @@
  * Tests for the shared "tokens saved" estimate ({@link savingsFor} +
  * {@link withSavings}) that every retrieval-style command routes through.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';

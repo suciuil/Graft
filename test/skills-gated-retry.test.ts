@@ -6,6 +6,7 @@
  * themselves. D101/D107 shape: Trail's words, no line for the agent to
  * recite, never telling it not to ask. Made-up repos only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runBlock } from "../src/skills/runblock.js";

@@ -4,6 +4,7 @@
  * laptop's settings only for agents installed here plus the caller, and the
  * agents set up here reported to Trail's page.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

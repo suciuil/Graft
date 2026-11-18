@@ -4,6 +4,7 @@
  * the person's, so an asked save can go live headless. Anywhere else an sdk
  * row is never typed, as in phase 0. Made-up repos and prompts only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

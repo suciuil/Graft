@@ -7,6 +7,7 @@
  * nothing at all. These tests run the real generated shim against the real
  * module, transpiled into a fake installed package.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

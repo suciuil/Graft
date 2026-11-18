@@ -7,6 +7,7 @@
  * a folder are refused everywhere; real processes writing skills.json and the
  * ledger at once never double a use or tear a line.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

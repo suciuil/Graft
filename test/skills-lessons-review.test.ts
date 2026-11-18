@@ -5,6 +5,7 @@
  * words the person didn't type (a pasted log after their line). Synthetic
  * corrections and made-up skills only; each test has its own TRAIL_HOME.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";

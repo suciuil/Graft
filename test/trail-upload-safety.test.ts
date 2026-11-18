@@ -7,6 +7,7 @@
  * learnings committed at HEAD go up, never an uncommitted edit or an untracked
  * file. The files queued for upload are readable by their owner only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

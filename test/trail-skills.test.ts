@@ -3,6 +3,7 @@
  * takeaways fold into a SKILL.md: the repo's own skill in `.claude/skills/`,
  * or one kept in ~/.trail until someone publishes it into the repo.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -5,6 +5,7 @@
  * writing or setting up tests, and the 25-word cap. The fold reads the repo's branches from its git folder.
  * Synthetic asks and repos only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

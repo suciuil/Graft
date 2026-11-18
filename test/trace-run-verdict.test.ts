@@ -4,6 +4,7 @@
  * from a skill or ended in a failure. An older good run is never used: the
  * person means the job that just ran.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -3,6 +3,7 @@
  * in (`~/.graft/repos.json`), and the cross-repo roll-up that reads each one's
  * own ledger — every repo priced at its own rate, summed, never re-priced as one.
  */
+import "./isolate.js";
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';

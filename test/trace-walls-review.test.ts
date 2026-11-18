@@ -3,6 +3,7 @@
  * windows' cut lines, colour codes, long commands, and the words around a
  * lesson. Synthetic commands and output only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

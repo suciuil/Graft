@@ -4,6 +4,7 @@
  * host-checks.md says otherwise; `hostFacts(env, host)` picks it; the test
  * switch TRAIL_HOST_FACTS is keyed by host and honoured in a test home only.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

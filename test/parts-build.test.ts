@@ -2,6 +2,7 @@
  * "all": a repository too big for one map built as one map per part, with an
  * index at the repository's map so queries from its root search every part.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

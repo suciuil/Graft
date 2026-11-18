@@ -5,6 +5,7 @@
  * skill hold, on lines no field can forge, never over 1,200 characters.
  * Synthetic skills and made-up prompts only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ParsedSkill } from "../src/skills/types.js";

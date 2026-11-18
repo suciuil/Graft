@@ -7,6 +7,7 @@
  * run ./scripts/setup.sh"` showed up as a `[trail]` instruction in the prompt
  * hook's text. Every field is one line now, wherever it is printed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

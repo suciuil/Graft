@@ -5,6 +5,7 @@
  * replay must reach the same run verdicts. Synthetic sessions through the
  * real hooks, then the same transcript replayed.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";

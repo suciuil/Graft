@@ -6,6 +6,7 @@
  * (`<PackageReference Include=…>`), and container sections become element nodes
  * scoped under their enclosing element.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

@@ -4,6 +4,7 @@
  * `graft ask` invoked repeatedly in one process) doesn't re-parse the wiring
  * graph and ask sidecar on every query.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync } from "node:fs";

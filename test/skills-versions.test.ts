@@ -5,6 +5,7 @@
  * file gets a proposal beside it, taken as Trail's own only on an exact copy;
  * an older version comes back as a new one. Synthetic skills (acme/shop).
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

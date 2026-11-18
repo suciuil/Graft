@@ -4,6 +4,7 @@
  * (one lookup's tokens saved, the learnings' titles, teammates' branches
  * from git). Route B: nothing in it is code, a diff or session text.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

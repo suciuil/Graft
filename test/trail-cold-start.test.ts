@@ -3,6 +3,7 @@
  * what counts as the person's own words, and that a finding survives only
  * when the quotes it cites really are in two or more sessions.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

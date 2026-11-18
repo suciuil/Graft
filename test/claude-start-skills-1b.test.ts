@@ -6,6 +6,7 @@
  * repairs relative to the checkout; and an init list still waiting is handed
  * over once, then dropped. Made-up repos, skills and commands only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';

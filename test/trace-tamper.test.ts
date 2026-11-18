@@ -6,6 +6,7 @@
  * or an interpreter writing a path it names. Reading them, a heredoc body that
  * only mentions them, and Claude Code's own memory files are not tampering.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";

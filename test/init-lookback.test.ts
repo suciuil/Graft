@@ -3,6 +3,7 @@
  * its transcript path and the byte range of its repo work, and what was left
  * out says why. Synthetic projects tree only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

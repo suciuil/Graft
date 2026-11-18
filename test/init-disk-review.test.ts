@@ -5,6 +5,7 @@
  * `recompileInitSkill`). Every file under the whole test root is read, not
  * just the Trail home; only Claude Code's own transcripts may hold them.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";

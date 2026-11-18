@@ -5,6 +5,7 @@
  * hook. A host with no dialect keeps 1a's reader. Synthetic rollouts only.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

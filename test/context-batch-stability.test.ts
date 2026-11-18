@@ -10,6 +10,7 @@
  * the plan is a function of the file PATHS, so only the batches around a change can
  * move.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";

@@ -5,6 +5,7 @@
  * calls also carry the folder and branch the host recorded for them, and a
  * result carries the host's own error flag apart from failure text.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, openSync, readSync, closeSync, writeFileSync } from "node:fs";

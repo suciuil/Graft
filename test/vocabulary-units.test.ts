@@ -5,6 +5,7 @@
  * reach the copy. `trail note --always-follow` is the one question that
  * replaces picking a kind.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

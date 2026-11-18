@@ -4,6 +4,7 @@
  * its exec tool can give a command a terminal (tty), so a TTY alone doesn't tell the person from Codex's agent: a
  * `codex` process among the ancestors is an agent, as the claude CLI is. Synthetic process tables only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { personAtTerminal, type PsRow } from "../src/skills/store.js";

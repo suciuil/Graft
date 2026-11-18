@@ -5,6 +5,7 @@
  * read back through the guarded front-matter reader, and never read at all
  * without Trail's `metadata.trail` mark.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSkillMd, renderSkillMd, skillHash } from "../src/skills/skillmd.js";

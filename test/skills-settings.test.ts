@@ -4,6 +4,7 @@
  * or broken; keys a later version adds survive every write; the test clock
  * works in a test home only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

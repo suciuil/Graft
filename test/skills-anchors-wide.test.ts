@@ -6,6 +6,7 @@
  * SessionStart reads the cache and scans nothing. Synthetic checkouts
  * (acme/shop, acme-cli) in sandbox folders with their own Trail home.
  */
+import "./isolate.js";
 import { after, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire, syncBuiltinESMExports } from "node:module";

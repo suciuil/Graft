@@ -4,6 +4,7 @@
  * reads a skill's check. A check whose result was rewritten after the run sheet recorded it as passing is refused.
  * Synthetic sessions only (acme/shop, acme-cli).
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";

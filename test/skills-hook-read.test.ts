@@ -6,6 +6,7 @@
  * substitution, npx, an env prefix, or a read piped into one of them.
  * Made-up repos and paths only.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { agentGuard } from '../src/skills/risk.js';

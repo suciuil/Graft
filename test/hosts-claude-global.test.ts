@@ -14,6 +14,7 @@
  * `~` when `--no-global` is passed, and `graft uninstall` removes exactly what an
  * init added.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

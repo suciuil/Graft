@@ -5,6 +5,7 @@
  * report query that came back. And how a turn's last words are read: done,
  * ended in a failure, or ended in a question.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { RunCall } from "../src/trace/types.js";

@@ -2,6 +2,7 @@
  * D117 (1): session start's intro names every command Trail may ask the agent to run that keeps something, so
  * none of them arrives unannounced (the H6 refusal shape D101 fixed for `trail skills add`).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SKILLS_INTRO } from "../src/claude/start-skills.js";

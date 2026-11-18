@@ -2,6 +2,7 @@
  * The queue: the reason no graft command ever waits on a socket. Its contract is
  * "append cheaply, drain exactly once, and never grow without bound".
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

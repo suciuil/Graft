@@ -5,6 +5,7 @@
  * corrected (spec 13), back to what it was after a hand edit; ledger status
  * lines for every change.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

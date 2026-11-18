@@ -7,6 +7,7 @@
  * every call carries the CLI token as a bearer. A slow or unreachable
  * workspace never holds the repo tools up, and never crashes the server.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

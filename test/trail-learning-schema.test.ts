@@ -5,6 +5,7 @@
  * replaced or retired, so the newest word on a decision is the only one an
  * agent sees.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

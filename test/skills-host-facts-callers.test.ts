@@ -3,6 +3,7 @@
  * payload came from, so a Codex hook gets Codex's facts (no ask, no notices, no PostToolUse context until their host
  * checks pass) and never Claude Code's. Synthetic data only.
  */
+import "./isolate.js";
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';

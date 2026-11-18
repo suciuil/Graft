@@ -5,6 +5,7 @@
  * lists them, so finding the previous run of the same job reads one sheet,
  * never the whole folder. Sheets go after 7 days.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";

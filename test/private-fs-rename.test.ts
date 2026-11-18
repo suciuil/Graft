@@ -5,6 +5,7 @@
  * (util/rename-replacing.ts) instead of losing the write. Here a child process holds the file the way such a
  * scanner does, then lets go.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

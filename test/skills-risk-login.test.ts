@@ -4,6 +4,7 @@
  * a release uses (`script -q /dev/null npm login`, a piped answer, `env`, `npx`). The patterns stay linear on a
  * 2 MB command. Made-up skill, session and repo.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

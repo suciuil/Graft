@@ -2,6 +2,7 @@
  * Init's live feed: each learning a read checks is shown the moment it lands,
  * once, to whoever listens, however late they start listening.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LiveFeed, liveLine } from "../src/init/live.js";

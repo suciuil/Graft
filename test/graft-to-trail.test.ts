@@ -4,6 +4,7 @@
  * a teammate who only has graft still gets a working MCP server in a repo
  * that's on trail.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

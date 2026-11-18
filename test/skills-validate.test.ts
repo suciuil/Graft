@@ -4,6 +4,7 @@
  * level, the name a folder name, and everything Trail adds under `metadata` as
  * flat quoted strings. Every SKILL.md Trail writes has to pass.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

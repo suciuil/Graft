@@ -5,6 +5,7 @@
  * program that writes them. Reading with git or xargs is not tampering.
  * Synthetic paths only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { tamperOf } from "../src/trace/tamper.js";

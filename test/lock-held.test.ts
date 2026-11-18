@@ -3,6 +3,7 @@
  * lock being deleted by another process fails with EPERM or EBUSY, not EEXIST:
  * that is the lock being let go, so it is waited on, not thrown (it threw in CI).
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lockHeld } from "../src/util/private-fs.js";

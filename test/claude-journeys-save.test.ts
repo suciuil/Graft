@@ -4,6 +4,7 @@
  * Stop all run through `main(event)`, the transcript grows between them,
  * and the CLI step is g5's `cliAdd`, as `trail skills add` runs it.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

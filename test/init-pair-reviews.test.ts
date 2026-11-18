@@ -5,6 +5,7 @@
  * terminal does, and what the PRs show the team decided reaches the page as
  * found learnings. Without `--pair`, an agent's init still starts no `claude`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

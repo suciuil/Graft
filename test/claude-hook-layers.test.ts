@@ -2,6 +2,7 @@
  * `init` registers the hooks in the repo and in ~/.claude, and Claude Code runs
  * both. One copy answers each event, or every prompt gets its learnings twice.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

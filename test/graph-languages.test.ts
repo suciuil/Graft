@@ -10,6 +10,7 @@
  * gave them no way to tell a language that was merely unlabelled from one that
  * really had been skipped.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

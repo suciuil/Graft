@@ -4,6 +4,7 @@
  * while fresh, and never after it was used. `lineAt` is the one positioned read
  * the gate makes of the transcript: the line that starts at a byte offset.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";

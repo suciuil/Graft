@@ -6,6 +6,7 @@
  *
  * (`test/trace-typed.test.ts` is phase 0's, for whose words a transcript line holds.)
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

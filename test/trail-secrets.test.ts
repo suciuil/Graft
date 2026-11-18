@@ -4,6 +4,7 @@
  * and assembled from pieces at run time, so the source holds nothing that
  * looks like a live credential.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { secretReason } from "../src/notes/secrets.js";

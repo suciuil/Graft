@@ -7,6 +7,7 @@
  * big enough that tree-sitter stops handing back the same JS wrapper object
  * for a node it already materialized.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

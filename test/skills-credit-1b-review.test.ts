@@ -6,6 +6,7 @@
  * outside SKILL.md, and the 60-day rule can't be pinned by a date after now.
  * Synthetic release runs, a sandbox TRAIL_HOME and a made-up transcript.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";

@@ -5,6 +5,7 @@
  * spawn without a shell: their JavaScript entry point runs with Node directly, so the
  * repo being mapped can't supply `node` and odd install paths don't break the launch.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

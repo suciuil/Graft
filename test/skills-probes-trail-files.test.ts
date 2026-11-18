@@ -7,6 +7,7 @@
  * committed yet. Any other dirty file still blocks, a later change to
  * `.claude/settings.json` included. Real temp repos.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

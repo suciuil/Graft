@@ -13,6 +13,7 @@
  * `copilot/auto` picker value that has to resolve to a real model, and the
  * freshly-opened session log that contains no model at all.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, utimesSync, symlinkSync, realpathSync } from 'node:fs';

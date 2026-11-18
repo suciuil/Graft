@@ -2,6 +2,7 @@
  * The fix lists (D104): one copy, in risk-delta.ts, read by the repair
  * detector and by moment 4's fix command. Synthetic commands only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

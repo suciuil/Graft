@@ -4,6 +4,7 @@
  * its set; a content-like key or value is dropped; TELEMETRY.md documents each
  * one and says what never travels; `skills_folded` went with `trail skills fold`.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";

@@ -5,6 +5,7 @@
  * by TypeScript), so 1a's own pins in skills-contracts.test.ts stay as they
  * were; this file reads the second one.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";

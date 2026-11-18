@@ -4,6 +4,7 @@
  * specifically for an R6-plus-roxygen setup (no S3/S4 involved) — see
  * plan_r_language_support.md's Phase 2 section and the follow-up discussion.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

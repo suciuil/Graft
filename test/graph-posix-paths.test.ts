@@ -15,6 +15,7 @@
  * genuinely built graph rather than on hand-written `GraphV1` stubs — the bug
  * lived in path *production*, so stubs cannot see it.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -4,6 +4,7 @@
  * and no network. Structured ops (synthesize, crux) ride forced tool-calling;
  * summarize is plain text.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ChatSummarizer } from "../src/ai/summarize.js";

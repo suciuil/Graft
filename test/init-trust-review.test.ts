@@ -6,6 +6,7 @@
  * elsewhere, never through a link, never a FIFO that would hang the reader.
  * Synthetic files only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

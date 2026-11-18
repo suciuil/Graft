@@ -5,6 +5,7 @@
  * reads a transcript only when Claude Code sent the payload: Cursor and
  * Copilot CLI run the same hooks with transcripts of their own.
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';

@@ -2,6 +2,7 @@
  * The one bar every learning read uses: what a learning's file looks like,
  * which quotes count, and how a headline is kept plain.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { learningBody, plainHeadline, sameLearning, verifyLearnings, type Learning } from "../src/learn/bar.js";

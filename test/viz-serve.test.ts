@@ -2,6 +2,7 @@
  * Tests for the viz server: endpoint shapes, code-graph gating, port fallback,
  * and SSE live-reload on context-dir changes.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";

@@ -5,6 +5,7 @@
  * it can't read, but never lets `trail keep` through when the transcript
  * plainly has no typed message after the list.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

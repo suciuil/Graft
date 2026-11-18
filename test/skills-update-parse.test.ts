@@ -5,6 +5,7 @@
  * command over 64 KB never read. The save gate's regex, on the fast path and
  * in the parser, now covers `update` too.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSkillsUpdate, SAVE_GATE_RE, SKILLS_UPDATE_RE } from "../src/skills/save-parse.js";

@@ -3,6 +3,7 @@
  * once, stale and future receipts, and a deferred item that a typed "all"
  * doesn't keep (it waits, it is not closed). Synthetic sessions only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

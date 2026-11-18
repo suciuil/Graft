@@ -5,6 +5,7 @@
  * know) it says why against the pair code; after (a crash part way) it says so
  * against the run.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

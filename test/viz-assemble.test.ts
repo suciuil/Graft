@@ -2,6 +2,7 @@
  * Tests for the viz graph assembly: .context/*.md frontmatter → {meta, nodes, edges}
  * with relation normalization, dangling-edge dropping, and malformed-file skipping.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

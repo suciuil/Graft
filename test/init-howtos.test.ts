@@ -3,6 +3,7 @@
  * only (design 4.5, b5): evidence for a skill, and a preference they already
  * say. Their text is never copied, sent or written. Synthetic files only.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";

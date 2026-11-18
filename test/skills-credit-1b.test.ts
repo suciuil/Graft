@@ -5,6 +5,7 @@
  * correction inside the window marks the credit `corrected` and watches for
  * a lesson, storing only the typed line's sha. Synthetic release runs.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";

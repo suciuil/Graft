@@ -7,6 +7,7 @@
  * spawn of Node itself is the same for every hook and is measured apart
  * (claude-pre-bash.test.ts).
  */
+import "./isolate.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';

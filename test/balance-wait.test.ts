@@ -3,6 +3,7 @@
  * account's tokens run out, LLM calls pause on one shared re-sent call and resume
  * as soon as the relay accepts calls again.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BalanceWaiter, relayName, withBalanceRetry } from "../src/ai/llm/balance-retry.js";

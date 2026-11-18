@@ -4,6 +4,7 @@
  * closed set, so a skill's name or a command under them is dropped; and
  * TELEMETRY.md documents each.
  */
+import "./isolate.js";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

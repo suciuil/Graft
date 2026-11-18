@@ -8,6 +8,7 @@
  * offer's own question. Real fold, real session lock, a made-up repo.
  */
 process.env.TZ = "UTC";
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { linkSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

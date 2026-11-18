@@ -3,6 +3,7 @@
  * branch anchors from the parameter's recorded value, so "may be out of date" can show when prod is gone. A value
  * the skill can't know (a `$(…)` default, several values seen and none kept) is no anchor. Synthetic checkout.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";

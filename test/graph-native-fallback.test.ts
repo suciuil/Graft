@@ -12,6 +12,7 @@
  * native backend the parity check still runs, a require that throws the way
  * node-gyp-build does.
  */
+import "./isolate.js";
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

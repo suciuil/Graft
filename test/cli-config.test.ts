@@ -3,6 +3,7 @@
  * the same validation `graft build --include-dir/--exclude-dir` applies, and help
  * that says what each setting means and what an entry may look like.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

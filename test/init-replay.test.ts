@@ -3,6 +3,7 @@
  * 1a's own parser and fold, in memory, so init's verdicts are the live
  * hooks' verdicts. Synthetic transcripts only; nothing is written.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";

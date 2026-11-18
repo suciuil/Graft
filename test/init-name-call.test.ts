@@ -5,6 +5,7 @@
  * the model's text never reaches a step. A `claude` stand-in on PATH counts
  * its calls and keeps what it was sent.
  */
+import "./isolate.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
