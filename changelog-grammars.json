@@ -1430,6 +1430,53 @@
               "text": "The grammar now has an external scanner (`src/scanner.c`), compiled by the Node, Rust, Go, Swift and Python bindings."
             }
           ]
+        },
+        {
+          "hash": "edcc66c345d58c38a2f6d92e5fd3f9ffaf9c5cd0",
+          "time": 1795010015,
+          "date": "2026-11-18",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "Constructors are no longer mistaken for method calls when a parameter type is written in all capitals (for example \"URL url\") or has a default value"
+            },
+            {
+              "type": "feature",
+              "text": "Body-less methods are now recognized when they have only modifiers and no return type (such as abstract methods), or when they return an all-capitals type in an interface"
+            },
+            {
+              "type": "fix",
+              "text": "A line that starts with an opening parenthesis now begins a new statement, so a multiple assignment right after a variable declaration parses correctly"
+            },
+            {
+              "type": "feature",
+              "text": "Chained assignments such as \"a = b = c\" are supported, and a lambda with typed parameters can now be assigned to a property"
+            },
+            {
+              "type": "fix",
+              "text": "Empty placeholders \"${}\" inside strings no longer cause parse errors"
+            },
+            {
+              "type": "feature",
+              "text": "Resources in a try-with-resources block can now be separated by line breaks as well as semicolons"
+            },
+            {
+              "type": "fix",
+              "text": "The underscore now works as a normal name (closure parameters, calls on it), the Jenkins \"@Library(...) _\" form still works, and syntax highlighting was updated to match"
+            },
+            {
+              "type": "feature",
+              "text": "Annotated declarations without a type (for example \"@Field x = 1\") are now supported"
+            },
+            {
+              "type": "feature",
+              "text": "Generic types such as \"List<Path>\" can be passed as call arguments, while ordinary comparisons keep their meaning"
+            },
+            {
+              "type": "improvement",
+              "text": "The prebuilt Windows parser was rebuilt with these changes, and new regression tests cover each of them"
+            }
+          ]
         }
       ]
     },
