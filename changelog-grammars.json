@@ -86,6 +86,17 @@
               "text": "Extended glob groups (shopt -s extglob) at the start of a word, such as ls !(*.c) or PATTERN+=+($A|+($B)), now parse in command arguments and variable assignments."
             }
           ]
+        },
+        {
+          "hash": "d1d24f58014f1c29cded8a046470a2fe6e020dab",
+          "time": 1794993994,
+          "date": "2026-11-18",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "In files with Windows (CRLF) line endings, a heredoc with an empty line right before its end word is now closed at that end word; before, the end word was read as heredoc content and the rest of the file failed to parse."
+            }
+          ]
         }
       ]
     },
@@ -1365,6 +1376,33 @@
               "text": "A triple-quoted string that starts with a line continuation (`'''\\` at the end of the line) no longer causes a parse error in files with CRLF line endings."
             }
           ]
+        },
+        {
+          "hash": "947b0bbee6b5c241ff4882b072373124e5d55c3c",
+          "time": 1794993976,
+          "date": "2026-11-18",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "Fields declared with `def` followed by modifiers (`def final static X = 1`, `def static String s`), `static def` fields holding closures, untyped fields with a capitalised name after modifiers (`static final RootFolder = 'x'`) and modifiers written before the access modifier (`final private Map<K, V> m`, `static protected void f()`, `abstract void run() public`) now parse correctly."
+            },
+            {
+              "type": "fix",
+              "text": "Declarations of several names, with or without values (`String a, b`, `String a = '', b = 'c'`, `int x = 0, y = 0` in a for loop), now parse as one declaration."
+            },
+            {
+              "type": "fix",
+              "text": "A for loop initialised by a plain assignment (`for (i = last; i > 0; i--)`) and a `return` on its own line followed by an assignment now parse correctly."
+            },
+            {
+              "type": "fix",
+              "text": "Command calls without parentheses used as values (`def r = f a: 1, b: 2, c: 3`, named arguments over several lines, `def r = f 1, 2, 3`), builder commands with a capitalised name and a string (`SandboxPath \"${dir}\"`), `void` as a closure body, Spock's `thrown Exception` (also before a `where:` label) and slashy strings with interpolation followed by a closure now parse correctly."
+            },
+            {
+              "type": "fix",
+              "text": "Closure parameters that mix typed and untyped names and default values (`{ String a = \"\", String b -> }`, `{ String a, b = 2 -> }`, `{ a, b = 2 -> }`) now parse correctly."
+            }
+          ]
         }
       ]
     },
@@ -1885,6 +1923,37 @@
             {
               "type": "fix",
               "text": "A here-document whose statement goes on after its body now parses, such as return <<EOT inside a subroutine with the closing } after the end word, or print $fh <<EOT without a semicolon on the same line. Before, the end word was reported as missing and the rest of the file failed to parse."
+            }
+          ]
+        },
+        {
+          "hash": "685d287eb1533261aeacbfa72db43a43d5253921",
+          "time": 1794993994,
+          "date": "2026-11-18",
+          "entries": [
+            {
+              "type": "fix",
+              "text": "The process ID variable $$ before a closing bracket or an operator, such as if ($pid != $$) { ... }, is now read as a variable; before, it was read as a dereference that swallowed the rest of the statement. $$ followed by a name ($$ref) is still a dereference."
+            },
+            {
+              "type": "feature",
+              "text": "Variable attributes, such as my $count :shared;, are now recognized."
+            },
+            {
+              "type": "fix",
+              "text": "A bare function name before ->[ or ->{, such as shift->[0] or shift->{name}, now parses."
+            },
+            {
+              "type": "fix",
+              "text": "Bless with any reference expression, and with => before the class, such as bless $book->[$i] => $class, now parses."
+            },
+            {
+              "type": "fix",
+              "text": "Dereferences of a call with spaced arguments, such as %{shift @_} or @{foo $x}, and hash elements keyed by such a call, such as $can{lc $t}, now parse."
+            },
+            {
+              "type": "fix",
+              "text": "Hash slices with several keys, such as @h{'a', 'b'}, the main package variable form $::name, and globs named by an expression with a glob slot, such as *{\"${class}::Fetch\"}{CODE}, now parse."
             }
           ]
         }
