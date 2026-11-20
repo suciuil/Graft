@@ -87,11 +87,11 @@
 <div class="stats">
 <!-- stats:start -->
   <div class="stat feature"><b>94</b><span>New features</span></div>
-  <div class="stat improvement"><b>98</b><span>Improvements</span></div>
-  <div class="stat fix"><b>49</b><span>Bug fixes</span></div>
+  <div class="stat improvement"><b>104</b><span>Improvements</span></div>
+  <div class="stat fix"><b>50</b><span>Bug fixes</span></div>
   <div class="stat change"><b>22</b><span>Change requests</span></div>
-  <div class="stat"><b>263</b><span>Items in total</span></div>
-  <div class="stat scope"><b>198</b><span>Graft itself</span></div>
+  <div class="stat"><b>270</b><span>Items in total</span></div>
+  <div class="stat scope"><b>205</b><span>Graft itself</span></div>
   <div class="stat scope"><b>65</b><span>Tree-sitter grammars</span></div>
 <!-- stats:end -->
 </div>
@@ -105,14 +105,14 @@
       <tr><td><a data-area="lang">Languages &amp; parsing</a></td><td>43</td><td>14</td><td>40</td><td>2</td><td>99</td></tr>
       <tr class="sub"><td><a data-area="lang" data-scope="graft">of which Graft</a></td><td>25</td><td>5</td><td>3</td><td>1</td><td>34</td></tr>
       <tr class="sub"><td><a data-area="lang" data-scope="tree-sitter">of which Bundled tree-sitter grammars</a></td><td>18</td><td>9</td><td>37</td><td>1</td><td>65</td></tr>
-      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>6</td><td>16</td><td>5</td><td>38</td></tr>
-      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>12</td><td>13</td><td>17</td><td>3</td><td>45</td></tr>
+      <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>7</td><td>19</td><td>5</td><td>42</td></tr>
+      <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>12</td><td>13</td><td>19</td><td>3</td><td>47</td></tr>
       <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>6</td><td>6</td><td>2</td><td>16</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>18</td><td>8</td><td>12</td><td>1</td><td>39</td></tr>
-      <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>5</td><td>7</td></tr>
+      <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>3</td><td>5</td><td>8</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>12</td><td>2</td><td>8</td><td>6</td><td>28</td></tr>
-      <tr class="total"><td>Total</td><td>94</td><td>49</td><td>98</td><td>22</td><td>263</td></tr>
-      <tr class="scope"><td><a data-scope="graft">Graft</a></td><td>76</td><td>40</td><td>61</td><td>21</td><td>198</td></tr>
+      <tr class="total"><td>Total</td><td>94</td><td>50</td><td>104</td><td>22</td><td>270</td></tr>
+      <tr class="scope"><td><a data-scope="graft">Graft</a></td><td>76</td><td>41</td><td>67</td><td>21</td><td>205</td></tr>
       <tr class="scope"><td><a data-scope="tree-sitter">Bundled tree-sitter grammars</a></td><td>18</td><td>9</td><td>37</td><td>1</td><td>65</td></tr>
 <!-- counts:end -->
     </tbody>
@@ -151,6 +151,14 @@
 <div class="group" data-group="pending">
   <h2>Not yet bundled <small>goes into the next <code>npm run pack:bundle</code></small></h2>
   <div class="scope" data-scope="graft">
+  <ul>
+  </ul>
+  </div>
+</div>
+
+<div class="group" data-group="bundle" data-date="2026-11-20" data-version="0.28.0.6">
+  <h2>2026-11-20 <small>kit 0.28.0.6, graft 0.28.0</small></h2>
+  <div class="scope" data-scope="graft">
   <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
   <ul>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>New "graft parts" command lists the parts a very large repository was split into when it was built.</span></li>
@@ -158,6 +166,12 @@
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>Plain-text files (.txt) can now be indexed. This is off by default. Each file is cut into chunks at its headings or paragraph breaks, and each chunk keeps its own line range, so a search points at the right part of a large log, spec or data dump instead of the whole file. Files up to 50 MB are read, binary files saved with a text name are skipped, and text chunks are never sent for AI summaries, so they cost no AI tokens.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>New settings choose which folders plain-text files are taken from and add other extensions to index the same way (.log, .out, ...). Extensions graft already parses as code or data are refused. The settings work as build options and as repository settings, apply to multi-repository workspaces and split builds too, and are described in the help and the README.</span></li>
     <li data-type="feature" data-types="feature improvement" data-area="lang packaging"><span class="tag">Feature</span><span><span class="area">Languages</span><span class="area">Packaging &amp; installer</span>Other changes to language support and parsing. <details class="more"><summary>details: 6 changes</summary><ul class="details"><li data-type="feature"><span class="tag">Feature</span><span>The fork's changelog page now lists each build's changes in two parts, one for graft itself and one for the bundled tree-sitter grammars, each under its own heading.</span></li><li data-type="feature"><span class="tag">Feature</span><span>The changelog page has a new filter to show graft changes only, grammar changes only, or both. The summary figures and the counts table now show totals for each part, and the language row is split into a graft row and a grammars row.</span></li><li data-type="feature"><span class="tag">Feature</span><span>A changelog line in a commit message can now be marked as a graft change or a grammar change, to correct where the page files it.</span></li><li data-type="improvement"><span class="tag">Improvement</span><span>Language changes are now grouped by language and part. Graft gets one item per language ("… support has been added/updated"), the grammars get "The … grammar has been updated", and grammar changes that name no language get their own catch-all item.</span></li><li data-type="improvement"><span class="tag">Improvement</span><span>The release notes published with each offline kit now show graft changes and bundled grammar changes under separate headings.</span></li><li data-type="improvement"><span class="tag">Improvement</span><span>The changelog summary printed after each update now also counts how many entries are about graft and how many are about the bundled grammars.</span></li></ul></details></span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The bundled AI model price list has been refreshed: prices added for more regional and US-government versions of Claude, GPT and Nova models, prices updated for several DeepSeek, GLM, Kimi, Gemini and GPT models, and retired models removed.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The PATCH integration guide and the implementation brief now make the AI layer a required part of the integration. It was forbidden before. The AI layer adds one-line summaries of the code, short key excerpts and overview pages for each system, and it is built through PATCH's own AI service and sign-in token, with no separate key.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>Both documents now describe automatic background updates of the AI layer. These are switched on for all repositories, with a custom threshold for how much may go out of date. Only PATCH's own background check can start an update, never an agent's search, and failures are reported and retried at most once per agreed interval.</span></li>
+    <li data-type="improvement" data-area="privacy"><span class="tag">Improvement</span><span><span class="area">Privacy</span>The privacy rules have been tightened for the AI layer. Protected, secret and ignored files must never reach the AI model, which is proven with marker files and recorded network traffic. A developer's own AI settings are never used, and the token never appears in command lines, files or logs.</span></li>
+    <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>Search results in the guides have been adjusted. While the AI layer is out of date, agents see the current code instead of old excerpts. AI-written text is marked so agents check it against the code. Overview pages that cover a protected file are hidden, and code search gets an option to show whole definitions.</span></li>
+    <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>The guides list new tests, measurements (time, cost, token lifetime), risks and open questions for the AI layer and its automatic updates, plus a new assumption to check first about PATCH's AI service and its approval.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>When parts are not linked (built by an older version, or not built), caller lookups say that callers in other parts are not tracked. They also list possible callers found by plain text search, marked as unverified.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>Text search across several repositories or parts can now be limited to one repository, part or folder, both on the command line and through the AI assistant's tools.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>In a repository built in parts, the instructions written for AI assistants now explain how to work with parts: what the part labels mean, how to limit a search to one part, and that paths start at the repository root. They update automatically when a build splits the repository into parts or turns it back into one map.</span></li>
@@ -167,6 +181,7 @@
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>A large text file with very many chunks now gets a short table of contents on its summary card instead of one line per chunk.</span></li>
     <li data-type="improvement" data-area="cli"><span class="tag">Improvement</span><span><span class="area">CLI &amp; configuration</span>Search answers that show source code from large files are faster and use less memory: each file is read only once per answer and is no longer split into lines in full.</span></li>
     <li data-type="improvement" data-area="llm"><span class="tag">Improvement</span><span><span class="area">LLM &amp; deep build</span>The memory check before a build now counts large text files by how much they hold, and a warning explains that asking to summarize .txt files does nothing and names the option that indexes them.</span></li>
+    <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span>The guides have been corrected on two points. Limiting the index to chosen folders is not remembered between builds, so saved folder exclusions are used instead. graft's build lock does not cover long AI builds, so PATCH has to queue builds itself.</span></li>
     <li data-type="fix" data-area="cli"><span class="tag">Bug fix</span><span><span class="area">CLI &amp; configuration</span>Questions like "who calls X" or "what does X call" over a folder of repositories or a repository built in parts no longer lose their answers during ranking.</span></li>
     <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span>Asking the AI assistant's tools for the full chain of callers ("all" levels) now works across several repositories or parts, where it used to stop at one level.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Running a single test file on its own no longer touches your real setup. Before, it added throwaway test folders to your cross-repository savings list and wrote maps into your personal profile store.</span></li>
