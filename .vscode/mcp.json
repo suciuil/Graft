@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "graft": {
+      "type": "stdio",
+      "command": "graft",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

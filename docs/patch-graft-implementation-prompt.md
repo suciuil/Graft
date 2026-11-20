@@ -15,7 +15,10 @@
 >   in parts work in the fork's current code: links between the parts, the
 >   `graft parts` command, and `grep --in` across parts. That code still
 >   reports version 0.28.0 but is newer than earlier 0.28.0 packages. Phase 1
->   finds out which behaviour the pinned package has (A.6).
+>   finds out which behaviour the pinned package has (A.6). The deep build
+>   and graft's automatic deep builds (section 6.4, A.7) were checked against
+>   the source only, not by running them on EBS: their cost, time and
+>   behaviour with parts are for the agent to measure.
 > - **PATCH's internals are not known.** This prompt states only what is
 >   believed about PATCH at the level of concepts (section 4). Each belief is
 >   a hypothesis the agent confirms or rejects in the PATCH repository before
@@ -38,7 +41,13 @@ When you are done, PATCH:
    runs it with PATCH's own bundled Node.js;
 2. builds graft's index (the "map") for the repository during its preparation
    phase, in PATCH's own data folder, never inside the repository;
-3. offers four new read-only agent tools (names are proposals; follow PATCH's
+3. adds graft's **AI layer** to that map with `graft build --deep`: a summary
+   of every symbol, short "crux" excerpts and concept nodes, written by a
+   language model reached through **the same LLM endpoint, with the same
+   token, that PATCH itself uses**. This is a required part of the
+   integration (section 6.4); the map without it is only the fallback while
+   the AI layer is being built or cannot be built;
+4. offers four new read-only agent tools (names are proposals; follow PATCH's
    naming conventions):
    - `code_search`: ranked search for code, with excerpts (`graft ask`);
    - `code_find_all`: every occurrence of a text or regex, grouped by
@@ -47,14 +56,19 @@ When you are done, PATCH:
      ranges (`graft skeleton`);
    - `code_callers`: who calls a function, or what it calls, up to a few
      levels deep (`graft callers`);
-4. runs those tools through PATCH's existing trusted-execution mechanism with a
+5. runs those tools through PATCH's existing trusted-execution mechanism with a
    fixed command shape, and filters every result through PATCH's existing
    security guards before it reaches the model;
-5. keeps the index reasonably fresh by rebuilding it in the background;
-6. tells agents, through PATCH's prompts and sub-agent configuration, when to
+6. keeps the index fresh by rebuilding it in the background, and keeps the AI
+   layer fresh with graft's **automatic deep builds** (`graft auto-deep`),
+   which PATCH switches **on globally** for its own graft, with a **custom
+   global staleness threshold** (`graft deep-threshold --global`) that PATCH
+   sets (section 6.4.1);
+7. tells agents, through PATCH's prompts and sub-agent configuration, when to
    use the new tools;
-7. degrades cleanly: if graft is missing, broken or the index is not built,
-   PATCH works as before and the tools return a clear diagnostic.
+8. degrades cleanly: if graft is missing, broken or the index is not built,
+   PATCH works as before and the tools return a clear diagnostic; if only the
+   AI layer is missing or out of date, the tools still work and say so.
 
 ## 2. Ground rules
 
@@ -77,10 +91,20 @@ When you are done, PATCH:
    - a hypothesis in section 4 turns out false in a way that changes the design;
    - a security mechanism would have to be weakened or bypassed;
    - a new network access, new executable or new privilege would be needed;
-   - the EBS index turns out too big or too slow for the agreed limits.
-5. **No network, no writes into the repository, no LLM.** graft must make no
-   outgoing connection, must write nothing into the checked-out repository, and
-   must never run its language-model features. Section 6.2 gives the exact
+   - graft cannot use PATCH's own LLM endpoint and token (graft does not
+     speak its protocol or authentication scheme, the token cannot be handed
+     to a trusted operation safely, or it expires before a deep build can
+     finish), or sending EBS source code to it from the background is not
+     covered by PATCH's approval, or the files PATCH's guards hide cannot all
+     be kept out of the deep build (6.4);
+   - the EBS index or its AI layer turns out too big, too slow or too costly
+     for the agreed limits.
+5. **One outgoing connection, no writes into the repository.** graft must
+   write nothing into the checked-out repository. Its only outgoing
+   connection is the deep builds' calls (PATCH's own runs and graft's
+   automatic ones) to PATCH's own LLM endpoint (6.4): agent queries and
+   plain builds make none, and no other graft feature that reaches the
+   network may run. Sections 6.2 and 6.4 give the exact
    environment that ensures this. Never weaken it to make something work.
 6. **Do not modify graft.** Use the published package as it is. If you find
    a limitation, work around it in PATCH and describe the graft change that
@@ -105,9 +129,37 @@ grammars (native `.node` modules) and writes an index called the **map**:
 - an **ask index** with symbol text for ranking, one markdown **card** per
   source file, and caches.
 
-Building and querying use no AI model, no API key and no network. graft has an
-optional language-model pass, `build --deep`, which sends source code to an
-LLM endpoint: **never run it**.
+A plain `build` and every query use no AI model, no API key and no network.
+
+On top of that, `build --deep` adds the **AI layer** (graft calls it the
+meaning tier), which PATCH requires:
+
+- a one-line **summary** of every symbol, used by `ask` to rank hits and shown
+  in its snippets and in `skeleton` entries;
+- a **crux** for each symbol: the up-to-8-line excerpt that holds its decision
+  point. `ask --source` then inlines that excerpt instead of the whole
+  definition, which keeps results short, and `--full` asks for the whole
+  definition again;
+- **concept nodes**: markdown pages, one per system of the repository, that
+  explain it in prose and list the files they cover. `ask` returns them as
+  hits of kind `concept`.
+
+To write it, `build --deep` sends the **full text of every indexed source
+file** (minus `--exclude-dir` entries, and never plain-text files) to an LLM
+endpoint, file by file, then batches of the summaries to write the concept
+nodes. Results are cached by content hash, so a later `--deep` run sends only
+new and changed files. A plain `build` keeps the AI layer: unchanged symbols
+keep their summary and crux, changed ones are marked stale and keep the old
+text until the next `--deep` run. PATCH gives graft its own endpoint and
+token (6.4); graft reads them from environment variables, and from settings
+a developer saved unless that is turned off.
+
+graft can also start `build --deep` **by itself** (auto-deep): when it is
+switched on and the share of out-of-date summaries (changed or new symbols)
+has reached the deep-threshold, the next query that refreshes the map starts
+a deep build in a detached background process. PATCH requires this, switched
+on in its isolated graft home for every repository, with a threshold PATCH
+chooses (6.4.1).
 
 How it works:
 
@@ -129,23 +181,26 @@ How it works:
    From the repository root, `ask`, `grep`, `skeleton` and the text output of
    `callers` search every part and use the links. When maps are too big to
    keep together, they read one part at a time (`callers` at most two).
-   **`callers --json` still does not search across parts** (section 6.5).
+   **`callers --json` still does not search across parts** (section 6.6).
    `graft parts --json` lists the parts, where each part's map is kept, and
    whether the links are current.
 
 Things graft normally does on a developer machine that PATCH must **not** use:
 `graft init` and "auto-init" (writing instruction files for AI assistants into
 the repository), the MCP server (`graft mcp`, which returns text only),
-assistant hooks, refresh-before-query, `--deep`, `--lsp`, "learnings" (notes in
-`.trail/learnings/`, returned by `ask` as `notes`), the savings ledger, the
-opt-in savings report to a company Oracle database, the update check, the price
-download, and user settings saved with `graft env`. Cloud sync and telemetry
-are permanently off in the company fork.
+assistant hooks, refresh-before-query in agent queries, `--lsp`, "learnings"
+(notes in `.trail/learnings/`, returned by `ask` as `notes`), the savings
+ledger, the opt-in savings report to a company Oracle database, the update
+check, the price download, and user settings saved with `graft env`,
+`graft api`, `graft model` or `graft effort`. Cloud sync and telemetry are
+permanently off in the company fork. `build --deep` and its automatic runs
+(`graft auto-deep`, `graft deep-threshold`) are used, but only as section
+6.4 describes.
 
 The exact commands, options, environment variables and JSON shapes are in
 **Appendix A**. Treat them as reliable for 0.28.0, and check them against the
 version you pin (Phase 1). A.6 lists what differs between packages with and
-without links between parts.
+without links between parts, and A.7 how the deep build is configured.
 
 ## 4. What is believed about PATCH (hypotheses to confirm)
 
@@ -174,6 +229,7 @@ change the design if false; ask before working around them.
 | H17 | PATCH has a data folder outside the repository with restricted access (ACLs) for per-repository state. | The map goes there; it contains source text. **(design-critical)** |
 | H18 | PATCH has an edit tool (seen: `source_edit`) and notices branch switches. | Triggers for background rebuilds. |
 | H19 | PATCH has a status bar or similar place to show per-session figures. | Optional savings display. |
+| H20 | PATCH's agents call an LLM endpoint with a token; a trusted operation can obtain that same endpoint URL, model and a currently valid token at run time, without writing the token to disk, argv or logs; the endpoint speaks a protocol graft supports (OpenAI-compatible including the Databricks AI Gateway, Anthropic, or a LiteLLM proxy) with an authentication scheme graft can send (A.7); and PATCH's approval for sending EBS source code to it also covers graft's background deep builds. | graft's deep builds, PATCH's and the automatic ones, send EBS source to that endpoint with that token. **(design-critical)** |
 
 ## 5. Phase 0: discovery (no code changes)
 
@@ -210,8 +266,18 @@ keeps design notes).
     and in what format.
 11. **Tests:** the test framework(s), how integration tests run, whether a
     Windows test machine or CI exists, and whether outbound network can be
-    blocked in tests.
-12. **Hypotheses:** the status of H1 to H19.
+    blocked and captured in tests.
+12. **PATCH's LLM endpoint and token (for 6.4):** which endpoint PATCH's
+    agents call, which protocol it speaks (OpenAI-compatible, Anthropic, a
+    LiteLLM proxy, the Databricks AI Gateway), how the token is sent (an
+    `Authorization: Bearer` header, an `x-api-key` header, something else),
+    which model PATCH uses and which others it offers, where PATCH keeps or
+    obtains the token (configuration, secret store, a sign-in), how long a
+    token stays valid and how PATCH renews it, how a trusted operation can
+    receive the current one, whether a proxy is needed, the rate and cost
+    limits, and whether PATCH's approval for sending EBS source code to it
+    covers whole files sent from the background (and who approved it).
+13. **Hypotheses:** the status of H1 to H20.
 
 Then write a plan that maps each phase of section 6 to the concrete PATCH
 files you will change. If the user is present, wait for approval.
@@ -265,8 +331,10 @@ files you will change. If the user is present, wait for approval.
 
 Build graft's environment from an **allowlist** using PATCH's existing
 environment-sanitising helper if there is one. Developers may have saved graft
-settings as user environment variables (`graft env` writes them to
-`HKCU\Environment`), and these must not reach PATCH's graft processes.
+settings as user environment variables (`graft env`, `graft api`, `graft model`
+and `graft effort` write them to `HKCU\Environment`), and these must not reach
+PATCH's graft processes. A deep build even reads them from the registry by
+itself, unless `GRAFT_NO_SAVED_SETTINGS=1` is set (A.7).
 
 Keep only what Node and Windows need to run (for example `SystemRoot`,
 `windir`, `PATH` limited to system folders, `TEMP`/`TMP`, `PATHEXT`,
@@ -274,22 +342,28 @@ Keep only what Node and Windows need to run (for example `SystemRoot`,
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `USERPROFILE` and `HOME` | `<PATCH data>\graft-home` | Isolates graft's per-user folder `~/.graft` (settings, savings ledger, savings-report opt-in, install id, update cache). Node's `os.homedir()` reads `USERPROFILE` on Windows. |
+| `USERPROFILE` and `HOME` | `<PATCH data>\graft-home` | Isolates graft's per-user folder `~/.graft` (settings, savings ledger, savings-report opt-in, install id, update cache). Node's `os.homedir()` reads `USERPROFILE` on Windows. Its `.graft\settings.json` holds the global auto-deep switch and deep-threshold that PATCH sets (6.4.1), so every graft process PATCH starts must use the same value. |
 | `GRAFT_DIR` | the absolute map folder for this repository (6.3) | Pins the map folder for internal paths (lock, caches) that do not see `--dir`. In a parts build it also redirects those internal paths of every part to this one folder: check that in 6.3 step 7. |
 | `GRAFT_PROFILE_STORE` | `<PATCH data>\graft\repos` (absolute, outside every repository) | Where graft keeps per-repository **build settings**; `--dir` does not move them. Without it they would go into `<repo>/.graft/config.json`. In a parts build each part's **map** and settings also go here (6.3 step 7), so builds and queries must use the same value. |
 | `DO_NOT_TRACK` | `1` | No background update check. |
 | `GRAFT_PRICES_AUTO_UPDATE` | `0` | No price-list download. |
-| `GRAFT_NO_REFRESH` | `1` for queries; **unset** for builds | Queries never rebuild or write. |
+| `GRAFT_NO_REFRESH` | `1` for agent queries; **unset** for builds and for the auto-deep trigger (6.4.1) | Agent queries never rebuild, write or start an automatic deep build. |
 | `GRAFT_NO_AUTO_INIT` | `1` | Never writes assistant instruction files into the repository. |
 | `GRAFT_NO_TRAIL_SWITCH` | `1` | Never rewrites assistant configuration from `graft` to `trail`. |
 | `GRAFT_NO_GITIGNORE`, `GRAFT_NO_IGNORE` | `1` | Never edits the repository's `.gitignore` or `.ignore`. |
 | `GRAFT_STDERR_SAVINGS` | `0` | stderr carries error messages only. |
+| `GRAFT_NO_SAVED_SETTINGS` | `1` | A deep build never fills in LLM settings a developer saved in `HKCU\Environment`. |
 | `NODE_OPTIONS` | `--max-old-space-size=<MB>` for builds | Size from a measured EBS build (6.3). |
+| LLM variables (`GRAFT_PROVIDER`, `GRAFT_BASE_URL`, `GRAFT_API_KEY`, `GRAFT_MODEL`, optional `GRAFT_REASONING_EFFORT`, `GRAFT_LLM_RETRIES`), from PATCH's own endpoint and token | **PATCH's deep builds and the auto-deep trigger only** (6.4); absent everywhere else | Only deep builds talk to an LLM. The automatic run inherits the trigger's environment. Agent queries and plain builds never get the token. |
 
-Everything else named `GRAFT_*`, `TRAIL_*` or `npm_config_*` must be absent.
-For example, `TRAIL_NO_FETCH=0` would turn on `git fetch origin` and
-`gh pr list`. Create both data folders with the same ACLs as PATCH's other
-per-repository state: the map contains source text.
+Everything else named `GRAFT_*`, `TRAIL_*` or `npm_config_*` must be absent,
+and so must the other variables graft falls back to for an LLM:
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`,
+`ORCAROUTER_API_KEY`, `ORCAROUTER_MODEL` (A.7). For example,
+`TRAIL_NO_FETCH=0` would turn on `git fetch origin` and `gh pr list`. Create
+both data folders with the same ACLs as PATCH's other per-repository state:
+the map contains source text, and with the AI layer, model-written text about
+it.
 
 ### 6.3 Phase 3: the index build step
 
@@ -313,7 +387,7 @@ per-repository state: the map contains source text.
    ```
    <node> <graft>/dist/bin/graft.js --dir <map> build <repo>
        --exclude-dir <entry> [--exclude-dir <entry> ...]
-       [--only-dir <path> ...] [--all-parts]
+       [--all-parts]
        --no-gitignore --no-ignore --no-workspace
    ```
 
@@ -322,7 +396,12 @@ per-repository state: the map contains source text.
      anything the credential and protected-tree guards hide that can be
      expressed as a folder. graft saves the list and **replaces** the saved
      list on each build, so always pass the complete set.
-   - `--only-dir`: restricts indexing to some folders (also saved).
+   - `--only-dir`: restricts indexing to some folders. It is **not** saved in
+     the build settings, only in the map's fingerprint (checked in graft's
+     code): a later `graft build` without it indexes the whole repository,
+     and so does an automatic deep build, which passes no options (6.4.1).
+     So do not use `--only-dir` with auto-deep on; keep folders out with
+     `--exclude-dir`, which is saved.
    - `--all-parts`: needed if one map would exceed the size limit (step 5).
      graft plans the parts (folders) itself and splits a part that is still
      too big. Each part inherits the root's `--exclude-dir` list (entries
@@ -330,8 +409,11 @@ per-repository state: the map contains source text.
      parts, a plain `build` of the root (without `--all-parts`) rebuilds
      every listed part and remakes the links. Passing `--all-parts` again
      plans the parts afresh.
-   - Never pass `--deep`, `--force`, `-j`, `--synth-concurrency`, `--lsp` or
-     `--no-reuse` (the last one only to recover a corrupt cache).
+   - This plain build gives the tools a working map quickly; the AI layer is
+     added by the deep build of 6.4, with the same options plus `--deep`.
+     Never pass `--lsp`; pass `--no-reuse` only to recover a corrupt cache,
+     and `--deep`, `--force`, `-j`, `--synth-concurrency` and
+     `--allow-partial` only as 6.4 says.
 4. **Run it as a Prepare step** after the steps it depends on (ignore rules,
    flavour and component context), with an allowlisted command, a timeout set
    from a measured build, and the build environment of 6.2. Any failure is a
@@ -343,15 +425,19 @@ per-repository state: the map contains source text.
    of `<map>/.graph/wiring.json`. For scale, a repository whose `wiring.json`
    was 98.6 MB needed 2.15 GB peak memory to build, and that size is about
    20 % of the per-map limit. If the build fails with `GRAPH_TOO_LARGE`
-   (graft suggests folders), use `--all-parts` or several `--only-dir`
-   builds, and report the numbers to the user. In a parts build, measure
+   (graft suggests folders), use `--all-parts` (several `--only-dir` builds
+   do not work with automatic deep builds, see step 3), and report the
+   numbers to the user. In a parts build, measure
    per part (`bytes` in `graft parts --json`) and the final link step
    separately. Its memory has not been measured. A query needs about the
    largest part's `wiring.json` in memory, or two parts' for `callers`. Size
-   the query concurrency limit (6.4) from that.
+   the query concurrency limit (6.5) from that.
 6. graft takes a build lock in the map folder, so concurrent builds of one
-   repository wait for each other. Still serialise builds per repository in
-   PATCH (one job at a time).
+   repository wait for each other. That lock is taken over once it is older
+   than 15 minutes, which a deep build outlasts (A.3), so it does not
+   reliably keep a plain build out of a running deep build. Serialise builds
+   per repository in PATCH (one job at a time); 6.4.1 step 4 covers the
+   automatic runs, which run outside PATCH's queue.
 7. **After a parts build, check where the part maps went.** They are **not**
    under `<map>`. graft builds each part with that part's folder as root and
    ignores `--dir` for it. The root `<map>` holds only `workspace.json` and
@@ -374,7 +460,262 @@ per-repository state: the map contains source text.
      causes conflicts. If it does, try running the build without `GRAFT_DIR`:
      `--dir` still places the root map. Report what you chose.
 
-### 6.4 Phase 4: the trusted query operation
+### 6.4 Phase 4: the deep build (the AI layer)
+
+The AI layer is required. PATCH builds it the first time after the plain
+build of 6.3, as a separate background job, so the tools work while it runs
+(an EBS deep build can take hours) and a failure never fails Prepare. After
+that, graft's automatic deep builds keep it current (6.4.1).
+
+1. **Endpoint and token: PATCH's own.** graft uses the LLM endpoint PATCH's
+   agents use, with the token PATCH uses for it (Phase 0 item 12, H20). Do
+   not configure a separate endpoint, a separate key or a copy of the token
+   for graft: read the endpoint and the current token from where PATCH keeps
+   them each time a graft process that needs them starts. If graft cannot
+   use them (step 3), or PATCH's approval does not cover sending whole
+   source files from the background, stop and ask the owner; until then
+   PATCH runs with the plain map, auto-deep stays off, and the AI layer is
+   reported as missing.
+2. **What is sent, and how to keep files out.** Every indexed source file
+   (minus `--exclude-dir` entries; plain-text files never) is sent whole,
+   then batches of summaries. The deep build uses the same saved
+   `--exclude-dir` list as the plain build, for the summaries as well as for
+   the concept nodes. So everything PATCH's credential guard, protected-tree
+   guard and agent ignore file hide must be in that list:
+   - a folder as a name or path, a single file as its repository-relative
+     path, a file pattern as a glob (`**` matches across folders, `*` and `?`
+     within one name);
+   - a glob such as `**/*.pem` may not match a file at the repository root
+     (the pattern has a slash); pass `*.pem` as well, and test both (step 9);
+   - if a guard rule cannot be written as a name, path or glob (for example
+     it looks at file contents), the deep build must not run until the owner
+     decides; list it under "Open decisions".
+3. **Environment:** 6.2, plus exactly these, set by PATCH from its own LLM
+   configuration (A.7). The same set goes to PATCH's deep builds and to the
+   auto-deep trigger of 6.4.1, and nowhere else:
+   - `GRAFT_PROVIDER`: from the protocol of PATCH's endpoint: `openai` for
+     an OpenAI-compatible endpoint (including the Databricks AI Gateway),
+     `anthropic`, or `litellm`;
+   - `GRAFT_BASE_URL`: PATCH's endpoint URL. Always set it: graft's default
+     endpoint for `openai` is a Databricks gateway, not PATCH's;
+   - `GRAFT_API_KEY`: PATCH's current token, in the environment of this
+     process only. Never in argv, a file, a log, a diagnostic or the
+     environment of any other graft process. graft sends it as
+     `Authorization: Bearer <token>` on the OpenAI protocol (seen in
+     graft's Databricks code; `litellm` is assumed to do the same, check it)
+     and as `x-api-key` on the Anthropic protocol (graft sends a bearer
+     token there only from `ANTHROPIC_AUTH_TOKEN`). If PATCH's
+     endpoint wants another scheme (an Anthropic-protocol endpoint with a
+     bearer token, extra headers, a signed request), graft cannot use it as
+     it is: ask the owner, and do not reach for the stripped fallback
+     variables of 6.2 without that decision;
+   - `GRAFT_MODEL`: the model PATCH uses on that endpoint, unless the owner
+     chooses another one the endpoint serves (summaries need no large model;
+     without a model graft takes the latest Claude Haiku the endpoint
+     lists). Always set it: without it graft lists the endpoint's models and
+     picks one itself. On a Databricks AI Gateway, graft tries other model
+     ids if the endpoint reports this one unknown;
+   - **token lifetime:** graft reads the token once, when the process
+     starts, and cannot renew it. A deep build can run for hours, an
+     automatic one up to 3 hours. If PATCH's tokens expire sooner, calls
+     start failing half-way (partial or failed runs, step 6 and 6.4.1
+     step 6): measure the lifetime in Phase 0 and ask the owner if it is
+     shorter than a run;
+   - `GRAFT_NO_SAVED_SETTINGS=1` (already in 6.2);
+   - optionally `GRAFT_REASONING_EFFORT` and `GRAFT_LLM_RETRIES`;
+   - a proxy, if Phase 0 found one is needed: check how graft's LLM client
+     reaches it on PATCH's Node (not verified; Node's built-in `fetch`
+     ignores `HTTPS_PROXY` unless told otherwise).
+4. **Command:**
+
+   ```
+   <node> <graft>/dist/bin/graft.js --dir <map> build <repo> --deep
+       --exclude-dir <entry> [--exclude-dir <entry> ...]
+       [--all-parts]
+       --no-gitignore --no-ignore --no-workspace
+       -j <n> --synth-concurrency <n>
+   ```
+
+   - The same exclusion and parts options as the plain build, and no
+     `--only-dir` (6.3 step 3): the saved list is replaced on each build, so
+     a different list here would change what the next plain build and the
+     next automatic run index.
+   - `-j` (files summarised at once, default 5) and `--synth-concurrency`
+     (concept batches at once, default 4): set them from the endpoint's rate
+     limits.
+   - `--force` re-summarises everything; use it only when the owner asks
+     (for example after changing the model). Do not pass `--allow-partial`
+     (step 6).
+   - Run it with stdin closed and no terminal: graft then asks nothing (no
+     endpoint check, no model picker). It still exits with code 130 if an
+     endpoint conflict were ever answered by "cancel"; treat that as a
+     failure.
+   - Whether `--deep` works together with a parts build (`--all-parts`, or a
+     plain root build of a parts map) has not been checked: verify it on
+     EBS, per part, before relying on it.
+5. **Order and locking.** Prepare runs the plain build (6.3), sets the
+   global auto-deep settings (6.4.1 step 2), then queues this deep build as
+   a background job when the map has no AI layer yet (`totals.summarized`
+   is 0 in `staleness`) or after a failure (6.4.1 step 6). graft's build
+   lock does not reliably keep two builds apart for as long as a deep build
+   runs (6.3 step 6), so serialise them in PATCH's per-repository job queue,
+   and never start this job while an automatic run is under way (6.4.1
+   step 5). graft checks the repository's size before the first LLM call,
+   so a repository too big for one map fails before it costs anything.
+6. **Outcome.** Classify every run:
+   - exit 0 and no warning line containing `falling back to the structural
+     build`: built;
+   - that warning (no key, or the endpoint was rejected): **not built**, even
+     with exit 0; graft then made a plain build instead. Report it as a
+     configuration error;
+   - exit 1 after the LLM calls started: **partial**: some summaries failed.
+     The map stays usable, with the summaries that succeeded. Read
+     `graft --dir <map> staleness <repo> --json --no-refresh` for how much is
+     done (A.7) and retry at the next scheduled run; cached results are not
+     sent again;
+   - a timeout or kill: partial too; graft writes finished crux excerpts to
+     disk as it goes, and the summary cache keeps what was done.
+   In every case keep only the first error lines for the warning, and scrub
+   the token from anything logged.
+7. **Time and cost limits.** Measure on EBS: wall time, number of LLM calls,
+   input and output tokens (from the endpoint's or proxy's records), and cost.
+   Expect about two calls per new or changed file (summary and crux), plus
+   the concept batches. Agree a timeout, a per-run budget and the
+   deep-threshold of 6.4.1 with the owner from these numbers before
+   auto-deep is switched on in a release; the agreed threshold is the
+   value PATCH sets.
+8. **What it writes.** Summaries and crux excerpts go into the map
+   (`wiring.json`), concept nodes into top-level `.md` files of the map
+   folder, caches into its `.cache/`. Check, as for the plain build, that
+   nothing is written into the repository, into the real `%USERPROFILE%`, or
+   into `HKCU\Environment`.
+9. **Prove the exclusions.** Put a canary string into a test file at the
+   root and in a subfolder of a test repository, for each kind of guard rule,
+   capture the deep build's requests (a local stub endpoint is enough), and
+   check that no canary is in them.
+
+#### 6.4.1 Automatic deep builds (required)
+
+After the first deep build, graft keeps the AI layer current by itself:
+PATCH switches graft's **auto-deep on globally** and sets a **custom global
+deep-threshold**, and graft then starts `build --deep` in the background
+whenever the share of out-of-date summaries reaches that threshold. What
+follows was checked in graft's code (A.7), not run on EBS.
+
+1. **What "global" means here.** Both settings go to
+   `~/.graft/settings.json`, which in PATCH's environment (6.2) is
+   `<PATCH data>\graft-home\.graft\settings.json`. They apply to every
+   repository PATCH's graft indexes on this machine and never touch the
+   developer's own `%USERPROFILE%\.graft`. A value saved in one
+   repository's build settings (under `GRAFT_PROFILE_STORE`) wins over the
+   global one, so PATCH keeps those unset (step 2).
+2. **Set them** in Prepare, after the plain build of 6.3 (both commands read
+   the map to print its current state; whether `deep-threshold` works
+   without a map has not been checked), with the environment of 6.2 and no
+   LLM variables:
+
+   ```
+   <node> <graft>/dist/bin/graft.js --dir <map> deep-threshold <N> <repo> --global
+   <node> <graft>/dist/bin/graft.js --dir <map> auto-deep on <repo> --global --yes
+   ```
+
+   - `<N>` is PATCH's threshold, a whole percent agreed with the owner from
+     the measured cost (6.4 step 7). A run is due once
+     (stale + unsummarised) / total reaches `<N>` % and at least one summary
+     is out of date. graft's default is 10; 0 starts a run after nearly
+     every change; 100 means never. Keep it in PATCH's configuration, not
+     hard-coded.
+   - `--yes` is required: without a terminal, `auto-deep on` otherwise exits
+     1 with `✗ auto-deep was not turned on: confirm with \`graft auto-deep
+     on --yes\` (no terminal to ask in).` It still prints a cost warning on
+     stderr; ignore it.
+   - Check the result: the first stdout line is
+     `deep-threshold: <N>% (global, <path>)` and `auto-deep: on (global,
+     <path>)`. If the source is `this repo` instead, that repository has its
+     own value: run the same command for it with `--reset` and without
+     `--global`. `staleness --json` shows the threshold in effect as
+     `threshold` and `thresholdSource`.
+   - Run them again only when PATCH's threshold changes, and `auto-deep on`
+     also as the retry of step 6: turning it on clears a failed automatic
+     run of `<repo>`.
+3. **The trigger.** Only a query that refreshes the map can start an
+   automatic run; graft's builds never do. PATCH's agent queries never
+   refresh (`--no-refresh`, `GRAFT_NO_REFRESH=1`, 6.5), so they never start
+   one. PATCH starts runs on purpose, with one **trigger query** in its
+   background job after each successful plain rebuild (6.8) and after the
+   first deep build of 6.4:
+
+   ```
+   <node> <graft>/dist/bin/graft.js --dir <map> ask - <repo> --json -n 1
+   ```
+
+   - a fixed query on stdin (any word), **without** `--no-refresh`, with
+     the environment of 6.2 minus `GRAFT_NO_REFRESH` and plus the LLM
+     variables of 6.4 step 3; discard its stdout and stderr (keep only the
+     exit code);
+   - a trusted operation of its own with a fixed argv, never reachable from
+     the agent tools;
+   - it first refreshes the map (nothing to do right after a rebuild), then,
+     when a run is due, starts it in a detached process and returns at once;
+   - `GRAFT_NO_AUTO_INIT=1` and the other switches of 6.2 still keep it
+     from writing into the repository: test that (7, test 15);
+   - do not run it while PATCH's own deep build (6.4) is queued or running.
+4. **What an automatic run is.** A detached Node process
+   (`dist/graph/auto-deep-run.js`) at low priority that runs
+   `graft build <repo> --deep --dir <map>` and nothing more:
+   - it inherits the trigger's environment, including the token, which it
+     reads once (6.4 step 3, token lifetime), and it keeps running after
+     the trigger and after PATCH exit;
+   - it passes no other option, so it uses the saved build settings: the
+     `--exclude-dir` list of the last build (always pass the complete list,
+     6.3 step 3), the defaults `-j 5` and `--synth-concurrency 4` (check
+     them against the endpoint's rate limits; whether a variable changes
+     them has not been checked), no `--only-dir` (so the whole repository,
+     6.3 step 3), and no `--no-workspace` (without a terminal graft then
+     builds the folder itself, as checked in its code). Whether it handles a
+     root built in parts has not been checked: verify it on EBS;
+   - unlike a manual deep build, it **fails** instead of falling back to a
+     plain build when the key is missing or the endpoint rejects it;
+   - it is stopped after **3 hours** (a fixed limit in graft) and then
+     recorded as failed. Measure an incremental run on EBS; a first deep
+     build is expected to take longer, which is why 6.4 runs that one;
+   - one run at a time per map (lock `<map>/.cache/auto-deep.lock`). It runs
+     outside PATCH's job queue, and graft's build lock does not reliably
+     keep a plain rebuild out of it (6.3 step 6). What happens when a plain
+     build runs during an automatic run has not been checked: test it
+     (test 15). If it is not safe, defer plain rebuilds while a run is under
+     way, report the index as stale meanwhile, and list the delay under
+     "Open decisions".
+5. **Its state.** graft records the last run in
+   `<map>/.cache/auto-deep.json`: `state` (`"running"`, `"succeeded"`,
+   `"failed"`), `startedAt`, `finishedAt`, `pid`, `trigger` (`outdated`,
+   `total`, `percent`, `threshold`), `after` (`outdated`, `total`),
+   `exitCode`, `error` (short) and `log`. The full output is in
+   `<map>/.cache/auto-deep.log`: scrub it like any build output and check
+   that the token never appears in it. This is an internal file: check its
+   shape on the pinned version (Phase 1) and read it defensively. A
+   `"running"` record whose runner is gone is turned into `"failed"` by the
+   next query that reports on it. `graft --dir <map> auto-deep <repo>`
+   prints the same in text. Set the `ai` state of 6.6 step 8 to
+   `"updating"` while a run is under way.
+6. **Failures.** graft never retries a failed run by itself, so it does not
+   charge the same failing calls again; automatic runs stay paused for that
+   map until a manual `build --deep` succeeds or `auto-deep on` is run
+   again. PATCH reports the failure as a warning with the (scrubbed)
+   `error`, fixes what it can (for example an expired token, 6.4 step 3),
+   and retries at
+   most once per agreed interval by queueing its own deep build of 6.4,
+   which clears the failure when it succeeds. Never retry in a loop.
+7. **Leftovers.** A successful run that still left summaries out of date
+   past the threshold (`after.outdated`) is not repeated until more are out
+   of date than it left. This is graft's rule; do not work around it.
+8. **Switching it off.** When the owner asks, or when PATCH removes graft:
+   `graft --dir <map> auto-deep off <repo> --global` (or `--reset
+   --global`). Decide with the owner whether PATCH stops a running run when
+   it exits (its `pid` is in the status file); a stopped run is recorded as
+   failed and needs the retry of step 6.
+
+### 6.5 Phase 5: the trusted query operation
 
 Add **one** operation to PATCH's closed set of trusted operations:
 
@@ -412,24 +753,36 @@ async function graftQuery(repoRoot, op, positional, flags, { stdin } = {}) {
 }
 ```
 
-### 6.5 Phase 5: the four tools
+### 6.6 Phase 6: the four tools
 
 Register them like PATCH's existing search tools, with typed parameter schemas
 and short prompt snippets.
 
 | Tool | Parameters | graft command (after `--dir <map>`) |
 |---|---|---|
-| `code_search` | `query` string 1..500; `limit` int 1..10, default 5; `path` optional repo-relative prefix | `ask - <repo> --json --source -n <limit> [--in <path>] --no-refresh`, query on stdin |
+| `code_search` | `query` string 1..500; `limit` int 1..10, default 5; `path` optional repo-relative prefix; `full` bool, default false | `ask - <repo> --json --source -n <limit> [--full] [--in <path>] --no-refresh`, query on stdin |
 | `code_find_all` | `pattern` string 1..300; `fixed` bool; `ignore_case` bool; `path` optional | `grep <pattern> <repo> --json [--fixed] [-i] [--in <path>] --no-refresh` |
 | `code_outline` | `file` repo-relative path | `skeleton <file> <repo> --json --no-refresh` |
 | `code_callers` | `symbol` string; `direction` "in" or "out"; `depth` int 1..3; `path` optional | `callers <symbol> <repo> --json --direction <d> -d <n> [--in <path>] --no-refresh` |
 
-`code_search` has no `full` parameter on purpose. On a map built without
-`--deep` (PATCH never runs it), `--source` already inlines each hit's whole
+**Excerpts.** With the AI layer, `--source` inlines a hit's crux (up to 8
+lines), followed by
+`… (crux — full definition at <path>:L<from>-L<to>; rerun with --full)`.
+With `full: true`, or for a symbol without a crux, it inlines the whole
 definition, up to 80 lines, ending with
-`… (+N more lines; open <path>:L<from>-L<to>)` when it is longer, and `--full`
-changes nothing. Short excerpts ("crux", up to 8 lines) exist only in maps
-built with `--deep`. Budget the character cap for this (step 7 below).
+`… (+N more lines; open <path>:L<from>-L<to>)` when it is longer. Budget the
+character cap for whole definitions (step 9 below).
+
+**Stale excerpts.** A crux is text cut from the file when the deep build ran.
+After a plain rebuild, a changed symbol keeps its old crux and summary until
+the next deep build, and `ask` still inlines that old crux under the
+symbol's new line range (checked in graft's code). So while the AI layer has
+stale entries (`totals.stale` > 0 in `graft staleness --json --no-refresh`,
+see 6.8), PATCH always passes `--full`, which reads the definition from disk.
+
+**Concept hits** (`kind: "concept"`) have a `pointer` that is a
+comma-separated list of the files the concept covers, not one path, and a
+`title` and `snippet` written by the model.
 
 `grep` patterns may legitimately start with `-`. For `code_find_all`, either
 reject such patterns with a clear message or prove from `graft grep --help`
@@ -439,21 +792,32 @@ general token rule.
 **Post-filter every result**, in this order, before the output envelope:
 
 1. Normalise every path to repository-relative with forward slashes:
-   `hits[].pointer` (format `path` or `path:Lx-Ly`), `symbol.path`,
+   `hits[].pointer` (format `path` or `path:Lx-Ly`; for concept hits, split
+   the comma-separated list and normalise each path), `symbol.path`,
    `hits[].path`, `groups[].path`, `groups[].symbol.path`, `file`.
 2. Drop every entry whose path PATCH's credential guard or protected-tree
    guard rejects, together with its code and text; do not mask, remove. Apply
-   the agent ignore file too.
+   the agent ignore file too. Drop a concept hit if **any** of its paths is
+   rejected.
 3. From `ask` results, delete `notes`, `notesChecked` and `notesHint`. They are
    "learnings" read from `.trail/learnings/` in the repository: free text
    written by other agents, with absolute paths, not vetted by PATCH.
-4. For EBS, tag hits in code inactive for the current flavour or outside the
+4. Rewrite graft's hint in crux excerpts, `rerun with --full`, to name
+   PATCH's tool instead (for example `call code_search with full: true, or
+   read <path>:L<from>-L<to>`).
+5. Mark model-written text as such: concept hits, `snippet` text (graft
+   shows a symbol's summary there when it has one) and `skeleton` `summary`
+   fields, for example with
+   `"aiWritten": true`, and `"aiStale": true` while the AI layer has stale
+   entries. Agents must check it against the code before relying on it.
+6. For EBS, tag hits in code inactive for the current flavour or outside the
    active components (H16), for example `"inactive": true`. graft knows
    nothing about flavours.
-5. In sub-agents, charge the result against the same budgets PATCH applies to
+7. In sub-agents, charge the result against the same budgets PATCH applies to
    grep and read.
-6. Add the index age, for example `"index": {"builtAt": "...", "stale": true|false}`.
-7. Serialise, apply PATCH's character cap by removing whole hits from the end,
+8. Add the index age and the state of the AI layer, for example
+   `"index": {"builtAt": "...", "stale": true|false, "ai": "current"|"stale"|"updating"|"partial"|"failed"|"missing"}`.
+9. Serialise, apply PATCH's character cap by removing whole hits from the end,
    and set the envelope's truncation flag.
 
 Error handling: no index, unknown symbol, invalid regex and similar errors give
@@ -494,13 +858,13 @@ older package does differently):
   "`callers --json` across parts" as a graft change in your report.
 - If `links` in `graft parts --json` is not `"current"` (a part was rebuilt
   alone, or its build failed), queries answer without the links. Only the
-  text output of `callers` says so. Report the index as degraded (6.7).
+  text output of `callers` says so. Report the index as degraded (6.8).
 
 **Quality signal.** `ask` results carry `coverage` and `coverageStrong`
 (0 to 1). `coverageStrong` of 0 means no query word matched the top hit's name
 or path. Use it to label weak results.
 
-### 6.6 Phase 6: prompts, sub-agents, skills
+### 6.7 Phase 7: prompts, sub-agents, skills
 
 1. Add the four tools to the sub-agents' read-only tool list.
 2. Add a short "Locating code" rule to the central prompt source (not to a
@@ -513,6 +877,10 @@ or path. Use it to label weak results.
       needed.
 
    Keep any existing rule that forbids answering from search results alone.
+   Add that concept hits and summaries are written by a model: they help to
+   find the right place and to understand a system quickly, but a claim
+   about the code must come from the code (a crux, a whole definition or a
+   line range read from disk).
 3. Add one-line prompt snippets for each tool. In a parts build, name the
    parts (the `part` values of `graft parts --json`) in the snippet for the
    `path` parameter, so agents can narrow to the part they work in.
@@ -523,7 +891,7 @@ or path. Use it to label weak results.
    grep or a whole-file read, add a one-line hint to use the code tools. Keep
    any redirecting behaviour off by default.
 
-### 6.7 Phase 7: freshness
+### 6.8 Phase 8: freshness
 
 - Queries never rebuild (`--no-refresh`, `GRAFT_NO_REFRESH=1`).
 - Rebuild in the background, one serialised job per repository, after each
@@ -535,6 +903,18 @@ or path. Use it to label weak results.
   compare against the time of the last edit or branch switch.
 - If file timestamps cannot be trusted (network drives, restored checkouts),
   set `GRAFT_REFRESH=hash` for builds (slower).
+- **The AI layer.** Plain rebuilds keep it but mark changed symbols stale
+  (6.6 explains why PATCH then passes `--full`). After each successful
+  plain rebuild, the same background job runs the trigger query of 6.4.1
+  step 3; graft starts an automatic deep build when the share out of date
+  has reached PATCH's global deep-threshold, and does nothing otherwise.
+  Each run sends only new and changed files. PATCH does not compare against
+  the threshold itself. For the `ai` state of 6.6 step 8, read
+  `graft --dir <map> staleness <repo> --json --no-refresh` (`totals` holds
+  `stale`, `unsummarized`, `summarized` and `total`, and `pct` the share
+  out of date; always pass `--no-refresh`, without it `staleness` rebuilds
+  the map first) together with `<map>/.cache/auto-deep.json` (6.4.1
+  step 5).
 - **Parts builds.** Queries with `--no-refresh` never remake the links
   between parts; only a build does. Always rebuild from the repository root
   with the same command, without `--all-parts`: it rebuilds every part
@@ -545,9 +925,11 @@ or path. Use it to label weak results.
   `graft --dir <map> parts <repo> --json`: the index is degraded when
   `links` is not `"current"` or a part is not `"built"`. That command loads
   no map, so it is cheap. Whether `build --check` reports drift per part has
-  not been checked; verify it on a parts build.
+  not been checked; verify it on a parts build. `staleness` reads the part
+  maps one at a time; whether its `repos` list names the parts has not been
+  checked.
 
-### 6.8 Phase 8: savings display (optional)
+### 6.9 Phase 9: savings display (optional)
 
 `ask --source` returns `saved: {files, baselineChars}`; `grep`, `skeleton` and
 `callers` return `saved` too. `baselineChars` is the size of the files the
@@ -568,8 +950,10 @@ Automate what PATCH's test setup allows; list the rest as manual checks.
    that already contains a developer's `graft/` map and `.trail/learnings/`.
 3. With `<repo>/.graft/config.json` present, the step is skipped with a
    warning and the file is unchanged.
-4. With outbound traffic blocked and captured, one build and 50 mixed queries
-   make no connection attempt.
+4. With outbound traffic blocked and captured, one plain build and 50 mixed
+   queries make no connection attempt, and a deep build (PATCH's or an
+   automatic one) connects only to PATCH's own LLM endpoint (and its proxy,
+   if one is configured).
 5. For each tool, a known symbol returns spans that match the file on disk,
    and an unknown one returns a diagnostic.
 6. A query that matches a credential file or protected tree returns no path or
@@ -594,15 +978,63 @@ Automate what PATCH's test setup allows; list the rest as manual checks.
       part only;
     - a checkout with a developer's `graft/` map inside one part makes the
       step warn and the tools report "index unavailable".
+13. The deep build:
+    - on EBS, finishes within the agreed time and budget, and afterwards
+      `code_search` returns concept hits and crux excerpts, and
+      `staleness --json --no-refresh` shows no stale symbols;
+    - sends no canary from a guarded or ignored file, at the repository root
+      or in a subfolder (6.4 step 9);
+    - leaves the repository, the real `%USERPROFILE%` and
+      `HKCU\Environment` unchanged, and the token appears in no log
+      (including `auto-deep.log`), argv, file or diagnostic;
+    - with a developer's saved `GRAFT_BASE_URL`, `GRAFT_API_KEY` and
+      `GRAFT_MODEL` in `HKCU\Environment`, still uses only PATCH's endpoint,
+      token and model;
+    - with a wrong key, is reported as not built (the "falling back to the
+      structural build" case) while the tools keep working on the plain map;
+    - stopped half-way, leaves a usable map, and the next run sends only what
+      is missing;
+    - after an edit and a plain rebuild, `code_search` shows the edited
+      symbol's current code (whole definition, because the AI layer is
+      stale) until the next deep build.
+14. A concept hit that covers a guarded file is never shown.
+15. Automatic deep builds:
+    - after Prepare, `auto-deep` and `deep-threshold` report `on` and `<N>%`
+      with the source `global`, `<PATCH data>\graft-home\.graft\settings.json`
+      holds both, and the developer's real `%USERPROFILE%\.graft` is
+      unchanged (also when it has its own `autoDeep` or
+      `deepStaleThreshold`);
+    - agent queries never start a run, even with the share out of date past
+      the threshold;
+    - after edits that push the share to the threshold, the plain rebuild
+      and its trigger query start exactly one run, which uses PATCH's
+      endpoint, token and model, honours the exclusions (canaries of 6.4
+      step 9) and writes nothing into the repository; below the threshold
+      the trigger starts nothing;
+    - a plain rebuild while a run is under way leaves a correct map and AI
+      layer (or PATCH defers it, 6.4.1 step 4);
+    - with a wrong or expired token, the run is recorded `failed`, PATCH
+      reports it, does not retry before the agreed interval, and its retry
+      clears the failure when it succeeds;
+    - a run killed half-way is reported failed by the next trigger, and the
+      map stays usable.
 
 ## 8. Do not
 
 - run graft through the agent's Low-IL shell, `npx`, a PATH lookup or an
   install on the target;
-- use `graft init`, `graft mcp`, `graft env`, `build --deep`, `--lsp`,
-  `blast --name`, or any `savings-report`, `login`, `connect` or `sync`
-  command;
-- let any query rebuild the index;
+- use `graft init`, `graft mcp`, `graft env`, `graft api`, `graft model`,
+  `graft effort`, `--lsp`, `blast --name`, or any `savings-report`,
+  `login`, `connect` or `sync` command;
+- use `graft auto-deep` and `graft deep-threshold` other than as 6.4.1
+  describes (the global settings in PATCH's isolated home, `--reset` of a
+  repository's own value, `off` when asked);
+- run `build --deep` other than as 6.4 describes: never against another
+  endpoint than PATCH's own, never with a separate key or a stored copy of
+  PATCH's token, never with a guarded file left out of the exclusion list,
+  never with the token in argv or a file;
+- use `--only-dir` while auto-deep is on (6.3 step 3);
+- let any agent query rebuild the index or start an automatic deep build;
 - show the model graft's raw text output, stderr, `notes`, absolute paths, or
   anything a PATCH guard rejects;
 - fetch graft from registry.npmjs.org;
@@ -612,13 +1044,19 @@ Automate what PATCH's test setup allows; list the rest as manual checks.
 ## 9. What to deliver
 
 1. The Phase 0 discovery note: answers with `file:line`, and the status of
-   H1 to H19.
+   H1 to H20.
 2. The code changes, phase by phase, each with tests.
 3. The measured EBS numbers: build time, peak memory, `wiring.json` size,
-   query latency (p50 and p95) per tool, and the shape chosen (single map,
-   parts or `--only-dir`). For parts, add the number of parts, the largest
+   query latency (p50 and p95) per tool, and the shape chosen (single map
+   or parts). For parts, add the number of parts, the largest
    part's `wiring.json`, the time and memory of the link step, and how
-   `code_callers` handles edges between parts.
+   `code_callers` handles edges between parts. For the deep build: the
+   endpoint and model used, wall time, number of LLM calls, input and output
+   tokens and cost of a first build and of a typical incremental one, the
+   share of symbols summarised, and how many concept nodes it wrote. For
+   automatic deep builds: the threshold agreed, how often runs started over
+   a typical week of edits, their wall time against graft's 3-hour limit,
+   their cost, and the lifetime of PATCH's token against a run.
 4. A final report with:
    - every deviation from this prompt and why;
    - the graft facts you checked, and any that differed from Appendix A;
@@ -664,20 +1102,28 @@ Automate what PATCH's test setup allows; list the rest as manual checks.
 - Build settings: `<repo>/.graft/config.json` if it exists; otherwise
   `<profile store>/<repo-folder>-<hash>/config.json`; otherwise (store off or
   unusable) `<repo>/.graft/config.json`. `--dir` does not affect this.
-- Build options `--exclude-dir`, `--only-dir`, `--follow-submodules`,
+- Build options `--exclude-dir`, `--follow-submodules`,
   `--follow-nested-repos` and `--index-text` are saved in those settings and
-  reused by later builds.
+  reused by later builds. `--only-dir` is not: it is kept only in the map's
+  fingerprint, which the query-time refresh reuses but `graft build` does
+  not. The same settings file holds a repository's own `autoDeep` and
+  `deepStaleThreshold` values, which win over the global ones (A.7).
 
 ### A.3 Build
 
 ```
 graft [--dir <map>] build [repo]
   --exclude-dir <name|path|glob>   repeatable; saved; replaces the saved list
-  --only-dir <path>                repeatable; saved; part of the fingerprint
+  --only-dir <path>                repeatable; not saved, only in the map's fingerprint
   --all-parts                      one map per part + workspace.json index + links
   --check [--json]                 report drift, build nothing
   --no-gitignore --no-ignore --no-workspace
-  never: --deep --force -j --synth-concurrency --lsp (--no-reuse only for recovery)
+  --deep                           add the AI layer through the LLM endpoint (A.7)
+  -j, --concurrency <n>            with --deep: files summarised at once (default 5)
+  --synth-concurrency <n>          with --deep: concept batches at once (default 4)
+  --force                          with --deep: re-summarise everything
+  --allow-partial                  with --deep: exit 0 even when some summaries failed
+  never: --lsp (--no-reuse only for recovery)
 ```
 
 - Exit 0 = built. Non-zero = failed; with `--all-parts`, also when parts
@@ -693,7 +1139,9 @@ graft [--dir <map>] build [repo]
   would keep it (A.2), normally the profile store. Each part's settings are
   derived from the root's (`--exclude-dir` re-rooted at the part).
 - Build lock in the map folder; taken over only when its owner process is gone
-  and it is older than 5 minutes (or older than 15 minutes in any case).
+  and it is older than 5 minutes (or older than 15 minutes in any case). A
+  deep build outlasts that limit (graft's own code says so), which is why
+  automatic deep builds use a lock of their own (A.7).
 
 ### A.4 Queries
 
@@ -702,12 +1150,15 @@ stdout, pretty-printed. Errors go to stderr, starting with `✗`, with exit
 code 1.
 
 **`ask`**: `ask <query|-> [dir] --json --source -n <N> [--full] [--in <path>]`.
-`-` reads the query from stdin. Default `-n` is 8. `--source` adds `code`: the
-hit's definition, up to 80 lines, then `… (+N more lines; open path:Lx-Ly)`.
-An excerpt of up to 8 lines (the "crux") replaces it only when the map was
-built with `--deep` and `--full` is not given, so on PATCH's maps `--full` has
-no effect. Searches all parts in a parts build; structural queries also
-follow the links between parts.
+`-` reads the query from stdin. Default `-n` is 8. `--source` adds `code`.
+When the symbol has a crux (maps built with `--deep`) and `--full` is not
+given, that is the crux of up to 8 lines, then
+`… (crux — full definition at path:Lx-Ly; rerun with --full)`. Otherwise it
+is the hit's definition read from disk, up to 80 lines, then
+`… (+N more lines; open path:Lx-Ly)`. The crux is stored text from the last
+deep build, and a changed symbol keeps its old one until the next deep build
+(6.6). Searches all parts in a parts build; structural queries also follow
+the links between parts.
 
 ```ts
 AskResult {
@@ -722,10 +1173,10 @@ AskResult {
   scopes?: { federated: string[]; alsoMatched: { scope: string; bestId: string }[] };
 }
 AskHit {
-  kind: "concept" | "symbol" | "caller" | "callee";   // no "concept" without --deep
+  kind: "concept" | "symbol" | "caller" | "callee";   // "concept" only on maps built with --deep
   title: string;
-  pointer: string;          // "path" or "path:Lx-Ly", repo-relative
-  snippet: string;
+  pointer: string;          // "path" or "path:Lx-Ly", repo-relative; concept: "path1, path2, ..."
+  snippet: string;          // may be a model-written summary
   relation?: string; related?: string[];
   score: number;
   code?: string;            // with --source
@@ -821,14 +1272,18 @@ PartsReport {
 | `git fetch`, `gh pr list`, init look-back | off by default; `TRAIL_NO_FETCH=0` or `TRAIL_NO_LOOK_BACK=0` turn them on | strip all `TRAIL_*` |
 | Savings report | uploads to a company Oracle database if opted in (the opt-in lives in `~/.graft`) | isolated home: never opted in |
 | Cloud sync, telemetry | none in the company fork (permanently off) | fetch the fork's package only |
-| `--deep`, `blast --name` | send code to an LLM endpoint | never |
+| `build --deep` | sends source files and summaries to the LLM endpoint | required: PATCH's own endpoint and token only, configured as in 6.4 and A.7 |
+| Saved LLM settings | a deep build reads `HKCU\Environment` (`~/.graft/env.sh` elsewhere) for missing LLM settings | off: `GRAFT_NO_SAVED_SETTINGS=1` |
+| `graft api`, `graft model`, `graft effort`, `graft env` | write user settings to `HKCU\Environment` | never run |
+| Automatic deep builds (`graft auto-deep`, `graft deep-threshold`) | a query that refreshes starts `build --deep` in a detached process once the threshold is reached; writes `~/.graft/settings.json` (global) or the build settings (per repository) | required: on globally in PATCH's isolated home, with PATCH's threshold; started only by PATCH's trigger query; agent queries use `--no-refresh` (6.4.1) |
+| `blast --name` | sends code to an LLM endpoint | never |
 | `--lsp` | starts local language servers | not used |
 | Auto-init, trail switch | write assistant files into the repository | off: `GRAFT_NO_AUTO_INIT=1`, `GRAFT_NO_TRAIL_SWITCH=1` |
 | `.gitignore` / `.ignore` edits | write into the repository | off: `GRAFT_NO_GITIGNORE=1`, `GRAFT_NO_IGNORE=1` |
 | Map, caches, lock | write into the map folder | `--dir` and `GRAFT_DIR` outside the repository |
 | Build settings | write `config.json` | profile store outside the repository; skip if `<repo>/.graft/config.json` exists |
 | Part maps and part settings (parts builds) | written where a build of the part folder would put them, ignoring `--dir` | profile store; check each `parts[].map` after the build (6.3 step 7) |
-| Links between parts | `<map>/.cache/links.json`, written by builds only | rebuild from the root (6.7) |
+| Links between parts | `<map>/.cache/links.json`, written by builds only | rebuild from the root (6.8) |
 
 ### A.6 Packages with and without links between parts
 
@@ -845,6 +1300,89 @@ it. Find out which you have:
 | `callers` text at the root | `## <part>/` blocks with `across parts:` | `## <part>/` blocks, edges within each part only |
 | `callers --json` at the root | fails (no root map) | fails (no root map) |
 | `graft parts` | lists parts, map folders, links state | absent: read `<map>/workspace.json` and find part maps with `graft where <repo>/<part>` (check this) |
+
+### A.7 The deep build: LLM configuration and reports
+
+- **Variables graft reads** for the LLM: `GRAFT_PROVIDER` (`openai`,
+  `anthropic`, `litellm`, `orcarouter`, `llm-incubator`; default `openai`),
+  `GRAFT_BASE_URL`, `GRAFT_API_KEY`, `GRAFT_MODEL`, `GRAFT_REASONING_EFFORT`,
+  `GRAFT_LLM_RETRIES`. It falls back to `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `ORCAROUTER_API_KEY`,
+  `GRAFT_OPENROUTER_MODEL` and `ORCAROUTER_MODEL` when the main ones are
+  missing; strip them all.
+- **Defaults to override.** The default endpoint for `openai` is a Databricks
+  AI Gateway, and `litellm` defaults to `http://localhost:4000`. Without a
+  model, graft lists the endpoint's models and takes the latest Claude Haiku
+  it serves (or a built-in id). Global `--model <id>` does the same as
+  `GRAFT_MODEL`; prefer the variable so argv stays fixed.
+- **Saved settings.** Before a deep build, graft fills every missing
+  `GRAFT_BASE_URL`, `GRAFT_API_KEY`, `GRAFT_MODEL`, `GRAFT_REASONING_EFFORT`,
+  `GRAFT_PROVIDER` and `GRAFT_ENDPOINT_CHOICE` from the user's saved settings
+  (`HKCU\Environment` on Windows, read with `reg query`; `~/.graft/env.sh`
+  elsewhere). `GRAFT_NO_SAVED_SETTINGS=1` turns that off.
+- **No terminal.** The endpoint check and the model picker run only in a
+  terminal; with pipes, graft asks nothing.
+- **Fallback.** With no key, or an endpoint the check rejected, graft prints
+  `⚠ … falling back to the structural build (no LLM summaries).` and makes a
+  plain build instead. The exit code of that case has not been checked:
+  detect the line. An automatic run fails instead (below).
+- **Exit codes.** 0 = built. 1 when some summaries failed (unless
+  `--allow-partial`), or on other errors. 130 = cancelled at a prompt (not
+  expected without a terminal; treat it as a failure).
+- **What is sent.** Each file's full text, once per summary pass and once
+  per crux pass for new or changed files; batches of summaries for the
+  concept nodes. Files under `--exclude-dir`, plain-text files and files
+  outside the `--only-dir` folders passed to that build are never sent: the
+  deep build walks the same lists as the plain build. An automatic run
+  passes no `--only-dir`.
+- **`staleness`**: `graft --dir <map> staleness [dir] --json --no-refresh
+  [--top <n>]` (it refreshes the map first without `--no-refresh`):
+
+  ```ts
+  StalenessReport {
+    indexed: boolean;                    // false: no map yet
+    totals: { stale: number; unsummarized: number; summarized: number; total: number };
+    pct: number;                         // share out of date, 0..100
+    threshold: number; thresholdSource: string;
+    recommended: boolean;                // graft's manual nudge, from the threshold in effect; not used by PATCH
+    repos: { name: string; totals: ...; pct: number }[];
+    files: { path: string; outdated: number; total: number }[];   // worst first
+  }
+  ```
+- **Authentication.** On the OpenAI protocol the key goes out as
+  `Authorization: Bearer <key>`; a Databricks AI Gateway URL also gets a
+  request-tags header and model-id fallbacks. On the Anthropic protocol
+  `GRAFT_API_KEY` goes out as `x-api-key`; only `ANTHROPIC_AUTH_TOKEN` is
+  sent as a bearer token there.
+- **`deep-threshold`**: `graft [--dir <map>] deep-threshold [percent] [dir]
+  [--global] [--reset]`. Without a percent it shows the value. Prints
+  `deep-threshold: <N>% (<source>)` with source `this repo, <path>`,
+  `global, <path>` or `default`, then the repository, global and default
+  values. Resolution: the repository's `deepStaleThreshold` (build
+  settings), then the global one (`~/.graft/settings.json`), then 10. 0 =
+  any out-of-date summary, 100 = never.
+- **`auto-deep`**: `graft [--dir <map>] auto-deep [on|off] [dir] [--global]
+  [--reset] [--yes]`. Same resolution (`autoDeep`; default off) and the
+  same output shape (`auto-deep: on (global, <path>)`). Turning it on
+  prints a cost warning on stderr and, without a terminal, needs `--yes`
+  (otherwise exit 1). Turning it on also clears a failed automatic run of
+  that repository.
+- **Automatic deep builds** start only from a query that refreshes (the CLI
+  queries without `--no-refresh` and `GRAFT_NO_REFRESH`, or graft's MCP
+  tools), never from a build and never from an automatic run. A run is due
+  when auto-deep is on, at least one summary is out of date and
+  (stale + unsummarised) / total is at or above the threshold, unless the
+  last successful run left as many out of date. The query then writes
+  `.cache/auto-deep.json` (`state: "running"`), takes `.cache/auto-deep.lock`
+  and starts `node dist/graph/auto-deep-run.js '<job>'` detached, with no
+  window and stdio ignored, inheriting its environment. That runner lowers
+  its priority and runs `graft build <repo> --deep --dir <map>` with
+  `GRAFT_AUTO_DEEP_RUN=1`, output to `.cache/auto-deep.log`, stopped after
+  3 hours. In that build, a missing key or a rejected endpoint fails the
+  build instead of falling back to a plain one. The outcome (`succeeded`
+  with `after`, or `failed` with `error` and `exitCode`) goes into
+  `.cache/auto-deep.json`. A failed run is reported on every query and not
+  retried until a manual `build --deep` succeeds or `auto-deep on` is run.
 
 ## Appendix B: leads from an earlier review of PATCH engine v3.11.0 (unverified)
 
