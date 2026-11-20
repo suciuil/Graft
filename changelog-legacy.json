@@ -523,17 +523,17 @@
       "html": "<b>Model detection from host session records</b> when the agent doesn't report a model: Kilo Code (including forks, VS Code Insiders installs, paired models and subagents, and shells started by Kilo's agent), VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. Repos and VS Code workspaces opened through a junction or symlink are recognised, as are Kilo sessions not yet saved to Kilo's main database file. Kilo turns are not priced at the model of a Copilot chat in the same VS Code window, and Kilo and Copilot calls are not filed under the last Claude Code model in repos where Claude Code once ran. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.",
       "replaces": [
         "Automatic detection of active models from host sessions (such as VS Code and GitHub Copilot) to track and price token savings when not explicitly specified.",
-        "Automatic detection of the active AI model from host session records (such as Kilo Code) as a backstop when not supplied by the agent, ensuring token savings can be priced and attributed accurately.",
-        "Added support for paired models and subagent workflows in Kilo Code, properly attributing active subagent turns and normalizing model IDs so token savings are accurately priced and displayed without duplicate entries.",
-        "The CLI now detects the running model from Kilo's session when it runs in a shell started by Kilo's agent, not only over MCP.",
-        "Forks of Kilo Code are now recognised, including installs under VS Code Insiders and under the automotive.kilo-code extension id.",
+        "Automatic detection of the active AI model from host session records (such as Github Copilot) as a backstop when not supplied by the agent, ensuring token savings can be priced and attributed accurately.",
+        "Added support for paired models and subagent workflows in Github Copilot, properly attributing active subagent turns and normalizing model IDs so token savings are accurately priced and displayed without duplicate entries.",
+        "The CLI now detects the running model from Github Copilot's session when it runs in a shell started by Github Copilot's agent, not only over MCP.",
+        "Forks of Github Copilot are now recognised, including installs under VS Code Insiders and under the automotive.kilo-code extension id.",
         "When GitHub Copilot runs Graft from a JetBrains IDE terminal (IntelliJ IDEA, PyCharm, and others), Graft can now work out the active AI model from Copilot's own session data. This means savings can be shown in dollars, not just tokens.",
         "Dollar savings now work for GitHub Copilot in IntelliJ IDEA and other JetBrains IDEs on Windows. The locked session store is read through a memory-mapped view and cached. The reader also handles a model recorded as both an id and a display name.",
-        "Savings are no longer attributed to the wrong model when several chats are open on the same project. Previously the most recently touched session won, so a long-idle chat's model could be billed for another chat's work (observed as a 6x price error); now graft only uses a host-recorded model when the live sessions agree or exactly one was written during the current turn, and otherwise reports tokens without a price. Applies to both Kilo and VS Code session detection.",
+        "Savings are no longer attributed to the wrong model when several chats are open on the same project. Previously the most recently touched session won, so a long-idle chat's model could be billed for another chat's work (observed as a 6x price error); now graft only uses a host-recorded model when the live sessions agree or exactly one was written during the current turn, and otherwise reports tokens without a price. Applies to both Github Copilot and VS Code session detection.",
         "Agents running behind a router/\"Auto\" picker report only their model family (e.g. gpt-5) rather than the model that actually ran (e.g. gpt-5.6-luna), which priced savings at up to 6x the real rate. When the host's record is the same model named more precisely, the precise name is now used; a genuinely different host model still loses to the agent's own report.",
-        "Kilo sessions are now found when a repository is opened through a junction or symlink. Kilo's turns are no longer priced at the model of the Copilot chat in the same VS Code window.",
-        "Kilo and Copilot sessions are now recognised more reliably. This covers Kilo sessions written recently but not yet saved to its main database file, and VS Code workspaces opened through a junction or symlink.",
-        "Savings are now priced with the model you actually used. Previously, in a repo where Claude Code had ever run, Kilo and Copilot calls could be filed under the last Claude model at its old price.",
+        "Github Copilot sessions are now found when a repository is opened through a junction or symlink. Github Copilot's turns are no longer priced at the model of another chat in the same VS Code window.",
+        "Github Copilot sessions are now recognised more reliably. This covers Github Copilot sessions written recently but not yet saved to its main database file, and VS Code workspaces opened through a junction or symlink.",
+        "Savings are now priced with the model you actually used. Previously, in a repo where Claude Code had ever run, Github Copilot calls could be filed under the last Claude model at its old price.",
         "Savings totals are now shown per model, with a combined total, when one turn used several models, for example a planning phase on a different model.",
         "Established model resolution precedence so agent-specified models take priority over host session records, and host session detection avoids falling back to the multi-model estimate table."
       ]
@@ -553,7 +553,7 @@
       "area": "savings",
       "html": "<b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified (for example in Kilo Code or MCP sessions), savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.",
       "replaces": [
-        "Multi-model token savings estimation table for Kilo Code and MCP sessions, automatically discovering and merging model configurations across Kilo Code 5.x and 7.x to present estimated savings under all available models when the active model cannot be identified.",
+        "Multi-model token savings estimation table for Github Copilot and MCP sessions, automatically discovering and merging model configurations across Github Copilot 5.x and 7.x to present estimated savings under all available models when the active model cannot be identified.",
         "Added the graft models CLI command to calculate and compare session token savings across all models supported by the host.",
         "Upgraded savings table formatting to clean, fenced ASCII boxes with right-aligned currency amounts and tailored guidance prompts to the current user interface (MCP argument vs. CLI flag).",
         "Savings reporting guidance is clearer and harder to misapply — when graft has priced a call, the agent is told to report a single plain-prose line and explicitly not to build a table; the per-model table is now documented as belonging only to the case where graft could not identify the model at all. This stops agents from emitting one-row tables or prices they computed themselves."
@@ -589,7 +589,7 @@
       "replaces": [
         "Added a persistent lifetime savings ledger and a new graft savings CLI command to track and report cumulative token and monetary savings per model across custom timeframes (all-time, yearly, monthly, or daily).",
         "Graft savings --all adds up the tokens and dollars graft has saved across every repo you've used it in.",
-        "Repos you used graft in before this version are found automatically the first time you run graft savings --all. The scan reads the folders remembered by Claude Code, Kilo, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex. It is read-only and runs once. --discover scans again and --no-discover skips it.",
+        "Repos you used graft in before this version are found automatically the first time you run graft savings --all. The scan reads the folders remembered by Claude Code, Github Copilot, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex. It is read-only and runs once. --discover scans again and --no-discover skips it.",
         "The same model spelled two ways (gemini-3.7-flash vs gemini-3-7-flash, or with different provider prefixes/casing) no longer appears as separate rows with separate dollar totals in graft savings. Ids are folded to a canonical key both when writing new entries and when totalling existing ones, so already-split historical ledgers report correctly without a migration.",
         "Databricks model ids (service ids, endpoint names and the vendor's own id) are now priced as the same vendor model and recorded as one row in the savings ledger. Before, some were unpriced and each name got its own row.",
         "Consolidated savings ledger entries by stripping provider routing prefixes to track each model under a single unified name, and updated estimation phrasing.",
@@ -650,7 +650,7 @@
         "Added prices for more AI models, so their savings show in dollars instead of tokens only: Claude Opus 4.8 fast mode, GPT-6 Sol, GPT-6 Luna, GPT-6.1 Sol, Grok 4.5–4.7, Kimi K3, Kimi K2.7 and MAI-Code-1.1-Flash.",
         "Added pricing support for Claude Opus 5.5, including its $4/Mtok input list rate and 0.05x cache-read discount.",
         "Added pricing support for the GPT-6 Astra model (gpt-6-astra) to accurately track and calculate dollar-denominated token savings.",
-        "Add the saved dollars info support for additional AI agents (e.g. Kilo Code, Github Copilot,etc) and for additional AI models (e.g. GPT 5.6 models, Gemini 3.7/3.8 models)"
+        "Add the saved dollars info support for additional AI agents (e.g. Github Copilot, etc) and for additional AI models (e.g. GPT 5.6 models, Gemini 3.7/3.8 models)"
       ]
     },
     {
@@ -668,7 +668,7 @@
       "area": "agents",
       "html": "Every agent gets the tool rules stated as rules: literal search → <code>graft grep</code>, \"what's in this file\" → <code>graft skeleton</code>, \"who calls this\" → <code>graft callers</code>. This covers Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL.",
       "replaces": [
-        "Every AI agent now gets the rules stated as rules => literal search → graft grep, \"what's in this file\" → graft skeleton, \"who calls this\" → graft callers. This reaches Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL"
+        "Every AI agent now gets the rules stated as rules => literal search → graft grep, \"what's in this file\" → graft skeleton, \"who calls this\" → graft callers. This reaches Cursor, Github Copilot, Kiro, Windsurf, Gemini, Codex/AGENTS.md, Grok, Hermes and AdaL"
       ]
     },
     {
@@ -704,7 +704,7 @@
       "area": "agents",
       "html": "<b>Kilo Code support.</b>",
       "replaces": [
-        "Add support for Kilo Code extension"
+        "Add support for Github Copilot extension"
       ]
     },
     {
