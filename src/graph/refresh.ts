@@ -54,9 +54,10 @@ import {
   type DeepStaleThresholdSource,
 } from "../util/state.js";
 import { CACHE_DIR } from "../context/node-file.js";
+import { heapArgs } from "../util/heap.js";
 import { buildGraph } from "./build.js";
 import { driftCount, isClean, probeDrift, readFingerprint, type Drift } from "./fingerprint.js";
-import { invalidateGraphCaches, loadGraphCached, tooBigToKeep } from "./load.js";
+import { doneWithMap, invalidateGraphCaches, loadGraphCached, startMapCommand, tooBigToKeep } from "./load.js";
 import type { RefreshRunArgs } from "./refresh-run.js";
 import { seedGraph, type SeedResult } from "./seed.js";
 import type { GraphV1 } from "./types.js";
@@ -211,11 +212,15 @@ let rebuilding: ChildProcess | null = null;
 async function rebuild(args: RefreshRunArgs): Promise<void> {
   const run = process.env.GRAFT_TEST_REFRESH_RUN ?? fileURLToPath(new URL("./refresh-run.js", import.meta.url));
   if (!existsSync(run)) {
-    await buildGraph(args.dir, { contextDir: args.contextDir, graphOnly: true, onlyDirs: args.onlyDirs });
+    if (args.link) (await import("./parts-link.js")).linkParts(args.dir, args.contextDir);
+    else await buildGraph(args.dir, { contextDir: args.contextDir, graphOnly: true, onlyDirs: args.onlyDirs });
     return;
   }
+  // The link step reads every part's boundary at once: as big a heap as a big
+  // build gets (a limit given to this process on its command line is kept).
+  const heap = args.link ? [...process.execArgv.filter((a) => /^--max-old-space-size\b/.test(a)), ...heapArgs()] : [];
   await new Promise<void>((done, fail) => {
-    const child = spawn(process.execPath, [run, JSON.stringify(args)], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const child = spawn(process.execPath, [...heap, run, JSON.stringify(args)], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     rebuilding = child;
     let err = "";
     child.stderr?.setEncoding("utf8").on("data", (c: string) => { err += c; });
@@ -382,6 +387,73 @@ export async function ensureFreshChildren(
     refreshed: true,
     note: `refreshed ${refreshedIn.join(", ")} (${files || "?"} file${files === 1 ? "" : "s"} changed) before answering`,
   };
+}
+
+/** Per links file, the parts' boundaries a relink failed for: not tried again
+ * by this process until one of them changes (a read-only map folder would
+ * otherwise redo the whole link step on every query). */
+const relinkFailed = new Map<string, string>();
+
+/**
+ * A repository built in parts: make the links between the parts again when a
+ * part's map changed since they were made (`parts-link.ts`), before a query
+ * that reads them (`graft callers`, `graft grep`, `graft map`, a structural
+ * `graft ask`, and their MCP tools). Run after {@link ensureFreshChildren},
+ * which rebuilds the parts.
+ *
+ * Under the repository map's `.sync.lock`, so two queries never link at once
+ * (the second waits a little, then reads what the first wrote), and in a
+ * short-lived child like {@link rebuild}: the link step reads every part's
+ * boundary. Never fatal: without current links the query says callers in other
+ * parts are not tracked. Nothing to do (and nothing read beyond the head of each
+ * boundary) when the links are current, the repository is not built in parts, or
+ * none of its parts has a boundary.
+ *
+ * Returns the note to show when the link step was tried and failed (not tried
+ * again until a part's boundary changes), else null.
+ */
+export async function refreshLinks(root: string, opts: RefreshOptions = {}): Promise<string | null> {
+  if (opts.disabled || envDisabled()) return null;
+  try {
+    const dir = resolve(root);
+    const { boundaryKey, linksPath, linksState } = await import("./parts-link.js");
+    if (linksState(dir, opts.contextDir).state === "current") return null;
+    const key = boundaryKey(dir, opts.contextDir);
+    if (key === null) return null;
+    const path = linksPath(dir, opts.contextDir);
+    if (relinkFailed.get(path) === key) return null;
+    const cache = join(contextDirFor(dir, opts.contextDir), CACHE_DIR);
+    let locked: boolean;
+    try {
+      locked = await waitForLock(cache);
+    } catch {
+      relinkFailed.set(path, key); // the map folder cannot be written
+      return null;
+    }
+    if (!locked) return null; // a build is making them: answer with what is there
+    const unhook = releaseOnSignal(cache);
+    try {
+      // Someone may have made them while we waited.
+      if (linksState(dir, opts.contextDir).state === "current") return null;
+      await rebuild({ dir, contextDir: opts.contextDir, link: true });
+      if (linksState(dir, opts.contextDir).state === "current") return null;
+      relinkFailed.set(path, key);
+      return linkFailedNote();
+    } catch (err) {
+      relinkFailed.set(path, key);
+      return linkFailedNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      unhook();
+      releaseLockIn(cache);
+    }
+  } catch {
+    // Answering without links beats failing the query.
+    return null;
+  }
+}
+
+function linkFailedNote(reason?: string): string {
+  return `[graft] the links between the parts could not be made${reason ? ` (${reason})` : ""}: answering without them`;
 }
 
 /** The one-line note a CLI/MCP surface prints when a refresh actually happened.
@@ -620,9 +692,10 @@ export function stalenessReport(
   const byFile = new Map<string, FileStaleness>();
   let indexed = false;
   const release = sources.length > 1 && tooBigToKeep(sources.map((s) => s.dir));
+  if (release) startMapCommand();
   for (const { name, dir } of sources) {
     const graph = loadGraphCached(dir);
-    if (release) invalidateGraphCaches(dir);
+    if (release) doneWithMap(dir);
     if (graph) indexed = true;
     const s = summaryStaleness(graph);
     addStaleness(totals, s);

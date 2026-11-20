@@ -12,10 +12,12 @@ import { buildGraph } from "../src/graph/build.js";
 import { allPartsPlan, formatTooLarge, GraphTooLargeError, suggestScopes } from "../src/graph/size-guard.js";
 import { buildAllParts, partConfig } from "../src/graph/parts-build.js";
 import { tooBigToKeep } from "../src/graph/load.js";
+import { callTool, traceDepth } from "../src/mcp/tools.js";
 import {
   childFor,
   federateAsk,
   federateCallers,
+  federateGrep,
   federateSkeleton,
   isWorkspaceBuildRoot,
   loadWorkspaceGraphs,
@@ -219,6 +221,44 @@ test("maps too big to hold together are flagged to be loaded one at a time", () 
   }
 });
 
+test("callers across parts: an untracked-callers note, text matches in the other parts, and depth all over MCP", async () => {
+  const root = mkdtempSync(join(tmpdir(), "graft-parts-xcall-"));
+  try {
+    const files: Record<string, string> = {
+      "Src/Lib/lib.ts": "export function sharedUtil() { return 1; }\nexport function midUtil() { return sharedUtil(); }\nexport function topUtil() { return midUtil(); }\n",
+      "Src/App/app.ts": "export function useIt() { return sharedUtil(); }\nexport function notIt() { return sharedUtilities(); }\nfunction sharedUtilities() { return 2; }\n",
+    };
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    }
+    await buildAllParts(root, ["Src/App", "Src/Lib"], { buildPart: async (dir) => { await buildGraph(dir); } });
+
+    const r = federateCallers(root, undefined, "sharedUtil", {});
+    assert.equal(r.found, true);
+    assert.match(r.text, /callers in other parts are not tracked/);
+    assert.match(r.text, /possible callers in other parts \(text match, unverified\):\n  ~ useIt \(Src\/App\/app\.ts:L1-L1\)/);
+    assert.doesNotMatch(r.text, /~ notIt/, "a longer name holding the symbol's is no match");
+    assert.doesNotMatch(r.text, /~ midUtil/, "the symbol's own part is walked, not text-matched");
+
+    const out = federateCallers(root, undefined, "midUtil", { direction: "out" });
+    assert.match(out.text, /callees in other parts are not tracked/);
+    assert.doesNotMatch(out.text, /possible callers/);
+
+    assert.equal(traceDepth("all"), Number.POSITIVE_INFINITY);
+    assert.equal(traceDepth("full"), Number.POSITIVE_INFINITY);
+    assert.equal(traceDepth(2.7), 2);
+    assert.equal(traceDepth("2"), undefined);
+    assert.equal(traceDepth(0), undefined);
+    const mcp = await callTool(root, "graft_trace_calls", { symbol: "sharedUtil", depth: "all" });
+    assert.equal(mcp.isError, false, mcp.text);
+    assert.match(mcp.text, /midUtil .*\[depth 1\]/);
+    assert.match(mcp.text, /topUtil .*\[depth 2\]/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("queries from the repository root search every part's map", async () => {
   const root = mkdtempSync(join(tmpdir(), "graft-parts-fed-"));
   try {
@@ -251,6 +291,16 @@ test("queries from the repository root search every part's map", async () => {
     assert.equal(callers.found, true);
     assert.match(callers.text, /## Src\/A\//);
     assert.doesNotMatch(callers.text, /## Src\/B\//);
+
+    // grep narrows the same way: a path under a part, one inside a part, one above parts.
+    const paths = (inPath?: string) => federateGrep(root, undefined, "Handler", inPath ? { in: inPath } : {}).result.groups.map((g) => g.path).sort();
+    assert.deepEqual(paths(), ["Src/A/a.ts", "Src/B/b.ts", "Src/B/sub/c.ts"]);
+    assert.deepEqual(paths("Src/A/"), ["Src/A/a.ts"], "--in a part searches only that part");
+    assert.deepEqual(paths("Src/B/sub"), ["Src/B/sub/c.ts"], "--in a folder inside a part narrows inside it");
+    assert.deepEqual(paths("Src"), ["Src/A/a.ts", "Src/B/b.ts", "Src/B/sub/c.ts"], "--in a folder above parts searches those");
+    const mcpGrep = await callTool(root, "graft_find_all", { pattern: "Handler", in: "Src/B/sub" });
+    assert.match(mcpGrep.text, /Src\/B\/sub\/c\.ts/);
+    assert.doesNotMatch(mcpGrep.text, /Src\/A\/a\.ts/, "graft_find_all honours in at the root");
 
     const sk = federateSkeleton(root, undefined, "Src/B/sub/c.ts");
     assert.equal(sk.file, "Src/B/sub/c.ts");

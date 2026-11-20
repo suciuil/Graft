@@ -78,6 +78,16 @@ export interface GrepOptions {
   /** Stop collecting hits after this many; the rest are tallied into
    * `truncated.hits`. Default 300. */
   maxHits?: number;
+  /** Added to the in-degree of these symbols (never below 0): the edges other
+   * maps have into this one, less those this map has that a map of more would
+   * not (a part of a repository built in parts and its links, `parts-walk.ts`). */
+  inDegreeDelta?: ReadonlyMap<string, number>;
+  /** @internal Test each line with this instead of `pattern` (which is still
+   * what the result names). */
+  match?: RegExp;
+  /** @internal Read no more files once `maxHits` are collected: the rest are
+   * neither collected nor counted. */
+  stopAtMax?: boolean;
 }
 
 const DEFAULT_MAX_HITS = 300;
@@ -100,16 +110,21 @@ interface SymbolSpan {
   end: number;
 }
 
-/** The file's symbol nodes, sorted ascending by span start — the order
- * `enclosingSymbol` scans in to find the innermost containing span. */
-function symbolsOf(graph: GraphV1, path: string): SymbolSpan[] {
-  const out: SymbolSpan[] = [];
+/** Each file's symbol nodes, sorted ascending by span start — the order
+ * `enclosingSymbol` scans in to find the innermost containing span. One pass
+ * over the nodes for all files, not one per file. */
+function symbolsByPath(graph: GraphV1): Map<string, SymbolSpan[]> {
+  const out = new Map<string, SymbolSpan[]>();
   for (const n of graph.nodes) {
-    if (n.kind === "file" || n.path !== path) continue;
+    if (n.kind === "file") continue;
     const b = spanBounds(n.span);
-    if (b) out.push({ node: n, start: b.start, end: b.end });
+    if (!b) continue;
+    const s = { node: n, start: b.start, end: b.end };
+    const list = out.get(n.path);
+    if (list) list.push(s);
+    else out.set(n.path, [s]);
   }
-  out.sort((a, b) => a.start - b.start);
+  for (const list of out.values()) list.sort((a, b) => a.start - b.start);
   return out;
 }
 
@@ -146,9 +161,10 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
   const maxHits = opts.maxHits ?? DEFAULT_MAX_HITS;
   const flags = opts.ignoreCase ? "i" : "";
   // A pattern is a regex by design; userRegExp rebuilds it from escaped literals and refuses a nested repeat.
-  const regex = opts.fixed ? new RegExp(escapeRegExp(pattern), flags) : userRegExp(pattern, flags);
+  const regex = opts.match ?? (opts.fixed ? new RegExp(escapeRegExp(pattern), flags) : userRegExp(pattern, flags));
 
   const inDegree = computeInDegree(graph);
+  for (const [id, d] of opts.inDegreeDelta ?? []) inDegree.set(id, Math.max(0, (inDegree.get(id) ?? 0) + d));
   // Same segment-aware prefix rule as `ask --in` / `callers --in`, and the same
   // loud failure when it matches nothing — `--in` used to mean a bare substring
   // here and a path prefix there, so `--in src` also swept up `lib/mysrc/`.
@@ -162,8 +178,10 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
   let collected = 0;
   let truncatedHits = 0;
   let truncatedFiles = 0;
+  let symbolsAt: Map<string, SymbolSpan[]> | undefined; // made at the first hit
 
   for (const file of fileNodes) {
+    if (opts.stopAtMax && collected >= maxHits) break;
     let text: string;
     try {
       const decoded = readSourceFile(join(repoRoot, file.path));
@@ -177,7 +195,7 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
       continue;
     }
 
-    const symbols = symbolsOf(graph, file.path);
+    let symbols: SymbolSpan[] | undefined;
     const lines = text.split("\n");
 
     for (let i = 0; i < lines.length; i++) {
@@ -185,12 +203,14 @@ export function grepGraph(graph: GraphV1, repoRoot: string, pattern: string, opt
       if (!regex.test(raw)) continue;
 
       if (collected >= maxHits) {
+        if (opts.stopAtMax) break;
         truncatedHits++;
         continue;
       }
       collected++;
 
       const lineNo = i + 1;
+      symbols ??= (symbolsAt ??= symbolsByPath(graph)).get(file.path) ?? [];
       const sym = enclosingSymbol(symbols, lineNo);
       const key = sym ? sym.id : `file:${file.path}`;
       let group = groups.get(key);

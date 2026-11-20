@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adding graft to PATCH: technical integration report</title>
+<style>
+  :root { --fg:#1d232b; --muted:#5b6673; --bg:#ffffff; --panel:#f5f7fa; --line:#d9dee5; --accent:#1f6feb; --warn:#9a6700; --warnbg:#fff8c5; --bad:#cf222e; --ok:#1a7f37; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+  header { padding:28px 40px 18px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:2px 0; color:var(--muted); }
+  .wrap { display:flex; }
+  nav { position:sticky; top:0; align-self:flex-start; width:270px; max-height:100vh; overflow:auto; padding:20px 16px 40px 28px; border-right:1px solid var(--line); font-size:13.5px; }
+  nav a { display:block; color:var(--fg); text-decoration:none; padding:3px 0; }
+  nav a:hover { color:var(--accent); }
+  main { flex:1; min-width:0; padding:10px 44px 80px; max-width:1100px; }
+  h2 { margin-top:42px; padding-top:10px; border-top:1px solid var(--line); font-size:21px; }
+  h3 { margin-top:26px; font-size:17px; }
+  code { font-family: Consolas, "Cascadia Mono", Menlo, monospace; font-size:13px; background:var(--panel); padding:1px 4px; border-radius:3px; }
+  pre { background:#0d1117; color:#e6edf3; padding:14px 16px; border-radius:6px; overflow:auto; font-size:12.8px; line-height:1.45; }
+  pre code { background:none; padding:0; color:inherit; }
+  table { border-collapse:collapse; width:100%; margin:12px 0 18px; font-size:13.8px; }
+  th, td { border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .note, .warn, .ok { border-left:4px solid var(--accent); background:#eef4ff; padding:10px 14px; margin:14px 0; border-radius:0 5px 5px 0; }
+  .warn { border-color:var(--warn); background:var(--warnbg); }
+  .ok { border-color:var(--ok); background:#eaf7ee; }
+  .tag { display:inline-block; font-size:11.5px; padding:0 6px; border-radius:9px; border:1px solid var(--line); color:var(--muted); margin-left:4px; }
+  .unv { color:var(--warn); border-color:var(--warn); }
+  .must { color:var(--bad); border-color:var(--bad); }
+  .diagram { font-family: Consolas, Menlo, monospace; font-size:12.5px; white-space:pre; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px; overflow:auto; }
+  ol li, ul li { margin:3px 0; }
+  .small { font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Adding graft to PATCH: technical integration report</h1>
+  <p>For PATCH maintainers. Explains what graft is, and how to give PATCH agents graft's code index through PATCH-native trusted tools, built on the graft npm package.</p>
+  <p>Versions inspected: graft <code>@nanonets/graft</code> 0.28.0 (this fork) and PATCH engine v3.11.0 (<code>C:\tools\PATCH\runtime\engine\v3.11.0</code>). Written on 2026-11-19.</p>
+  <p class="small">Every <code>file:line</code> reference was read from the source of those versions. Graft line numbers come from the fork's working tree on that date, which held uncommitted changes in some files (for example <code>src/cli.ts</code>, <code>src/util/state.ts</code>), so they can be a few lines off from the published 0.28.0 package; the function names cited next to them are stable. Graft paths (<code>src/…</code>, <code>package.json</code>) are in the graft repository; PATCH paths (<code>engine/…</code>, <code>app/…</code>, <code>.ebs/…</code>) are in the PATCH engine. Items tagged <span class="tag unv">verify</span> were not checked and need a test on the target before anyone relies on them.</p>
+</header>
+<div class="wrap">
+<nav>
+  <a href="#read">How to read this report</a>
+  <b style="display:block;margin-top:10px">Part I: graft for newcomers</b>
+  <a href="#what">A. What graft is</a>
+  <a href="#how">B. How graft works</a>
+  <a href="#example">C. A query, end to end</a>
+  <a href="#uses">D. What PATCH uses, and what it leaves out</a>
+  <a href="#glossary">E. Glossary</a>
+  <b style="display:block;margin-top:10px">Part II: the integration</b>
+  <a href="#tldr">1. Summary</a>
+  <a href="#arch">2. Target architecture</a>
+  <a href="#pkg">3. The npm package</a>
+  <a href="#install">4. Bundling into the PATCH payload</a>
+  <a href="#env">5. Process environment contract</a>
+  <a href="#store">6. Where graft reads and writes</a>
+  <a href="#build">7. Building the graph (Prepare step)</a>
+  <a href="#query">8. Query commands and JSON contracts</a>
+  <a href="#process">9. Per-call CLI vs long-lived process</a>
+  <a href="#tools">10. Typed trusted tools</a>
+  <a href="#security">11. Security and policy</a>
+  <a href="#prompt">12. Prompt, skills, sub-agents, hooks</a>
+  <a href="#fresh">13. Freshness</a>
+  <a href="#savings">14. Savings reporting</a>
+  <a href="#points">15. PATCH integration points</a>
+  <a href="#accept">16. Acceptance tests</a>
+  <a href="#risks">17. Risks and open items</a>
+  <a href="#graftchanges">18. Optional graft changes</a>
+</nav>
+<main>
+
+<h2 id="read">How to read this report</h2>
+<p>This report assumes you know PATCH well and know nothing about graft.</p>
+<ul>
+  <li><b>Part I (sections A to E)</b> explains graft itself: what it is, how it builds its index, what a query returns, which of its features PATCH would use, and the words graft uses. Read it first. Every graft term used later is defined in the <a href="#glossary">glossary</a>.</li>
+  <li><b>Part II (sections 1 to 18)</b> is the integration design: packaging, process environment, the build step, the query contracts, the PATCH tools, security, tests and open items. Section 1 summarises it, and section 15 lists every PATCH file that would change.</li>
+  <li><b>To have an AI agent implement it,</b> give it <a href="patch-graft-implementation-prompt.md"><code>patch-graft-implementation-prompt.md</code></a> (next to this file). That prompt repeats the graft facts from this report and treats every statement about PATCH's internals as a hypothesis the agent must check in the PATCH repository before it changes code.</li>
+</ul>
+
+<h1 style="margin-top:36px;font-size:23px">Part I: graft for newcomers</h1>
+
+<h2 id="what">A. What graft is</h2>
+<ul>
+  <li><b>A code index for AI coding agents.</b> graft is a command-line tool, written in TypeScript and shipped as an npm package that runs on Node.js. It reads a source repository and builds an index of it, called the <b>map</b>: every file, every function, class, method and type in it (each one a <b>symbol</b>), where each one starts and ends, and which symbol calls, imports or extends which. It then answers questions from that index.</li>
+  <li><b>The problem it solves.</b> Without an index, an agent looking for code runs a text search, opens a file, follows a call, opens another file, and so on, spending tool calls and context on files it then throws away. With graft, the agent asks one question ("where are retries configured", "who calls <code>init_can_bus</code>") and gets a short ranked list of <code>file:line</code> ranges, with the relevant lines of code included, from which it reads only what it needs. Upstream reports 46 % fewer tool calls and 60 % less time on its own benchmark (<code>README.md:33-40</code>); that is the project's claim and has not been measured on EBS.</li>
+  <li><b>Local and deterministic.</b> The index is built by parsing each file with <a href="#g-treesitter">tree-sitter</a>, a widely used open-source parsing library with one grammar per language. Building and querying the index uses no AI model, no API key and no network. graft does have an optional extra step, <code>graft build --deep</code>, which sends code to a language model to write plain-English summaries. PATCH must never run it (section 7).</li>
+  <li><b>Four questions it answers.</b> These are the four commands PATCH would use (section 8):
+    <table>
+      <tr><th>Command</th><th>Question</th><th>Comparable to</th></tr>
+      <tr><td><code>graft ask</code></td><td>"Where is the code that does X?" Ranked hits for a plain-language or identifier query, with code excerpts.</td><td>A search engine over symbols, not over raw text.</td></tr>
+      <tr><td><code>graft grep</code></td><td>"Every place this text or regex occurs." Complete, not ranked to a top few; hits are grouped by the function they are in.</td><td><code>rg</code>, restricted to indexed files, with the enclosing function named.</td></tr>
+      <tr><td><code>graft skeleton</code></td><td>"What is defined in this file?" Every definition's signature and line range.</td><td>An outline view of one file.</td></tr>
+      <tr><td><code>graft callers</code></td><td>"Who calls this function?" or "what does it call?", optionally several levels deep ("what breaks if I change it").</td><td>An IDE's call hierarchy.</td></tr>
+    </table>
+  </li>
+  <li><b>Languages.</b> C and C++, the main EBS languages, are indexed at graft's "broad" level: functions, types and other symbols, plus call edges matched <b>by name</b> (<code>README.md:525-528</code>). graft does not resolve types the way a compiler does, so expect calls through function pointers or macros to be missing, and calls to same-named functions in different files to be matched to the wrong definition at times. How often this happens on EBS has not been measured. <span class="tag unv">verify</span> Bash, CMake, Make, Perl, Python, XML, YAML, JSON and others are covered too (<code>README.md:474-549</code>). <code>graft languages --json</code> prints the exact list for an installed copy.</li>
+  <li><b>Where it comes from.</b> graft is an open-source project (MIT licence) by NanoNets, on GitHub as <code>NanoNets/Graft</code>; this report calls it <b>upstream</b>. Upstream has since renamed the product <b>Trail-code</b>, added a second feature called <a href="#g-learnings">learnings</a>, and added an optional cloud service; the <code>graft</code> command and the <code>@nanonets/graft</code> package still work (<code>README.md:48-49, 125-137</code>). PATCH would use the company's own <b>fork</b>: a copy of upstream that switches off every cloud and telemetry feature for good (<code>docs/no-cloud-policy.md</code>) and is published to the company's Artifactory as <code>@nanonets/graft</code>, version 0.28.0 at the time of writing. Section 3 explains why the package must come from that registry and not from the public npm registry.</li>
+</ul>
+
+<h2 id="how">B. How graft works</h2>
+<div class="diagram">                 graft build &lt;repo&gt;                                    graft ask | grep | skeleton | callers
+                 (minutes on a big repo, then incremental)              (each call: load the map, answer, exit)
+
+ repo files ──► which files? ──► parse each file ──► symbols + edges ──► map folder ──► query ──► JSON on stdout
+ (read only)    files git sees,   tree-sitter,        "foo() at L10-L40     wiring.json     loads
+                minus excluded    one grammar per     calls bar()"          ask index       the map
+                folders           language                                  cards, caches</div>
+<ol>
+  <li><b>Choose the files.</b> graft indexes the files git knows about: tracked files plus untracked files that git does not ignore (<code>git ls-files --cached --others --exclude-standard</code> in <code>gitVisibleFiles</code>, <code>src/ingest/fs.ts:331-451</code>), minus folders excluded with <code>--exclude-dir</code>. Languages it has no grammar for are skipped.</li>
+  <li><b>Parse.</b> Each file is parsed with its tree-sitter grammar. The grammars are compiled native modules (<code>.node</code> files, in effect DLLs) shipped inside the package; for C and C++ only a Windows x64 build is shipped (section 3).</li>
+  <li><b>Extract.</b> From each parsed file graft records its symbols (name, kind, line range, signature) and its edges (calls, references, imports, implements, extends). Edges between files are matched by name.</li>
+  <li><b>Write the map.</b> Everything goes into one folder, the <b>map folder</b>: <code>.graph/wiring.json</code> (the <a href="#g-wiring">wiring graph</a>), an <a href="#g-askindex">ask index</a> used for ranking, one markdown <a href="#g-card">card</a> per source file, and caches (<code>README.md:461, 470</code>). By default this folder is <code>graft/</code> inside the repo or a per-user folder elsewhere; PATCH puts it in its own data folder (section 6). The map holds code text, so it is as sensitive as the source (section 11).</li>
+  <li><b>Rebuild incrementally.</b> Every parse is cached by a hash of the file's content, so a rebuild only re-parses changed files. On graft's own repo (312 files) a cold build takes about 5 s and a rebuild after one edit about 0.6 s (<code>README.md:466</code>). EBS has not been measured.</li>
+  <li><b>Query.</b> Each query command loads the map, answers, and exits. By default graft first checks whether any file changed since the last build and rebuilds if so (a <a href="#g-refresh">refresh</a>). PATCH switches that off with <code>--no-refresh</code> and rebuilds on its own schedule instead (section 13), because a refresh inside a query makes its time and memory unpredictable.</li>
+  <li><b>Large repos.</b> One map has a hard size limit of about 483 million characters of <code>wiring.json</code> (section 7). A repo too big for one map can be built as several <a href="#g-parts">parts</a>, each with its own map, plus a small index that lets queries search them all.</li>
+</ol>
+
+<h2 id="example">C. A query, end to end</h2>
+<p>These outputs were produced by running graft 0.28.0 on graft's own repository, shortened only where marked. They show what PATCH's tool wrapper would receive on stdout.</p>
+<h3>"Who calls <code>repoKey</code>?"</h3>
+<pre><code>&gt; graft callers repoKey . --json --no-refresh
+{
+  "query": "repoKey",
+  "matches": [
+    {
+      "symbol": { "id": "src/context/profile-store.ts#repoKey", "name": "repoKey",
+                  "kind": "function", "path": "src/context/profile-store.ts", "span": "L110-L118" },
+      "hits": [
+        { "id": "src/context/profile-store.ts#profileRepoDir", "relation": "calls", "depth": 1,
+          "name": "profileRepoDir", "kind": "function",
+          "path": "src/context/profile-store.ts", "span": "L121-L126" },
+        … 2 more hits …
+      ]
+    }
+  ],
+  "saved": { "files": 2, "baselineChars": 34894 }
+}</code></pre>
+<p>Read it as: the function <code>repoKey</code> (lines 110-118 of <code>src/context/profile-store.ts</code>) is called by <code>profileRepoDir</code> at lines 121-126 of the same file, and two others. An agent would now open exactly those line ranges. <code>saved</code> says that answering this by reading the two files involved would have cost 34,894 characters of context (section 14).</p>
+<h3>"Where is the map folder of a repo chosen?"</h3>
+<pre><code>&gt; graft ask "where is the map folder of a repo chosen" . --json --source -n 2 --no-refresh
+{
+  "query": "where is the map folder of a repo chosen",
+  "mode": "lexical",
+  "hits": [
+    { "kind": "symbol", "title": "own-folder.ts · file", "pointer": "src/skills/own-folder.ts",
+      "snippet": "Protects Trail-managed subfolders from symlink redirection …", "score": 1.0136 },
+    { "kind": "concept", "title": "Code map directory resolution", "pointer": "src/context/map-dir.ts",
+      "snippet": "Decides where the repo's code map lives: …", "score": 1 }
+  ],
+  "coverage": 0.825, "coverageStrong": 0,
+  "saved": { "files": 2, "baselineChars": 5369 },
+  "notesChecked": true,
+  "notes": [ … two team learnings from .trail/learnings/, with absolute paths and full text … ]
+}</code></pre>
+<ul>
+  <li><code>mode: "lexical"</code> means the query was ranked as words against symbol names, paths and text. A query phrased as "who calls X" or "what imports X" switches to <code>"structural"</code> and walks the graph instead (<code>src/ask/ask.ts</code>, see <a href="#g-mode">glossary</a>).</li>
+  <li>The second hit is a <a href="#g-concept">concept</a> hit: graft's own repository was built with <code>--deep</code>, which writes those summaries. A PATCH-built map has no concept hits, only symbol and file hits.</li>
+  <li><code>coverageStrong: 0</code> means none of the query's words matched a name or path of the top hit, which marks this as a weak result (section 8.1).</li>
+  <li><code>notes</code> are <a href="#g-learnings">learnings</a> read from files in the repo. They carry absolute paths and free text written by agents. PATCH removes them (section 10).</li>
+</ul>
+
+<h2 id="uses">D. What PATCH uses, and what it leaves out</h2>
+<p>On a developer's machine, graft is normally installed globally and wired into the developer's AI assistant: <code>graft init</code> writes instruction files and configuration into the repo so the assistant knows to call graft, and from then on graft refreshes itself, reports what it saved and nudges the assistant towards its own commands. PATCH needs none of that wiring. It uses graft only as an index builder and a query engine behind its own tools.</p>
+<table>
+<tr><th>graft feature</th><th>What it does</th><th>In PATCH</th></tr>
+<tr><td><code>graft build</code></td><td>Builds or updates the map.</td><td><b>Used</b>, in a new Prepare step and in background rebuilds (sections 7, 13).</td></tr>
+<tr><td><code>ask</code>, <code>grep</code>, <code>skeleton</code>, <code>callers</code> with <code>--json</code></td><td>Answer queries from the map as JSON.</td><td><b>Used</b>, one process per call, behind four typed PATCH tools (sections 8-10).</td></tr>
+<tr><td><code>graft init</code> and auto-init</td><td>Writes instruction files and settings for AI assistants (<code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>.mcp.json</code>, hooks and so on) into the repo, and later rewrites them when graft is updated.</td><td><b>Not used.</b> PATCH sessions do not load repo instruction files, and nothing may be written into the checkout. Switched off with <code>GRAFT_NO_AUTO_INIT=1</code> (section 5).</td></tr>
+<tr><td><a href="#g-mcp">MCP server</a> (<code>graft mcp</code>)</td><td>Offers the same queries as tools to assistants that speak MCP.</td><td><b>Not used.</b> It returns text only, not JSON, and PATCH sessions load no MCP extension (section 9).</td></tr>
+<tr><td>Assistant hooks</td><td>Add the top search hits to each user prompt (for Claude Code).</td><td><b>Not used as is.</b> PATCH can do the same in its own <code>before_agent_start</code> hook (section 12).</td></tr>
+<tr><td>Refresh before each query</td><td>Rebuilds the map inside a query when files changed.</td><td><b>Switched off</b> (<code>--no-refresh</code>, <code>GRAFT_NO_REFRESH=1</code>). PATCH rebuilds on its own schedule (section 13).</td></tr>
+<tr><td><code>--deep</code> summaries</td><td>Sends code to a language model to write summaries and concept nodes.</td><td><b>Never.</b> It needs an API key and sends source code out (section 7).</td></tr>
+<tr><td><code>--lsp</code></td><td>Asks an installed language server (for example clangd) for exact call edges.</td><td><b>Not used</b>: slower and starts extra processes. A possible later improvement for C/C++ accuracy.</td></tr>
+<tr><td><a href="#g-learnings">Learnings</a> (Trail)</td><td>Notes that agents save in <code>.trail/learnings/</code> and that graft adds to search results.</td><td><b>Not used.</b> Removed from results (section 10).</td></tr>
+<tr><td>Savings lines and ledger</td><td>Tells the assistant how many tokens graft saved and keeps a running total in <code>~/.graft</code>.</td><td><b>Not used.</b> PATCH totals the <code>saved</code> fields itself (section 14).</td></tr>
+<tr><td>Savings report</td><td>Opt-in upload of savings totals to a company Oracle database.</td><td><b>Must stay off.</b> Guaranteed by giving graft an isolated home folder (section 5).</td></tr>
+<tr><td>Cloud sync, telemetry</td><td>Upstream features that send data to NanoNets/Trail servers.</td><td><b>Off for good</b> in the fork; no setting turns them on (section 5).</td></tr>
+<tr><td>Update check, price download</td><td>Asks the npm registry for a newer version; downloads a public model price list.</td><td><b>Switched off</b> (<code>DO_NOT_TRACK=1</code>, <code>GRAFT_PRICES_AUTO_UPDATE=0</code>, section 5).</td></tr>
+<tr><td><code>graft env</code> settings</td><td>Saves graft settings as user environment variables for every new terminal.</td><td><b>Ignored.</b> PATCH builds graft's environment from an allowlist (section 5).</td></tr>
+</table>
+
+<h2 id="glossary">E. Glossary</h2>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td id="g-map">map (map folder, context graph)</td><td>Everything <code>graft build</code> writes for one repo, in one folder: the wiring graph, the ask index, cards and caches. graft's own help text sometimes calls it the "context graph" or the "graft map".</td></tr>
+<tr><td id="g-wiring">wiring graph, <code>wiring.json</code></td><td>The core of the map: one node per file and symbol, one edge per call, reference, import, implementation or inheritance. Stored as one JSON file, <code>.graph/wiring.json</code>, which every query loads into memory.</td></tr>
+<tr><td id="g-askindex">ask index</td><td>A side file of the map with the text <code>graft ask</code> ranks against, including symbol bodies.</td></tr>
+<tr><td id="g-card">card</td><td>A small markdown file per source file, listing its symbols with line ranges and signatures. Meant for assistants that read files directly; PATCH does not need them.</td></tr>
+<tr><td id="g-concept">concept node</td><td>A markdown summary of a subsystem, written by a language model during <code>build --deep</code>. Absent from PATCH-built maps.</td></tr>
+<tr><td>symbol</td><td>A named definition: function, method, class, struct, type, macro, variable and so on.</td></tr>
+<tr><td>span, pointer</td><td>A line range, written <code>L110-L118</code>. A pointer is a repo-relative path with an optional span: <code>src/x.c:L10-L40</code>.</td></tr>
+<tr><td>edge, relation</td><td>A link between two symbols. The relation names its type: <code>calls</code>, <code>references</code>, <code>imports</code>, <code>implements</code>, <code>extends</code> and similar.</td></tr>
+<tr><td>in-degree</td><td>How many edges point at a symbol. <code>grep</code> sorts its groups by it, so heavily used functions come first.</td></tr>
+<tr><td>crux, excerpt</td><td>The key lines of a definition (up to 8) that an LLM picked during <code>build --deep</code>. <code>ask --source</code> shows the crux instead of the whole definition unless <code>--full</code> is given. PATCH never runs <code>--deep</code>, so its maps have no crux and <code>ask --source</code> always shows the whole definition, up to 80 lines (<code>src/ask/ask.ts:1375-1393</code>).</td></tr>
+<tr><td id="g-mode">lexical / structural mode</td><td>How <code>ask</code> handled a query. Lexical: ranked by words against names, paths and text. Structural: the query named a symbol and a relation ("who calls X"), so graft walked the graph from it.</td></tr>
+<tr><td>coverage, coverageStrong</td><td>Numbers from 0 to 1 in an <code>ask</code> result: the share of query words the top hit matched, in any field or only in its name and path. Low values mean a weak answer.</td></tr>
+<tr><td id="g-parts">parts, parts build, <code>workspace.json</code></td><td>A repo built as several separate maps (<code>graft build --all-parts</code>), because it is too big for one or contains several repositories. <code>workspace.json</code> is the small index that lists the parts so a query at the root can search all of them ("federated" search). In the fork's current code, a parts build also writes <b>links</b> (<code>.cache/links.json</code> in the root map folder): the calls, imports and references that cross from one part into another, which no part's own map can settle. <code>graft parts</code> lists the parts.</td></tr>
+<tr><td>scope</td><td>In a parts build or a folder of several repos, the label of the part a hit came from.</td></tr>
+<tr><td id="g-store">profile store</td><td>A folder outside the repo where graft keeps maps, one sub-folder per repo, named after the repo folder plus a hash of its path. Lets graft index a repo without writing into it.</td></tr>
+<tr><td id="g-refresh">refresh, fingerprint</td><td>Before answering, a query compares the files on disk against a fingerprint saved by the last build and rebuilds changed files. <code>--no-refresh</code> skips this and answers from the map as it is.</td></tr>
+<tr><td>savings, baseline</td><td>graft's estimate of the context it saved: the characters of the files an answer covers (<code>baselineChars</code>) against the size of the answer.</td></tr>
+<tr><td>nudge</td><td>A hint graft appends to text output, telling an assistant which graft command to use next. Not present in JSON output.</td></tr>
+<tr><td>auto-init</td><td>graft rewriting the assistant instruction files in a repo after it was updated. Off in PATCH.</td></tr>
+<tr><td id="g-learnings">learnings, notes, Trail</td><td>Upstream's second feature: short markdown notes ("decided", "ruled out", "watch out") that agents save in <code>.trail/learnings/</code> and that <code>ask</code> returns as <code>notes</code>. A repo "on trail" (with <code>.trail/</code>) also keeps its map in <code>.trail/cache/</code> (section 6). "Trail switch" is graft moving a repo's wiring from graft to the <code>trail</code> command. None of this is used by PATCH.</td></tr>
+<tr><td>deep build</td><td><code>graft build --deep</code>: the optional language-model pass that writes summaries and concept nodes. Never run by PATCH.</td></tr>
+<tr><td id="g-mcp">MCP</td><td>Model Context Protocol: a standard way for AI assistants to call tools in another process over stdio. graft offers its queries as MCP tools (<code>graft mcp</code>).</td></tr>
+<tr><td id="g-treesitter">tree-sitter, grammar, prebuild</td><td>tree-sitter is an open-source parsing library. A grammar teaches it one language. graft uses grammars compiled to native Node modules (<code>.node</code> files); a prebuild is such a module compiled in advance for one platform, so nothing is compiled on the target.</td></tr>
+<tr><td>upstream, fork</td><td>Upstream: the public NanoNets project. Fork: the company's copy, with cloud features disabled, published to the company's Artifactory.</td></tr>
+</table>
+
+<h1 style="margin-top:36px;font-size:23px">Part II: the integration</h1>
+
+<h2 id="tldr">1. Summary</h2>
+<ul>
+  <li><b>Goal.</b> Give PATCH agents (the main session and Scouts) a fast, exact way to find code in EBS: ranked search, complete text search, file outlines and call hierarchies, answered from an index instead of by grepping and reading whole files. Part I explains the tool that provides this.</li>
+  <li><b>Recommended approach.</b> PATCH ships a pinned copy of the graft npm package in its signed payload and runs it with PATCH's own Node 24.18.0. A new Prepare step builds the <a href="#g-map">map</a> into PATCH's data folder. Four typed tools in the <code>guardrails</code> extension (<code>code_search</code>, <code>code_find_all</code>, <code>code_outline</code>, <code>code_callers</code>) run read-only graft queries through a new trusted operation. Before anything reaches the model, PATCH filters the JSON results with its existing guards (credential paths, protected trees, child budgets, the 12,000-character cap).</li>
+  <li><b>What not to use.</b> PATCH cannot use the way graft normally connects to an assistant (section D). Sessions start with <code>noContextFiles</code>, <code>noExtensions</code>, <code>noSkills</code> and no MCP extension, so the instruction files <code>graft init</code> writes, graft's <a href="#g-mcp">MCP server</a> and its rule files are never seen by the agent. <code>workspace_shell</code> is the wrong channel too: it runs at Low IL, the repo is read-only there, and user shell commands are blocked.</li>
+  <li><b>No graft code changes are needed.</b> The graft command line already provides everything required: <code>build</code>, <code>ask/grep/skeleton/callers --json</code>, <code>--no-refresh</code>, and a map folder outside the repo (<code>--dir</code>). PATCH must still pin graft's process environment (section 5) so graft makes no network calls, writes nothing into the checkout and does not pick up the developer's own graft settings.</li>
+  <li><b>Three facts that change the design.</b>
+    <ul>
+      <li>graft's MCP tools return only markdown text, not JSON, so PATCH runs one graft process per query instead of keeping one running (section 9).</li>
+      <li><code>callers --json</code> does not search across the <a href="#g-parts">parts</a> of a multi-part build (section 8.4).</li>
+      <li>One map is capped at about 483 M characters, so a repository of EBS size probably has to be built in parts (<code>--all-parts</code>) or limited to some folders (<code>--only-dir</code>) (section 7).</li>
+      <li>A map or a <code>.trail/</code> folder that a developer left in the checkout takes precedence over any outside map folder, and graft may even move files inside the checkout. PATCH avoids this by always naming the map folder explicitly with <code>--dir</code> and <code>GRAFT_DIR</code> (section 6).</li>
+    </ul></li>
+</ul>
+
+<h2 id="arch">2. Target architecture</h2>
+<p>Three pieces: graft's files ship inside the PATCH payload; Prepare builds a map for the repo; during a session, PATCH tools run graft queries and filter the answers.</p>
+<div class="diagram">PATCH payload (hash-pinned, payload-manifest.json)
+  engine/graft/                  &lt;- graft package + production node_modules (section 4)
+  engine/bin/node.exe            &lt;- PATCH's Node 24.18.0 runs graft
+
+Prepare (Medium IL, engine/host/prepare.js)
+  flame -&gt; flags -&gt; components -&gt; context -&gt; [graph]      &lt;- new step, warning on failure
+                                               |
+                                               v
+                       node engine/graft/dist/bin/graft.js --dir &lt;map&gt; build &lt;repo&gt; --exclude-dir ...
+                       &lt;map&gt; = &lt;PATCH data&gt;\graft\repos\&lt;repo-id&gt;\   (never inside the repo)
+
+Session (pi agent, guardrails extension)
+  code_search / code_find_all / code_outline / code_callers     &lt;- typed tools
+        |  trusted.graftQuery(op, args)   (fixed exe + fixed argv shape, Medium IL)
+        v
+  node graft.js --dir &lt;map&gt; ask|grep|skeleton|callers ... --json --no-refresh
+        |  JSON on stdout
+        v
+  PATCH post-filter: credential paths, protected trees, flavor tags, child budget,
+                     12 000-char knowledgeOutputContract  -&gt;  model</div>
+
+<h2 id="pkg">3. The npm package</h2>
+<table>
+<tr><th>Item</th><th>Value</th><th>Source</th></tr>
+<tr><td>Name / version</td><td><code>@nanonets/graft</code> 0.28.0, <code>"type":"module"</code>, MIT</td><td><code>package.json</code></td></tr>
+<tr><td>CLI entry</td><td><code>bin.graft = dist/bin/graft.js</code>. PATCH should call <code>node.exe &lt;pkg&gt;/dist/bin/graft.js</code> directly, not a shim on PATH.</td><td><code>package.json</code></td></tr>
+<tr><td>Library entry</td><td><code>main ./dist/index.js</code>. The <code>exports</code> map exposes only <code>.</code> and <code>./package.json</code>, so deep imports such as <code>@nanonets/graft/dist/ask/ask.js</code> are blocked by Node.</td><td><code>package.json</code>, <code>src/index.ts:18-46</code></td></tr>
+<tr><td>Public API</td><td><code>Graft</code> class: <code>init</code>, <code>check</code>, <code>checkGraph</code>, <code>graph</code>, <code>ask(dir, query, {limit, source, full, in, graphRank}) → AskResult</code>. There is no public skeleton, grep or callers function.</td><td><code>src/engine.ts:66-192</code>, <code>ask</code> at <code>:123-133</code></td></tr>
+<tr><td>Node</td><td><code>engines.node: "^20.16.0 || &gt;=22.3.0"</code>. PATCH's Node 24.18.0 satisfies it.</td><td><code>package.json:73-75</code></td></tr>
+<tr><td>Runtime deps</td><td><code>commander</code>, <code>dotenv</code>, <code>gray-matter</code>, <code>tree-sitter ^0.21.1</code> (native), <code>tree-sitter-wasm</code>, <code>web-tree-sitter</code>, <code>web-tree-sitter-depth</code>, <code>vscode-jsonrpc</code>, <code>vscode-languageserver-protocol</code> (only for <code>--lsp</code>), <code>@anthropic-ai/sdk</code> and <code>openai</code> (only for <code>--deep</code>, which PATCH never runs)</td><td><code>package.json:76-88</code></td></tr>
+<tr><td>Native parser</td><td><code>tree-sitter</code> 0.21.1 installs with <code>node-gyp-build</code> and ships prebuilds for <code>darwin-arm64, darwin-x64, linux-x64, win32-x64</code>. They load at runtime, so no compiler is needed on the target.</td><td><code>node_modules/tree-sitter/package.json</code>, <code>prebuilds/</code></td></tr>
+<tr><td>Bundled grammars</td><td><code>vendor/&lt;lang&gt;/prebuilds/win32-x64/tree-sitter-&lt;lang&gt;.node</code> for bash, c, cmake, cpp, css, csv, c_sharp, groovy, html, json, kotlin, make, markdown, matlab, perl, plsql, razor, scss, xml and yaml. <b>Only win32-x64 is shipped.</b> The loader tries an installed package first, then <code>vendor/&lt;key&gt;</code>. C/C++, which EBS needs, use these native grammars.</td><td><code>src/graph/native.ts:176-189</code> (<code>loadOptionalGrammar</code>)</td></tr>
+<tr><td>Optional deps</td><td>Every <code>optionalDependencies</code> entry is a <code>file:../tree-sitter-*</code> path that exists only on the build machine. A registry install skips them, and the grammars come from <code>vendor/</code> instead.</td><td><code>package.json:89-110</code></td></tr>
+<tr><td>Other payload</td><td><code>vendor/oracledb/**</code> and <code>vendor/odpnet/**</code> serve the opt-in savings report to a company Oracle database. PATCH must keep it off (section 11). <code>config/savings-report*.json</code> is an example config only.</td><td><code>package.json:40-50</code>, <code>src/reporting/flush.ts:314-368</code></td></tr>
+<tr><td>Registry</td><td><code>publishConfig.registry = https://eu.artifactory.automotive.cloud/ui/repos/tree/General/a_asc_tools_graft</code>. That is an Artifactory UI address: confirm the npm API address for <code>npm pack</code>/<code>npm view</code>. <span class="tag unv">verify</span></td><td><code>package.json</code>, <code>src/cli-meta.ts:61-67</code></td></tr>
+</table>
+<div class="warn"><b>Name clash with upstream.</b> Upstream publishes the same name, <code>@nanonets/graft</code>, on registry.npmjs.org, and that build has the cloud features (Trail sync, telemetry) switched on. Always resolve the <code>@nanonets</code> scope against the fork's Artifactory registry, for example <code>npm pack @nanonets/graft@0.28.0 --@nanonets:registry=&lt;fork npm URL&gt;</code>, and check the tarball's SHA-512 integrity before it goes into the payload. <code>src/hosts/mcp-config.ts:32-61</code> carries the same warning for npx launches.</div>
+
+<h2 id="install">4. Bundling into the PATCH payload</h2>
+<ol>
+  <li><b>Fetch on the release builder:</b> <code>npm pack @nanonets/graft@&lt;pinned&gt; --@nanonets:registry=&lt;fork npm URL&gt;</code>, then record the tarball's integrity hash.</li>
+  <li><b>Install the production tree with no lifecycle scripts:</b>
+<pre><code>mkdir engine\graft &amp;&amp; cd engine\graft
+npm init -y &gt;NUL
+npm install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund ^
+    --@nanonets:registry=&lt;fork npm URL&gt; &lt;path&gt;\nanonets-graft-0.28.0.tgz</code></pre>
+    Use <code>--ignore-scripts</code> deliberately. graft's <code>postinstall</code> (<code>scripts/postinstall.mjs</code>) does two things, and PATCH wants neither on the builder:
+    <ul>
+      <li>it adds <code>@nanonets:registry=…</code> and <code>@trailhq:registry=…</code> to the user's <code>~/.npmrc</code>;</li>
+      <li>it creates a random install id in <code>~/.graft/telemetry.json</code>.</li>
+    </ul>
+    The script itself says the id is minted on first use instead when scripts are skipped. <code>tree-sitter</code>'s <code>node-gyp-build</code> install step is not needed either, because the win32-x64 prebuild is loaded at runtime.</li>
+  <li><b>Add the tree to the payload:</b> include <code>engine/graft/**</code> in <code>payload-manifest.json</code> (<code>files[]</code>, SHA-256), so <code>engine/host/install-integrity.js</code> covers it. Today <code>engine/</code> is protected only through <code>engine/bin/</code>, <code>engine/host/</code>, <code>engine/contract/</code>, <code>engine/extension-groups.json</code> and <code>engine/package.json</code> (<code>install-integrity.js:10-18</code>), so add <code>engine/graft/</code> to <code>SAFETY_PATHS</code>.</li>
+  <li><b>Add a preflight check</b> next to the rg/fd check (<code>engine/host/preflight.js:82-117</code>, id <code>pi_tools</code>, severity <code>warn</code>). It should check that <code>dist/bin/graft.js</code> exists, that <code>vendor/c</code> and <code>vendor/cpp</code> prebuilds and <code>node_modules/tree-sitter/prebuilds/win32-x64/tree-sitter.node</code> exist, and that <code>node graft.js --version</code> exits 0 within a few seconds. If it fails, disable the graph step and tools; PATCH itself keeps working.</li>
+  <li><b>Smoke test:</b> on a clean Windows x64 machine with PATCH's Node, run <code>graft build</code> and <code>graft ask … --json</code> on a small C repo, to prove the native grammars load under Node 24.18.0. <span class="tag unv">verify</span> (checked here only on Node 26.13.1).</li>
+</ol>
+<div class="note">The fork also publishes an offline installer kit (<code>graft-a.b.c.d-win-&lt;arch&gt;.zip</code>, built by <code>npm run pack:bundle</code>). It is meant for people installing graft by hand. For PATCH, the npm tarball is the cleaner input: it is one versioned artefact with a registry integrity hash, and it does not touch PATH or the registry.</div>
+
+<h2 id="env">5. Process environment contract</h2>
+<p>Most of graft's settings are environment variables, named <code>GRAFT_*</code> and <code>TRAIL_*</code> (the full list is <code>ENV_VARS</code> in <code>src/env-cli.ts:128-548</code>; <code>graft env</code> prints it). Several of them turn on behaviour PATCH must not have, such as network access or writing into the repo. <code>graft env …</code> saves them as user environment variables (<code>HKCU\Environment</code> on Windows), so a developer's own graft settings would leak into PATCH's child processes. Build the graft child environment from an allowlist (PATCH already has <code>sanitizeChildEnvironment</code>, imported by <code>engine/host/prepare.js</code>), then add the values below.</p>
+<table>
+<tr><th>Variable</th><th>Value</th><th>Why</th><th>Source</th></tr>
+<tr><td><code>USERPROFILE</code> (and <code>HOME</code>)</td><td><code>&lt;PATCH data&gt;\graft-home</code></td><td>Isolates <code>~/.graft</code>: settings.json, the savings ledger, repos.json, the update cache, the install id and the savings-report opt-in. The developer's own choices (for example <code>graft savings-report enable</code> or a <code>profileStore</code> setting) then cannot apply inside PATCH. Node's <code>os.homedir()</code> reads <code>USERPROFILE</code> on Windows.</td><td><code>src/context/profile-store.ts:82-90</code>, <code>src/reporting/flush.ts:314-368</code></td></tr>
+<tr><td><code>GRAFT_DIR</code>, and the <code>--dir</code> option on every command</td><td>The absolute map folder PATCH chose for this repo: <code>&lt;PATCH data&gt;\graft\repos\&lt;repo-id&gt;</code></td><td>Names the map folder explicitly, so graft never looks for a map inside the checkout (section 6). <code>--dir</code> is read by the commands themselves (<code>contextDirFor</code>, <code>src/context/node-file.ts:114-117</code>); <code>GRAFT_DIR</code> covers the internal paths that do not see <code>--dir</code>, such as the build lock and caches (<code>resolveContextDir</code>, <code>src/util/state.ts:54-58</code>). Set both to the same path. PATCH picks <code>&lt;repo-id&gt;</code>, for example from the normalised repo path.</td><td><code>src/cli.ts:391</code>; <code>env-cli.ts:136, 143-145</code></td></tr>
+<tr><td><code>GRAFT_PROFILE_STORE</code></td><td><code>&lt;PATCH data&gt;\graft\repos</code> (absolute)</td><td><b>Required even with <code>--dir</code>.</b> It decides where graft keeps the repo's build settings (<code>&lt;store&gt;/&lt;folder&gt;-&lt;hash of repo path&gt;/config.json</code>); <code>--dir</code> does not move them (<code>buildConfigPath</code>, <code>src/util/state.ts:197-201</code>). Without a usable store, graft writes them to <code>&lt;repo&gt;/.graft/config.json</code>. It also catches any call that runs without <code>--dir</code>: the map then goes into this <a href="#g-store">profile store</a> rather than into the repo or the user's profile.</td><td><code>profile-store.ts:62-79, 98-102, 121-126</code>; <code>src/env-cli.ts:128-141</code></td></tr>
+<tr><td><code>DO_NOT_TRACK</code></td><td><code>1</code></td><td>Stops the detached background <code>graft _update-check</code> (<code>npm view</code> against the registry).</td><td><code>src/upkeep.ts:135-156</code>, <code>src/cli-meta.ts:113-126</code></td></tr>
+<tr><td><code>GRAFT_PRICES_AUTO_UPDATE</code></td><td><code>0</code></td><td>Without it, a call naming a model graft has no price for may download LiteLLM's public price list.</td><td><code>env-cli.ts:354-371</code></td></tr>
+<tr><td><code>GRAFT_NO_REFRESH</code></td><td><code>1</code> for query processes, <b>unset</b> for the build</td><td>"Queries answer from the graph as it is and never write." Every query also passes <code>--no-refresh</code>. The MCP and CLI refresh paths both honour it.</td><td><code>env-cli.ts:374-388</code>; <code>src/graph/refresh.ts:102-105, 280-281, 364-369, 415-416</code></td></tr>
+<tr><td><code>GRAFT_NO_AUTO_INIT</code></td><td><code>1</code></td><td>graft never writes or rewrites AI-assistant instruction files in the repo (<code>AGENTS.md</code>, <code>CLAUDE.md</code> and the like), which it otherwise does after an update ("auto-init").</td><td><code>env-cli.ts:514-528</code>, <code>src/hosts/auto-init.ts</code></td></tr>
+<tr><td><code>GRAFT_NO_TRAIL_SWITCH</code></td><td><code>1</code></td><td>graft never rewrites a repo's assistant configuration to use the newer <code>trail</code> command instead of <code>graft</code> (see <a href="#g-learnings">Trail</a>).</td><td><code>env-cli.ts:500-512</code></td></tr>
+<tr><td><code>GRAFT_NO_GITIGNORE</code>, <code>GRAFT_NO_IGNORE</code></td><td><code>1</code></td><td>graft never adds its map folder to the repo's <code>.gitignore</code> or <code>.ignore</code>. With the map outside the repo it would not do so anyway (<code>ensureGitignored</code>, <code>src/context/node-file.ts:136-163</code>); this keeps it so if a path is ever misconfigured.</td><td><code>env-cli.ts:420-450</code></td></tr>
+<tr><td><code>GRAFT_STDERR_SAVINGS</code></td><td><code>0</code></td><td>Keeps graft's human-readable "tokens saved" line off stderr, so stderr carries error messages only.</td><td><code>env-cli.ts:531-544</code></td></tr>
+<tr><td><code>NODE_OPTIONS</code></td><td><code>--max-old-space-size=&lt;MB&gt;</code> for the build</td><td>A full build of a 98.6 MB wiring graph peaked at 2.15 GB RSS. Size the limit from a measured EBS build. <span class="tag unv">verify</span></td><td><code>.trail/learnings/2026-10-29-on-a-big-repo-every-trail-*.md</code></td></tr>
+<tr><td>Strip</td><td>all other <code>GRAFT_*</code>, all <code>TRAIL_*</code>, <code>npm_config_*</code></td><td><code>TRAIL_NO_FETCH=0</code> would turn on <code>git fetch origin</code> and <code>gh pr list</code>. <code>TRAIL_NO_LOOK_BACK=0</code> would turn on the init look-back. <code>GRAFT_API_KEY</code>, <code>GRAFT_BASE_URL</code>, <code>GRAFT_MODEL</code> and <code>GRAFT_PROVIDER</code> only matter for language-model runs. A developer's own <code>GRAFT_DIR</code> would point graft at their map; PATCH replaces it with its own value (above).</td><td><code>src/util/privacy-switches.ts:24-31</code>, <code>env-cli.ts:143-311</code></td></tr>
+</table>
+<div class="ok">In this fork, cloud sync and telemetry are hard-coded off (<code>cloudEnabled()</code> in <code>src/cloud/workspace.ts</code>, <code>offReason()</code> in <code>src/telemetry/gate.ts</code>), and no variable turns them on. That guarantee holds only for the fork's package, which is why the registry pinning in section 3 matters.</div>
+
+<h2 id="store">6. Where graft reads and writes</h2>
+<table>
+<tr><th>What</th><th>Location (with the environment above)</th><th>Notes</th></tr>
+<tr><td>Map: wiring graph, ask index, cards, caches, <code>workspace.json</code> and <code>.cache/links.json</code> for parts (the part maps themselves are elsewhere, see below)</td><td>The <code>--dir</code>/<code>GRAFT_DIR</code> folder, <code>&lt;PATCH data&gt;\graft\repos\&lt;repo-id&gt;\</code></td><td>The parts index goes through the same <code>contextDirFor</code> (<code>src/graph/workspace.ts:123-157</code>). Without <code>--dir</code>, the profile store key would be the resolved repo path, lower-cased on case-insensitive filesystems (<code>repoKey</code>, <code>profile-store.ts:110-118</code>).</td></tr>
+<tr><td>Per-repo build settings (<code>--exclude-dir</code>, <code>--only-dir</code>, etc.)</td><td><code>%GRAFT_PROFILE_STORE%\&lt;repo-folder&gt;-&lt;hash&gt;\config.json</code>, unless the repo has its own <code>.graft/config.json</code></td><td>Build options are <b>persisted</b> and reused by later builds and refreshes. graft reads and writes <code>&lt;repo&gt;/.graft/config.json</code> when that file exists, otherwise the profile store's copy (<code>buildConfigPath</code>, <code>src/util/state.ts:197-201</code>; <code>profileConfigPathFor</code>, <code>profile-store.ts:135-138</code>). <code>--dir</code> does not change this.</td></tr>
+<tr><td>Global state</td><td><code>%USERPROFILE%\.graft\</code> (isolated)</td><td>Savings ledger, recent calls, repos.json, update cache, install id, settings.json.</td></tr>
+<tr><td>The repo checkout</td><td>read only</td><td>With <code>--dir</code> outside the repo and the section 5 environment, graft writes nothing into the checkout. Queries with <code>--no-refresh</code> write no map files. Acceptance test 2 (section 16) checks this.</td></tr>
+</table>
+<div class="warn"><b>Why PATCH always passes <code>--dir</code>.</b> Without it, graft decides where the map is with <code>mapDirFor</code> (<code>src/context/map-dir.ts:37-53</code>), and a map a developer left in the checkout always wins:
+<ol>
+  <li>If the repo has <code>.trail/cache/</code>, graft uses it.</li>
+  <li>Otherwise, if the repo is "on trail" (it has <code>.trail/learnings/</code> or trail hooks) and still has an old <code>graft/</code> map, graft <b>renames</b> <code>graft/</code> to <code>.trail/cache/</code> inside the checkout and adds an entry to <code>.trail/.gitignore</code> (<code>moveOldMap</code>, <code>:71-87</code>), unless git tracks <code>graft/INDEX.md</code>. This happens the first time any command asks where the map is, queries included.</li>
+  <li>Otherwise, if the repo has a <code>graft/</code> map, graft uses it.</li>
+  <li>Only then does graft use the profile store.</li>
+</ol>
+So without <code>--dir</code>, PATCH could read a developer's stale map, and a graft process running at Medium IL could move files inside the checkout. With <code>--dir</code> (and <code>GRAFT_DIR</code> for internal paths), <code>mapDirFor</code> is never called (<code>contextDirFor</code>, <code>src/context/node-file.ts:114-117</code>; <code>resolveContextDir</code>, <code>src/util/state.ts:54-58</code>).
+<p style="margin-bottom:0"><b>One case <code>--dir</code> does not cover:</b> a <code>.graft/config.json</code> that a developer left in the checkout. graft reads build settings from it and writes PATCH's <code>--exclude-dir</code> and <code>--only-dir</code> lists back into it (table above). Prepare should check for that file and, if it exists, skip the graph step with a warning. <code>buildConfigPath</code> prefers the in-repo file whenever it exists, and no other way to redirect it was found; section 18 lists the graft change that would.</p>
+<p style="margin-bottom:0"><code>graft where</code> prints the folder a repo uses, which is useful in diagnostics.</p>
+<p style="margin-bottom:0"><b>Parts builds do not keep the part maps under <code>--dir</code>.</b> Each part is built with its own folder as root and no <code>--dir</code> (<code>buildOne(dir, undefined, true)</code>, <code>cli.ts:1625-1628</code>). Its map therefore goes where <code>mapDirFor</code> puts it for that folder: a <code>.trail/cache/</code> or <code>graft/</code> a developer left inside the part, otherwise the profile store. Queries find part maps the same way (<code>partInfo</code>, <code>src/graph/parts-list.ts:95-109</code>). Each part's build settings likewise go to the profile store, or to a <code>.graft/config.json</code> inside the part. Only <code>workspace.json</code> and <code>.cache/links.json</code> (<code>linksPath</code>, <code>src/graph/parts-link.ts:85-88</code>) live in the <code>--dir</code> folder. After a parts build, PATCH checks every <code>parts[].map</code> from <code>graft --dir &lt;map&gt; parts &lt;repo&gt; --json</code> and disables the tools if one is outside the profile store. With <code>GRAFT_DIR</code> set, internal paths that go through <code>resolveContextDir</code> (caches, stamps) resolve to the root map folder for every part. Whether that causes conflicts has not been checked. <span class="tag unv">verify</span></p></div>
+
+<h2 id="build">7. Building the graph (Prepare step)</h2>
+<h3>Command</h3>
+<p>The build reads the repo, parses every indexed file and writes the map (section B). The first build is a full one; later builds re-parse only changed files.</p>
+<pre><code>node engine\graft\dist\bin\graft.js --dir &lt;map&gt; build &lt;repo&gt; ^
+     --exclude-dir &lt;each .piignore entry&gt; ... ^
+     [--only-dir &lt;partition&gt; ...] [--all-parts] ^
+     --no-gitignore --no-ignore --no-workspace</code></pre>
+<table>
+<tr><th>Option</th><th>Use in PATCH</th><th>Source</th></tr>
+<tr><td><code>--exclude-dir &lt;name|path|glob&gt;</code> (repeatable)</td><td>Mirror <code>.piignore</code> and generated or third-party trees. The list is persisted and <b>replaces</b> the saved list on each build, so always pass the full set.</td><td><code>src/cli.ts:931-939</code></td></tr>
+<tr><td><code>--only-dir &lt;path&gt;</code></td><td>Index only some partitions or components. It is recorded in the graph fingerprint, so refreshes walk the same set.</td><td><code>cli.ts:940-947</code></td></tr>
+<tr><td><code>--all-parts</code></td><td>For a repo too big for one map: builds each part into its own map, plus an index at the root so root queries search all of them.</td><td><code>cli.ts:948-952</code>, <code>src/graph/parts-build.ts:113-194</code></td></tr>
+<tr><td><code>--check --json</code></td><td>Builds nothing; reports drift as JSON. Use it for "is the graph stale?" checks.</td><td><code>cli.ts:872-873, 987-993</code></td></tr>
+<tr><td><code>--deep</code>, <code>--force</code>, <code>-j</code>, <code>--synth-concurrency</code></td><td><b>Never.</b> They start the language-model pass ("deep build"), which needs an API key and sends source code to a language-model endpoint.</td><td><code>cli.ts:874-885</code></td></tr>
+<tr><td><code>--lsp</code></td><td>No. It is opt-in, slower and starts language servers (for C/C++, <code>clangd</code>) to get exact call edges.</td><td><code>cli.ts:887</code></td></tr>
+<tr><td><code>--no-reuse</code></td><td>Only to recover a corrupt cache. Normal builds replay unchanged files from the extraction cache, which makes rebuilds incremental.</td><td><code>cli.ts:886</code></td></tr>
+<tr><td><code>--follow-submodules</code>, <code>--follow-nested-repos</code>, <code>--index-text</code></td><td>Off (the defaults) unless EBS needs them. These settings are persisted too.</td><td><code>cli.ts:889-922</code></td></tr>
+</table>
+<h3>Size limit</h3>
+<p>One map is capped at <code>GRAPH_CHAR_BUDGET = floor(0x1fffffe8 × 0.9) ≈ 483 M characters</code> of <code>wiring.json</code>, a limit that comes from V8's maximum string length (<code>src/graph/size-guard.ts:20-23</code>). The size guard estimates while parsing and throws <code>GraphTooLargeError</code> (code <code>GRAPH_TOO_LARGE</code>, <code>size-guard.ts:98-104</code>) along with suggested folders. <code>--all-parts</code> handles that by splitting too-large parts recursively. The <code>workspace.json</code> index is rewritten after each part, so an interrupted run can still be searched, and failed parts stay listed so the next build retries them (<code>parts-build.ts:113-194</code>). In the fork's current code it then makes the links between parts (<code>linkParts</code>, <code>src/graph/parts-link.ts:169-284</code>). Once a repo is built in parts, a plain root <code>build</code> rebuilds every listed part and remakes the links (<code>cli.ts:1306-1313</code>). Queries with <code>--no-refresh</code> never remake them, so PATCH's background rebuilds always run from the root. <b>Measure EBS first.</b> For orientation: a repo whose <code>wiring.json</code> was 98.6 MB is about 20 % of the budget.</p>
+<h3>Wiring it into Prepare</h3>
+<ul>
+  <li>Add <code>graph</code> after <code>context</code> in the VC step list (<code>engine/host/prepare.js:53-56</code>). Run it through <code>runPrepareStep</code> (<code>:195</code>), the same way <code>componentsStep</code> (<code>:237</code>) runs <code>.ebs/scripts/generate_active_components.sh</code> with <code>timeout 600_000</code> (<code>:245</code>). Set a timeout based on the measured EBS build time.</li>
+  <li>Add the exact command to the <code>script-runner.js</code> allowlist (around lines 22-30).</li>
+  <li>A failure produces a warning (like <code>components_unavailable</code>), never a Prepare error. The tools then report "graph unavailable" through <code>diagnostic</code>.</li>
+  <li>graft takes a build lock (<code>src/util/state.ts</code>). The lock is taken over only when its owner process is gone and it is older than <code>LOCK_STALE_MS</code> (5 min), so two Prepare runs on the same repo serialise instead of corrupting the map.</li>
+  <li>Exit codes: 0 = built, non-zero = failed. With <code>--all-parts</code>, the exit code reflects failed or too-large parts (<code>buildParts</code>, <code>cli.ts:1599-1632</code>). Read stderr for the reason.</li>
+</ul>
+
+<h2 id="query">8. Query commands and JSON contracts</h2>
+<p>Section C shows real outputs; this section gives the exact shapes. Every query takes <code>[dir]</code> (repo root, default <code>.</code>), <code>--json</code> and <code>--no-refresh</code>, and PATCH adds the global <code>--dir &lt;map&gt;</code> before the command name (section 6). The command lines below leave <code>--dir</code> out for brevity. JSON goes to stdout, pretty-printed with 2-space indent (<code>JSON.stringify(r, null, 2)</code>). Error messages go to stderr and start with <code>✗</code>.</p>
+
+<h3>8.1 <code>ask</code>: ranked search with source</h3>
+<pre><code>graft ask "&lt;query&gt;" &lt;repo&gt; --json --source -n &lt;1..10&gt; [--in &lt;path&gt;] --no-refresh
+graft ask - &lt;repo&gt; --json ...      # query read from stdin (keeps it out of the process list)</code></pre>
+<p><code>src/cli.ts:1668-1715</code>. Default <code>-n</code> is 8. <code>--source</code> inlines each hit's definition, capped at 80 lines (<code>MAX_SPAN_LINES</code>, <code>src/ask/ask.ts:104</code>) and then <code>… (+N more lines; open path:Lx-Ly)</code>. Only a map built with <code>--deep</code> has the shorter crux (up to 8 lines), which replaces the definition unless <code>--full</code> is given (<code>src/ask/ask.ts:1375-1393</code>). PATCH's maps have none, so <code>--full</code> changes nothing there. An engine error exits 1. Result (<code>src/ask/ask.ts:55-149</code>):</p>
+<pre><code>AskResult {
+  query: string;
+  mode: "structural" | "lexical" | "empty";
+  subject?: string;                 // structural mode: symbol whose neighbours were walked
+  hits: AskHit[];                   // authoritative order, do NOT re-sort by score
+  note?: string;
+  notes?: NoteHit[]; notesChecked?: boolean; notesHint?: string;   // learnings from .trail/: drop in PATCH
+  saved?: { files: number; baselineChars: number };                // only with --source
+  coverage?: number;                // lexical: share (0..1) of query terms the top hit matched
+  coverageStrong?: number;          // same, name+path fields only
+  scopes?: { federated: string[]; alsoMatched: { scope: string; bestId: string }[] };
+}
+AskHit {
+  kind: "concept" | "symbol" | "caller" | "callee";
+  title: string;
+  pointer: string;                  // "path" or "path:Lx-Ly", repo-relative
+  snippet: string;
+  relation?: string; related?: string[];
+  score: number;
+  code?: string;                    // with --source
+  scope?: string;                   // multi-scope repos
+  parse_errors?: number;            // file had syntax errors: graph info may be incomplete
+}</code></pre>
+<p>Use <code>coverage</code> and <code>coverageStrong</code> to suppress weak results, for example in the <code>before_agent_start</code> hook (section 12). In a parts build, <code>ask --json</code> searches all parts (<code>runWorkspaceAsk</code>, <code>cli.ts:1709</code>). Structural queries ("who calls X") also follow the links between parts.</p>
+
+<h3>8.2 <code>grep</code>: exhaustive search over indexed files</h3>
+<pre><code>graft grep "&lt;regex&gt;" &lt;repo&gt; --json [--fixed] [-i] [--in &lt;path&gt;] --no-refresh</code></pre>
+<p><code>cli.ts:2844-2878</code>, <code>src/search/grep-cli.ts:100-132</code>. No graph, or an invalid regex, exits 1. <b>Zero hits exits 0</b> with <code>totalHits: 0</code>. Result (<code>src/search/grep.ts:21-69</code>):</p>
+<pre><code>GrepResult {
+  pattern: string;
+  filesSearched: number;
+  totalHits: number;
+  groups: GrepGroup[];              // sorted: inDegree desc, then path asc
+  truncated: { files: number; hits: number };   // unreadable files, hits past maxHits
+  saved?: Savings;
+}
+GrepGroup { symbol: { id, name, kind, path, span } | null;   // null = module level
+            path: string; inDegree: number; hits: { line: number; text: string /* ≤160 chars */ }[];
+            parse_errors?: number }</code></pre>
+<p>In a parts build, <code>grep --json</code> searches all parts and, in the fork's current code, honours <code>--in</code>: a part, a folder inside one, or a folder above several (<code>runWorkspaceGrep</code>, <code>cli.ts:2882-2886</code>; <code>federateGrep</code>, <code>src/graph/workspace.ts:892-934</code>). <code>inDegree</code> includes edges from other parts when the links are current. Earlier 0.28.0 packages drop <code>--in</code> there, and PATCH must then filter by path itself.</p>
+
+<h3>8.3 <code>skeleton</code>: one file's API</h3>
+<pre><code>graft skeleton &lt;repo-relative path | unique basename&gt; &lt;repo&gt; --json --no-refresh</code></pre>
+<p><code>cli.ts:1717-1733</code>. It works across parts (<code>federateSkeleton</code>). Result (<code>ask.ts:1522-1540</code>):</p>
+<pre><code>SkeletonResult { file: string; entries: { name; kind; span; signature: string|null; summary? }[];
+                 note?: string; parse_errors?: number; saved?: Savings }</code></pre>
+<p>How an unknown file is reported (in <code>note</code> or through the exit code) has not been checked. <span class="tag unv">verify</span></p>
+
+<h3>8.4 <code>callers</code>: call graph and blast radius</h3>
+<pre><code>graft callers &lt;symbol&gt; &lt;repo&gt; --json [--direction in|out] [-d &lt;n|all&gt;] [--in &lt;path&gt;] --no-refresh</code></pre>
+<p><code>cli.ts:2770-2810</code>, <code>src/graph/traverse-cli.ts:129-266</code>. Symbols can be a bare name, <code>Class.method</code> or <code>pkg.Fn</code>. Exit 1 (stderr <code>✗ …</code>) when there is no graph, an unknown symbol, a bad <code>--direction</code>, a depth below 1 or non-numeric, or an unindexed <code>--in</code> prefix. Result:</p>
+<pre><code>{ query: string,
+  matches: [ { symbol: { id, name, kind, path, span, parse_errors? },
+               hits: [ { id, name?, kind?, path?, span?, relation, depth, parse_errors? } ],
+               note?: string } ],          // note explains an empty result
+  saved?: Savings }</code></pre>
+<div class="warn"><b>Parts builds:</b> <code>callers --json</code> does <b>not</b> search across parts. The cross-part path runs only without <code>--json</code> (<code>if (!opts.json &amp;&amp; readWorkspace(...))</code>, <code>cli.ts:2810</code>). With <code>--json</code>, it reads the root map, which a parts build clears, and fails with "no graph found". PATCH has two options:
+<ul>
+<li><b>Per part, with <code>--json</code>.</b> Pass the part's folder as <code>[dir]</code> and its map folder from <code>graft parts --json</code> as <code>--dir</code>. The result is structured, but every edge that crosses parts is missing. It may also contain edges the links mark as wrong.</li>
+<li><b>At the root, without <code>--json</code>.</b> The text output (<code>federateCallers</code>, <code>src/graph/workspace.ts:1034-1202</code>) follows the links. It has one <code>## &lt;part&gt;/</code> block per part that defines the symbol, and an <code>across parts:</code> list of hits in other parts. When the links are missing or stale, it says that callers in other parts are not tracked, and may add text-match guesses marked unverified. PATCH must parse this output strictly.</li>
+</ul>
+<span class="tag unv">verify</span> The real fix is a graft change (section 18).</div>
+
+<h3>8.5 Others worth knowing</h3>
+<ul>
+  <li><code>graft blast [dir] --format json --base &lt;ref&gt; -d &lt;n&gt; --no-owners --no-refresh</code>: the blast radius of a diff (<code>cli.ts:2812-2842</code>). A candidate for a later <code>code_impact</code> tool. Never pass <code>--name</code>, which makes an LLM call.</li>
+  <li><code>graft map</code>: a token-budgeted overview of the repo (<code>cli.ts:2880</code>). JSON support has not been checked. <span class="tag unv">verify</span></li>
+  <li><code>graft --version</code>, for preflight.</li>
+  <li><code>--agent-model &lt;id&gt;</code> (<code>cli.ts:393</code>) prices savings for a named model. It is optional; see section 14.</li>
+</ul>
+
+<h2 id="process">9. Per-call CLI vs long-lived process</h2>
+<p>Every query has to load the map into memory first, which is the slow and memory-hungry part on a big repo. The question is whether PATCH pays that cost on each tool call (a new graft process per call) or once (one graft process kept running per repo).</p>
+<table>
+<tr><th>Option</th><th>Output</th><th>Pros</th><th>Cons</th></tr>
+<tr><td><b>A. One CLI process per tool call</b> (recommended first)</td><td>JSON (section 8)</td><td>A stable, documented contract. No state is shared between calls. Easy to run as a closed trusted operation.</td><td>Each call loads the map: over 1 GB RSS and seconds of load time on a big repo (<code>loadGraphCached</code> is per process). Needs a concurrency limit of 1-2 graft processes per repo, and a measured latency target.</td></tr>
+<tr><td>B. <code>graft mcp</code> over stdio, owned by the Engine host</td><td>Markdown text only. Tools: <code>graft_find_code</code>, <code>graft_file_api</code>, <code>graft_check_freshness</code>, <code>graft_trace_calls</code>, <code>graft_find_all</code>, <code>graft_repo_map</code> (<code>src/mcp/tools.ts:105-189</code>)</td><td>The map stays loaded. Concurrent calls are isolated (<code>runInCallScope</code>, <code>tools.ts:316-323</code>).</td><td>No JSON, so PATCH would have to parse markdown to filter paths, which is fragile. Each call also runs a refresh, a price lookup and auto-init, and appends savings and nudge text meant for the assistant (<code>tools.ts:325-417</code>). Usable only with <code>GRAFT_NO_REFRESH=1</code>, <code>GRAFT_NO_AUTO_INIT=1</code> and <code>GRAFT_PRICES_AUTO_UPDATE=0</code>, plus stripping that text.</td></tr>
+<tr><td>C. In-process library (<code>import { Graft }</code>)</td><td><code>AskResult</code> objects</td><td>No process spawn per call.</td><td>Only <code>ask</code> is public. Loading the map inside the Engine host costs over 1 GB in that process. Deep imports are blocked by <code>exports</code>.</td></tr>
+</table>
+<div class="note"><b>Recommendation.</b> An earlier draft proposed "one long-lived graft MCP process shared by the main agent and Scouts". Since the MCP surface has no JSON, start with option A behind a queue. Measure p50 and p95 latency on EBS. Move to a long-lived process only after graft gains a JSON mode for it (section 18), or, as a stop-gap, a small PATCH-owned broker that loads graft's modules from a pinned file path. That broker would depend on graft internals, so treat it as a last resort.</div>
+
+<h2 id="tools">10. Typed trusted tools</h2>
+<p>The agent never sees graft or its command line. It sees four ordinary PATCH tools with typed parameters; each tool builds a fixed graft command, runs it through a trusted operation, filters the JSON and returns it in PATCH's usual output format.</p>
+<p>Follow the pattern of <code>courage_search</code> and <code>aflow_search</code> in <code>app/resources/extensions/guardrails/index.ts</code>. Register with <code>pi.registerTool({ name, ...promptFor(name), label, description, parameters: Type.Object(...), async execute(_id, params) { … } })</code>. <code>promptFor</code> is at <code>:167</code> and reads <code>TOOL_PROMPT_SNIPPETS</code>. Wrap output in <code>knowledgeOutputContract</code> (<code>:1252</code>): <code>{"result":…, "truncated"?:true, "diagnostic"?:"…"}</code>, 12,000-character cap. The tool names below are proposals.</p>
+<table>
+<tr><th>Tool</th><th>Parameters (TypeBox)</th><th>Fixed argv</th></tr>
+<tr><td><code>code_search</code></td><td><code>query</code> string (1..500), <code>limit</code> int 1..10 (default 5), <code>path</code> optional repo-relative prefix</td><td><code>ask - &lt;repo&gt; --json --source -n &lt;limit&gt; [--in &lt;path&gt;] --no-refresh</code>, query on stdin</td></tr>
+<tr><td><code>code_find_all</code></td><td><code>pattern</code> string (1..300), <code>fixed</code> bool, <code>ignore_case</code> bool, <code>path</code> optional</td><td><code>grep &lt;pattern&gt; &lt;repo&gt; --json [--fixed] [-i] [--in &lt;path&gt;] --no-refresh</code></td></tr>
+<tr><td><code>code_outline</code></td><td><code>file</code> repo-relative path</td><td><code>skeleton &lt;file&gt; &lt;repo&gt; --json --no-refresh</code></td></tr>
+<tr><td><code>code_callers</code></td><td><code>symbol</code> string, <code>direction</code> "in"|"out", <code>depth</code> int 1..3, <code>path</code> optional</td><td><code>callers &lt;symbol&gt; &lt;repo&gt; --json --direction &lt;d&gt; -d &lt;n&gt; [--in &lt;path&gt;] --no-refresh</code></td></tr>
+</table>
+<h3>Trusted operation (sketch)</h3>
+<p>Add one closed operation to <code>guardrails/trusted-tools.js</code> (v2.6.0, rules at <code>:1-75</code>): a fixed executable (<code>engine/bin/node.exe</code>), a fixed script (<code>engine/graft/dist/bin/graft.js</code>) and a fixed subcommand set. It must reject tokens that start with <code>-</code> or contain <code>;</code>, CR or LF, and accept repo-relative paths only.</p>
+<pre><code>// trusted-tools.js (sketch, not drop-in)
+const GRAFT_OPS = new Set(['ask', 'grep', 'skeleton', 'callers']);
+export async function graftQuery(repoRoot, op, positional, flags, { stdin } = {}) {
+  if (!GRAFT_OPS.has(op)) throw new Error('graft: op not allowed');
+  for (const t of positional) assertSafeToken(t);           // no leading '-', no ; CR LF
+  const argv = [GRAFT_JS, '--dir', patchMapDir(repoRoot) /* section 6 */,
+                op, ...positional, repoRoot, ...flags, '--json', '--no-refresh'];
+  const res = await runFixed(NODE_EXE, argv, {
+    cwd: repoRoot, env: graftEnv(/* section 5: GRAFT_DIR, GRAFT_NO_REFRESH=1, ... */),
+    stdin, timeoutMs: 30_000, maxStdoutBytes: 8 * 1024 * 1024,
+  });
+  if (res.code !== 0) return { ok: false, diagnostic: firstLine(res.stderr) };  // "✗ no symbol ..."
+  return { ok: true, json: JSON.parse(res.stdout) };
+}</code></pre>
+<h3>Post-filter (in the wrapper, before the output contract)</h3>
+<ol>
+  <li>Normalise every path to repo-relative with forward slashes (the graph stores POSIX paths; normalise anyway). Fields: <code>pointer</code>, <code>symbol.path</code>, <code>hits[].path</code>, <code>groups[].path</code>, <code>file</code>.</li>
+  <li>Drop entries that fail <code>credential-read-guard.js</code> (<code>credentialReadVerdict</code>) or <code>protected-tool-trees.js</code> (<code>guardProtectedToolTrees</code>). Remove <code>code</code> and <code>text</code> for those entries; do not just mask them.</li>
+  <li>Drop <code>notes</code>, <code>notesChecked</code> and <code>notesHint</code> from ask results. They are <a href="#g-learnings">learnings</a> read from <code>.trail/learnings/</code> in the repo: free text written by other agents, with absolute paths (section C), which PATCH has not vetted.</li>
+  <li>Tag hits in flavor-inactive components (from the files PATCH already generates in <code>flagsStep</code>/<code>componentsStep</code>: <code>.ebs/.active_flags</code>, and the components file whose name is <span class="tag unv">verify</span>). graft has no notion of build flavor; it parses every <code>#if</code> branch it can.</li>
+  <li>For child sessions (<code>isChild</code>, <code>index.ts:238, 381</code>), apply the Scout budget the same way <code>child-grep-budget.js</code> and <code>child-read-budget.js</code> do.</li>
+  <li>Serialise, then apply the 12,000-character cap, preferring to cut whole hits from the end. Set <code>truncated: true</code>.</li>
+</ol>
+
+<h2 id="security">11. Security and policy</h2>
+<ul>
+  <li><b>No network.</b> With the section 5 environment and no <code>--deep</code>, <code>--lsp</code> or <code>blast --name</code>, graft makes no outgoing requests:
+    <ul>
+      <li>the update check is off (<code>DO_NOT_TRACK</code>);</li>
+      <li>price downloads are off (<code>GRAFT_PRICES_AUTO_UPDATE=0</code>);</li>
+      <li>fetching and look-back are off by default, and stripping <code>TRAIL_*</code> keeps them off;</li>
+      <li>cloud and telemetry are hard-off in the fork;</li>
+      <li>the savings report to Oracle is opt-in and stored in <code>~/.graft</code>, which is isolated.</li>
+    </ul>
+    Check this by running the acceptance tests with outbound traffic blocked.</li>
+  <li><b>Integrity.</b> The graft tree is part of the signed, hash-pinned payload (section 4). PATCH never runs npx or an install on the target.</li>
+  <li><b>Integrity level.</b> Builds and queries run as trusted Medium-IL operations, never through Low-IL <code>workspace_shell</code> (that guard sits around <code>index.ts:1999-2021</code>; user shell commands are blocked at <code>:2274</code>).</li>
+  <li><b>Data in the map.</b> The map stores signatures, spans and the ask index, which includes symbol body text (<code>writeGraph</code> moves <code>body_text</code> into the ask sidecar). Treat the store as being as sensitive as the source: put it under the PATCH data folder with the same ACLs, and delete it when the repo is removed.</li>
+  <li><b>Excluded paths.</b> Files that <code>.piignore</code> or the credential guard hide should not be indexed in the first place. Pass them as <code>--exclude-dir</code> globs at build time, and keep the post-filter as a second line of defence.</li>
+</ul>
+
+<h2 id="prompt">12. Prompt, skills, sub-agents, hooks</h2>
+<ul>
+  <li><b>Sub-agents.</b> Add the four tools to <code>READ_ONLY_TOOLS</code> in <code>app/resources/extensions/subagents/role-catalog.ts</code> (v0.5.0), so Scout and General both get them, and mention them in <code>agents/scout.md</code>.</li>
+  <li><b>Central prompt.</b> In <code>app/resources/prompts/AGENTS.src.md</code>, which generates <code>AGENTS.md</code>, add a short "Locating code" rule: resolve partition, component and flavor first (the existing <code>.ebs/context</code> rules at <code>AGENTS.md:36-38, 54</code>), then <code>code_search</code>/<code>code_callers</code>, then <code>read</code> at the returned span, and <code>grep</code> last. Keep the existing rule at <code>:63</code> ("do not answer from file contents or search results alone"). Do not put graft rules in <code>.ebs/context</code>: <code>generate_agent_context.py</code> rewrites and prunes that mirror.</li>
+  <li><b>Tool snippets.</b> Add one-line entries to <code>TOOL_PROMPT_SNIPPETS</code> (read by <code>promptFor</code>, <code>index.ts:167</code>).</li>
+  <li><b>Skills.</b> Update <code>/understand</code>, <code>/impact</code> and the component-info skills under <code>.ebs/skills</code> to call the tools in the order above. Skills are hash-pinned and gated by <code>_scope.tsv</code>.</li>
+  <li><b>Hooks (phase 2).</b> pi extension events:
+    <ul>
+      <li><code>before_agent_start</code>: add the top 3 <code>code_search</code> hits, only when <code>coverageStrong</code> is above 0 (port of graft's <code>askGraph</code>, <code>src/claude/prompt-hook.ts:219-237</code>, which runs <code>ask - . --json -n 3</code>).</li>
+      <li><code>tool_result</code>: after a broad <code>grep</code> or a whole-file <code>read</code>, add a one-line hint to use the code tools.</li>
+      <li><code>tool_call</code>: an optional soft redirect, off by default.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="fresh">13. Freshness</h2>
+<p>The map describes the code as it was at the last build. After an edit or a branch switch it is out of date until the next build, and answers may point at moved or missing lines.</p>
+<ul>
+  <li>Queries always use <code>--no-refresh</code>, so a tool call never triggers a rebuild in a process that holds over 1 GB.</li>
+  <li>Rebuild in the background, as a single serialised job per repo, at these points:
+    <ul>
+      <li>each Prepare;</li>
+      <li>after <code>source_edit</code> succeeds (debounced);</li>
+      <li>after a branch switch.</li>
+    </ul>
+    The rebuild is <code>graft build &lt;repo&gt;</code> without <code>GRAFT_NO_REFRESH</code>. It is incremental (extraction cache), and graft's own refresh runs it in a short-lived child (<code>src/graph/refresh-run.ts</code>).</li>
+  <li>Add the graph age to each tool result (for example <code>"graph": {"builtAt": …, "stale": bool}</code>). <code>graft build --check --json</code> reports drift without building.</li>
+  <li>If file times can't be trusted (network drives, restored checkouts), set <code>GRAFT_REFRESH=hash</code> for the build (<code>env-cli.ts:389-403</code>). It is slower.</li>
+</ul>
+
+<h2 id="savings">14. Savings reporting</h2>
+<p>graft estimates how much context each answer saved: the size of the files an answer covers (what an agent would otherwise have read) against the size of the answer. This is optional for PATCH, but it is a cheap way to show the value of the feature.</p>
+<ul>
+  <li><code>ask --source</code> returns <code>saved: {files, baselineChars}</code>. <code>grep</code>, <code>skeleton</code> and <code>callers</code> return a <code>Savings</code> object (<code>src/context/savings.ts:22-27</code>). Sum them per session in PATCH and show them in the status bar, using PATCH's own model and price data.</li>
+  <li>Passing <code>--agent-model</code> is only useful for graft's own ledger, which sits in the isolated home. PATCH can skip it.</li>
+  <li>Do not rely on graft's human savings or nudge lines. They appear only in text output and are disabled on stderr by <code>GRAFT_STDERR_SAVINGS=0</code>.</li>
+</ul>
+
+<h2 id="points">15. PATCH integration points (engine v3.11.0)</h2>
+<table>
+<tr><th>File</th><th>Location</th><th>Change</th></tr>
+<tr><td><code>engine/host/prepare.js</code></td><td>steps <code>:53-56</code>, <code>runPrepareStep :195</code>, <code>componentsStep :237-261</code>, <code>contextStep :270-274</code></td><td>New <code>graph</code> step after <code>context</code>: compute the map folder, skip with a warning if <code>&lt;repo&gt;/.graft/config.json</code> exists, run the build with <code>--dir</code>; warning on failure.</td></tr>
+<tr><td><code>engine/host/script-runner.js</code></td><td>allowlist, around <code>:22-30</code></td><td>Allow the graft build command.</td></tr>
+<tr><td><code>engine/host/preflight.js</code></td><td><code>:82-117</code> (<code>PI_TOOL_NAMES</code>, <code>pi_tools</code>)</td><td>Add a graft check (section 4).</td></tr>
+<tr><td><code>engine/host/install-integrity.js</code>, <code>payload-manifest.json</code></td><td><code>SAFETY_PATHS :10-18</code></td><td>Add <code>engine/graft/</code>; list its files.</td></tr>
+<tr><td><code>app/resources/extensions/guardrails/trusted-tools.js</code></td><td>closed op set, <code>:1-75</code></td><td>New <code>graftQuery</code> operation.</td></tr>
+<tr><td><code>app/resources/extensions/guardrails/index.ts</code></td><td><code>promptFor :167</code>, <code>knowledgeOutputContract :1252</code>, next to <code>courage_search :1342</code> and <code>aflow_search :1382</code></td><td>Register the 4 tools; post-filter; snippets.</td></tr>
+<tr><td><code>guardrails/credential-read-guard.js</code>, <code>protected-tool-trees.js</code>, <code>child-grep-budget.js</code>, <code>child-read-budget.js</code></td><td>reused as-is</td><td>Called by the post-filter.</td></tr>
+<tr><td><code>app/resources/extensions/subagents/role-catalog.ts</code></td><td><code>READ_ONLY_TOOLS</code></td><td>Add the 4 tools.</td></tr>
+<tr><td><code>app/resources/prompts/AGENTS.src.md</code></td><td>near the rules at <code>AGENTS.md:25, 36-38, 63, 73-76</code></td><td>"Locating code" rule.</td></tr>
+<tr><td><code>.ebs/skills/*</code></td><td>/understand, /impact, component-info</td><td>Tool order.</td></tr>
+<tr><td><code>engine/host/session-runtime/runtime.js</code></td><td><code>:1011-1024</code></td><td><b>No change.</b> Keep <code>noExtensions</code>, <code>noContextFiles</code> etc.; the tools come from the trusted <code>guardrails</code> group in <code>engine/extension-groups.json</code>.</td></tr>
+</table>
+
+<h2 id="accept">16. Acceptance tests</h2>
+<ol>
+  <li>Preflight passes on a clean machine. Renaming <code>vendor/c</code> makes it warn, and PATCH still starts.</li>
+  <li>Prepare on EBS builds the graph within the agreed time and memory. <code>git status --ignored</code> in the repo shows no new files (no <code>graft/</code>, <code>.graft/</code>, <code>.trail/</code>, <code>.gitignore</code> or <code>.ignore</code> change), and nothing appears under the developer's real <code>%USERPROFILE%\.graft</code>. Repeat with a checkout that already contains a developer's <code>graft/</code> map and <code>.trail/learnings/</code>.</li>
+  <li>With outbound traffic blocked and a network capture running, a build and 50 mixed queries make no connection attempts.</li>
+  <li>For each tool, a known symbol returns spans that match the file on disk, and an unknown symbol returns a <code>diagnostic</code>, not an exception.</li>
+  <li>A query matching a credential file or a protected tree returns no path or code from it, in the main session and in a Scout.</li>
+  <li>The output never exceeds 12,000 characters. <code>truncated</code> is set when it would.</li>
+  <li>After a <code>source_edit</code>, the background rebuild finishes, and the next query sees the new span.</li>
+  <li>A developer's own <code>graft env</code> settings (for example <code>GRAFT_DIR</code>, <code>TRAIL_NO_FETCH=0</code>) have no effect inside PATCH.</li>
+  <li>Concurrency: three Scouts querying at once stay within the configured process limit and memory budget.</li>
+</ol>
+
+<h2 id="risks">17. Risks and open items</h2>
+<table>
+<tr><th>Item</th><th>Impact</th><th>Mitigation</th></tr>
+<tr><td>EBS size vs the ~483 M-character map limit</td><td>A single-map build fails with <code>GRAPH_TOO_LARGE</code></td><td>Measure; use <code>--all-parts</code> or partition <code>--only-dir</code> builds.</td></tr>
+<tr><td>Memory per process (over 1 GB on big maps)</td><td>Concurrent per-call queries can exhaust RAM</td><td>Queue (1-2 per repo); <code>--max-old-space-size</code>; later, a long-lived process (section 18).</td></tr>
+<tr><td><code>callers --json</code> does not search across parts</td><td>Incomplete callers in a parts build</td><td>Query per part with <code>--json</code>, or parse the root's text output, which follows the links (section 8.4); ask for the graft fix in section 18.</td></tr>
+<tr><td>Part maps ignore <code>--dir</code></td><td>A developer's <code>graft/</code> or <code>.graft/config.json</code> inside a part would be used</td><td>Check every <code>parts[].map</code> from <code>graft parts --json</code> after the build (section 6).</td></tr>
+<tr><td>Links between parts go stale</td><td>Queries answer without cross-part edges</td><td>Rebuild from the root only; mark the index degraded when <code>links</code> is not <code>"current"</code>.</td></tr>
+<tr><td>Flavor-agnostic graph</td><td>Hits in code inactive for the current flavor</td><td>Tag them in the post-filter; prompt rule "flavor first".</td></tr>
+<tr><td>Native grammars win32-x64 only; Node 24.18.0 not tested</td><td>Parser fails to load</td><td>Preflight plus the smoke test in section 4.</td></tr>
+<tr><td>A map or <code>.trail/</code> folder left in the checkout takes precedence; graft may rename <code>graft/</code> to <code>.trail/cache/</code></td><td>Reads a developer's stale map; moves files inside the checkout</td><td>Always pass <code>--dir</code> and set <code>GRAFT_DIR</code> (section 6).</td></tr>
+<tr><td>A <code>.graft/config.json</code> left in the checkout</td><td>graft reads it and writes PATCH's build settings into it</td><td>Prepare skips the graph step with a warning when it exists (section 6); graft change in section 18.</td></tr>
+<tr><td>Registry name clash with upstream</td><td>Ships a build with cloud features on</td><td>Pin the scope registry; check the integrity hash.</td></tr>
+<tr><td>Not verified</td><td>-</td><td>How <code>skeleton</code> reports an unknown file; <code>map --json</code>; whether <code>GRAFT_DIR</code> causes conflicts between parts; memory of the link step; <code>build --check</code> on a parts build; the npm API address of the Artifactory repo; the components file name in <code>.ebs/</code>; C/C++ call-edge accuracy on EBS; native grammar loading under Node 24.18.0.</td></tr>
+</table>
+
+<h2 id="graftchanges">18. Optional graft changes (not required)</h2>
+<ul>
+  <li><b><code>callers --json</code> across parts</b>, following the links the way the text output already does. (<code>--in</code> for <code>grep</code> in parts builds is already in the fork's current code.)</li>
+  <li><b>Part maps that follow <code>--dir</code></b>: keep each part's map and settings under the <code>--dir</code> folder instead of where a build of the part folder would put them.</li>
+  <li><b>A JSON mode for the long-lived server</b>: for example a <code>format: "json"</code> argument on the MCP tools, or a <code>graft serve --json</code> line protocol. This would let PATCH keep one map in memory per repo without parsing text.</li>
+  <li><b>Build settings that follow <code>--dir</code></b>: keep <code>config.json</code> in the <code>--dir</code> folder when one is given, instead of preferring <code>&lt;repo&gt;/.graft/config.json</code> (<code>buildConfigPath</code>, <code>src/util/state.ts:197-201</code>). PATCH could then index a checkout a developer has also set up for graft.</li>
+  <li><b>An embedded switch</b> (for example <code>GRAFT_EMBEDDED=1</code>) that in one step turns off upkeep, price downloads, auto-init, trail switching and agent-facing savings text, replacing the list in section 5.</li>
+  <li><b>Flavor awareness</b>: evaluating <code>#if</code> against a defines file (for example <code>.ebs/.active_flags</code>). Today <code>conditionalChains</code> (<code>src/graph/extract.ts:1165-1194</code>) is used only to balance braces.</li>
+  <li><b>Export <code>skeleton</code>, <code>grepGraph</code> and the callers walk</b> from <code>src/index.ts</code>, so a host can call them in-process without depending on internals.</li>
+</ul>
+<p class="small">Generated from a source review of graft 0.28.0 (this fork) and PATCH engine v3.11.0. This file is not part of the npm package: <code>package.json</code> <code>files</code> ships only <code>docs/changelog.html</code> from <code>docs/</code>.</p>
+</main>
+</div>
+</body>
+</html>

@@ -78,6 +78,12 @@ export function readJson<T>(p: string): T | null {
  * `.cache/` to clean them up.
  */
 export function writeJsonAtomic(p: string, value: unknown, compact = false, mode?: number): void {
+  writeTextAtomic(p, compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), mode);
+}
+
+/** {@link writeJsonAtomic} for text already serialized (a big cache stringified
+ * once, to hash it and to write it). */
+export function writeTextAtomic(p: string, text: string, mode?: number): void {
   mkdirSync(dirname(p), { recursive: true });
   // A name no one can guess, opened new-only and never through a link: a link
   // planted where the temp file goes is neither written through nor renamed
@@ -89,7 +95,7 @@ export function writeJsonAtomic(p: string, value: unknown, compact = false, mode
     const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), mode ?? 0o666);
     try {
       if (mode !== undefined && process.platform !== 'win32') fchmodSync(fd, mode);
-      const buf = Buffer.from(compact ? JSON.stringify(value) : JSON.stringify(value, null, 2), 'utf8');
+      const buf = Buffer.from(text, 'utf8');
       for (let off = 0; off < buf.length; ) off += writeSync(fd, buf, off, buf.length - off);
     } finally {
       closeSync(fd);

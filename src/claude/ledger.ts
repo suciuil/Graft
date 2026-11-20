@@ -19,8 +19,9 @@
  */
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { cacheDir, writeJsonAtomic } from '../util/state.js';
+import { isPartsWorkspace, readWorkspace } from '../graph/workspace-index.js';
 import { locateLedger, pathKey, readRepoRegistry, registerRepo, repoRegistryPath } from './repo-registry.js';
 import {
   NO_MODEL,
@@ -206,7 +207,29 @@ export function currentModel(dir: string, stamped?: string | null): string {
  * day/model rows, ~900 kB): under 10ms to rewrite, ~4ms to read. Both are noise
  * beside the retrieval that triggered them, so the simpler layout wins. */
 export function ledgerPath(d: string): string {
-  return join(cacheDir(d), 'savings.json');
+  return join(cacheDir(savingsRoot(d)), 'savings.json');
+}
+
+/**
+ * The folder whose ledger holds what graft saved in `d`: `d` itself, unless `d`
+ * is a part of a repository built in parts (`graph/parts-build.ts`). A query run
+ * inside a part uses that part's own map, so its root is the part; its savings
+ * still belong to the repository, whose ledger the queries run at its root
+ * already fill. So the nearest parts index above `d` that lists the folder
+ * holding `d` names the root, and `graft savings` there counts every part,
+ * wherever the agent was opened. With `GRAFT_DIR` set, every folder's map is
+ * that one folder, so no index above `d` can be told apart: `d` itself.
+ */
+export function savingsRoot(d: string): string {
+  const from = resolve(d);
+  if (process.env.GRAFT_DIR) return from;
+  for (let dir = from, up = dirname(dir); up !== dir; dir = up, up = dirname(dir)) {
+    const ws = readWorkspace(up);
+    if (!isPartsWorkspace(ws)) continue;
+    const rel = relative(up, from).split(sep).join('/');
+    if (ws!.children.some((part) => rel === part || rel.startsWith(`${part}/`))) return up;
+  }
+  return from;
 }
 
 export function readLedger(d: string): SavingsLedger {
@@ -321,7 +344,8 @@ function ledgerKey(model: string): string {
  * normalised HERE: a writer that forgot would silently start a second row for a
  * model already in the file. */
 function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedger) => void): void {
-  const file = ledgerPath(d);
+  const home = savingsRoot(d);
+  const file = join(cacheDir(home), 'savings.json');
   let ledger: SavingsLedger;
   try {
     ledger = readLedgerStrict(file, true);
@@ -340,7 +364,7 @@ function patchBucket(d: string, model: string, when: Date, patch: (b: ModelLedge
     // Note the folder in the user's profile so `graft savings --all` can find
     // this ledger from anywhere. Throttled to one write per repo per day, and
     // never throws.
-    registerRepo(d, file, { when });
+    registerRepo(home, file, { when });
   } catch {
     // A lifetime total is never worth failing a hook over.
   }
@@ -715,7 +739,8 @@ export function formatAllSavingsReport(r: AllSavingsReport): string {
  * anyone looks at its savings — the next saving filed there would add it anyway.
  */
 export function registerExistingLedger(d: string): void {
-  const file = ledgerPath(d);
+  const home = savingsRoot(d);
+  const file = join(cacheDir(home), 'savings.json');
   if (!existsSync(file)) return;
-  registerRepo(d, file, { touch: false });
+  registerRepo(home, file, { touch: false });
 }

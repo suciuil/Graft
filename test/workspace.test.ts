@@ -21,6 +21,7 @@ import {
   isWorkspaceBuildRoot,
 } from "../src/graph/workspace.js";
 import { formatAsk } from "../src/ask/ask.js";
+import { __parseCount, __resetParseCounts, __setKeepLimit } from "../src/graph/load.js";
 import type { GraphV1 } from "../src/graph/types.js";
 
 /** A parent dir with git children (each a `.git` dir + one source file). */
@@ -438,6 +439,59 @@ test("federated ask: --in <child> narrows to that child; --in <unknown> errors l
     () => federateAsk(p, undefined, "handler", { in: "nope" }),
     /no workspace repo "nope".*repoA.*repoB/s,
   );
+  rmSync(p, { recursive: true, force: true });
+});
+
+test("federated ask: a structural question gets its callers from the repo holding them, not an empty result", async () => {
+  const p = workspaceFx(REPOS);
+  await buildWorkspace(p);
+  const r = federateAsk(p, undefined, "who calls helperThing", { limit: 8 });
+  assert.equal(r.mode, "structural");
+  assert.deepEqual(
+    r.hits.map((h) => [h.relation, h.title, h.pointer.replace(/:L\d+-L\d+$/, "")]),
+    [["calls", "alphaHandler", "repoA/a.ts"]],
+  );
+  assert.match(r.note ?? "", /callers \/ references of helperThing/);
+  assert.deepEqual(federateAsk(p, undefined, "who calls helperThing", { limit: 8, in: "repoA" }).hits, r.hits, "--in the repo answers the same");
+
+  // A subject with no callers anywhere: ranked matches, saying so.
+  const none = federateAsk(p, undefined, "who calls betaHandler", { limit: 8 });
+  assert.notEqual(none.mode, "structural");
+  assert.match(none.note ?? "", /structural index: no entries for 'betaHandler'/);
+  rmSync(p, { recursive: true, force: true });
+});
+
+test("federated ask: a structural question named nowhere reads each map once when the maps are too big to keep", async () => {
+  const p = workspaceFx(REPOS);
+  await buildWorkspace(p);
+  const q = "who calls handlerish alpha";
+  __setKeepLimit(0);
+  let big;
+  try {
+    __resetParseCounts();
+    big = federateAsk(p, undefined, q, { limit: 8, source: true });
+    assert.equal(__parseCount.graph, 2, "each repo's map is read once, for the subject and the ranking");
+  } finally {
+    __setKeepLimit();
+  }
+  assert.notEqual(big.mode, "structural");
+  assert.ok(big.hits.length > 0, "the ranking still answers");
+  assert.deepEqual(big, federateAsk(p, undefined, q, { limit: 8, source: true }), "the same answer as with the maps kept");
+  rmSync(p, { recursive: true, force: true });
+});
+
+test("federated ask: a qualified subject named whole in one repo is not also its last segment in another", async () => {
+  const p = workspaceFx({
+    repoA: { "a.ts": "export class Cache { run() { return helperA(); } }\nfunction helperA() { return 1; }\n" },
+    repoB: { "b.ts": "export function run() { return helperB(); }\nfunction helperB() { return 2; }\n" },
+  });
+  await buildWorkspace(p);
+  const r = federateAsk(p, undefined, "callees of Cache.run", { limit: 8 });
+  assert.equal(r.mode, "structural");
+  assert.deepEqual(r.hits.map((h) => h.title), ["helperA"], "one map takes Cache.run, never run");
+  // Named nowhere whole: the last segment, in every repo, as one map does.
+  const bare = federateAsk(p, undefined, "callees of Store.run", { limit: 8 });
+  assert.deepEqual(bare.hits.map((h) => h.title).sort(), ["helperA", "helperB"]);
   rmSync(p, { recursive: true, force: true });
 });
 

@@ -6,7 +6,8 @@
 import { statSync, writeFileSync, readFileSync, mkdirSync, existsSync, rmSync, rmdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { HOSTS, defaultHosts, hostRelPath, hostWiringName, type DetectProbe, type HostTarget } from './registry.js';
+import { HOSTS, defaultHosts, hostRelPath, hostWiringName, installedHostText, type DetectProbe, type HostTarget } from './registry.js';
+import { repoFacts, settledFacts } from './repo-facts.js';
 import { GRAFT_MARKERS, markersFor, upsertSection } from './sections.js';
 import type { Brand } from '../brand.js';
 import { registerMcpConfigs, type McpWrite } from './mcp-config.js';
@@ -84,14 +85,17 @@ export function runHostsInit(
   }
 
   const written: HostsInitResult['written'] = [];
+  // What the repo's map says of it (built in parts or not), for text that fits it.
+  const facts = repoFacts(repo);
   for (const host of selected) {
     const path = join(repo, hostRelPath(host, name));
+    const content = host.content(name, settledFacts(facts, installedHostText(repo, host, name)));
     // Under trail, graft's copy of an owned file goes and graft's fenced
     // block becomes trail's, so the agent reads the instructions once.
     const action =
       host.kind === 'owned'
-        ? writeOwned(path, host.content(name))
-        : upsertSection(path, host.content(name), markersFor(name), name === 'trail' ? [GRAFT_MARKERS] : []).action;
+        ? writeOwned(path, content)
+        : upsertSection(path, content, markersFor(name), name === 'trail' ? [GRAFT_MARKERS] : []).action;
     if (name === 'trail' && host.kind === 'owned') removeGraftCopy(join(repo, host.relPath));
     written.push({ id: host.id, path, action });
   }

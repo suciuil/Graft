@@ -3,11 +3,11 @@
  * `callTool` never throws — hosts get soft errors as isError content.
  */
 import { Graft } from '../engine.js';
-import { formatAsk, formatAskWithSaved, skeleton, formatSkeleton } from '../ask/ask.js';
+import { formatAsk, formatAskWithSaved, skeleton, formatSkeleton, structuralIntent } from '../ask/ask.js';
 import { formatCheckReport } from '../context/check.js';
 import { formatGraphCheckReport } from '../graph/check.js';
 import { loadGraphCached } from '../graph/load.js';
-import { ensureFreshChildren, ensureFreshGraph, refreshNote } from '../graph/refresh.js';
+import { ensureFreshChildren, ensureFreshGraph, refreshLinks, refreshNote } from '../graph/refresh.js';
 import { deepNoticeFor } from '../graph/auto-deep.js';
 import { contextDirFor } from '../context/node-file.js';
 import { resolveSymbol, edgeWalk, type Direction, type EdgeHit } from '../graph/traverse.js';
@@ -210,6 +210,24 @@ function renderMatches(
     .join('\n\n');
 }
 
+/** `graft_trace_calls`'s `depth`: `"all"`/`"full"` (or a huge number) walks the
+ * full transitive closure — every connected source — terminating when no new
+ * node is reached; a number ≥ 1 is floored; anything else is undefined (the
+ * default, 1). Shared by the single-map and the workspace paths. */
+export function traceDepth(raw: unknown): number | undefined {
+  if (raw === 'all' || raw === 'full') return Number.POSITIVE_INFINITY;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) return Math.floor(raw);
+  return undefined;
+}
+
+/** Whether a workspace tool reads the links between parts (a repository built
+ * in parts), so they are made again first if a part changed. */
+function readsLinks(name: string, args: Record<string, unknown>): boolean {
+  // Only a structural question ("who calls X") reads them in graft_find_code.
+  if (name === 'graft_find_code') return structuralIntent(String(args.query ?? '')) !== null;
+  return name === 'graft_trace_calls' || name === 'graft_find_all' || name === 'graft_repo_map';
+}
+
 /** When the MCP server is rooted at a workspace parent, the ask/callers/grep/
  * map/check tools federate across the children — identical to the CLI, and the
  * file API looks the file up in the child that holds it. Returns null for any
@@ -234,7 +252,7 @@ async function callWorkspaceTool(
       if (!symbol) return { text: 'graft_trace_calls requires a symbol', isError: true };
       const { text, found } = federateCallers(root, dirOverride, symbol, {
         direction: args.direction === 'out' ? 'out' : 'in',
-        depth: typeof args.depth === 'number' && Number.isFinite(args.depth) ? args.depth : undefined,
+        depth: traceDepth(args.depth),
         in: typeof args.in === 'string' && args.in ? args.in : undefined,
       });
       return { text, isError: !found };
@@ -245,6 +263,7 @@ async function callWorkspaceTool(
       const { result, coverage } = federateGrep(root, dirOverride, pattern, {
         ignoreCase: typeof args.ignore_case === 'boolean' ? args.ignore_case : undefined,
         fixed: typeof args.fixed === 'boolean' ? args.fixed : undefined,
+        in: typeof args.in === 'string' && args.in ? args.in : undefined,
       });
       const text = result.totalHits === 0 ? zeroHitNote(result) : formatGrepResult(result);
       return { text: coverage ? `${text}\n${coverage}` : text, isError: false };
@@ -369,6 +388,12 @@ async function callToolScoped(
         ? await ensureFreshChildren(root, ws.children, { contextDir: dirOverride })
         : await ensureFreshGraph(root, { contextDir: dirOverride });
       note = refreshNote(r);
+      // A repository built in parts: the links between them, made again if a part
+      // changed, for the tools that read them.
+      if (ws && readsLinks(name, args)) {
+        const failed = await refreshLinks(root, { contextDir: dirOverride });
+        if (failed) note = note ? `${note}\n${failed}` : failed;
+      }
       // Read after the refresh, which is what marks changed nodes' summaries stale.
       // Skipped for graft_check_freshness, whose report already names them.
       // With auto-deep on: the automatic run's state instead of the manual nudge.
@@ -477,14 +502,7 @@ async function callSingleTool(
         const matches = resolveSymbol(w, symbol, inOpt);
         if (matches.length === 0) return { text: unknownSymbolText(symbol), isError: true };
         const direction: Direction = args.direction === 'out' ? 'out' : 'in';
-        // `depth: "all"` (or a huge number) walks the full transitive closure —
-        // every connected source — terminating when no new node is reached.
-        const depth =
-          args.depth === 'all' || args.depth === 'full'
-            ? Number.POSITIVE_INFINITY
-            : typeof args.depth === 'number' && Number.isFinite(args.depth) && args.depth >= 1
-              ? Math.floor(args.depth)
-              : 1;
+        const depth = traceDepth(args.depth) ?? 1;
         const results = matches.map((m) => ({ symbol: m, hits: edgeWalk(w, m, direction, depth) }));
         const byId = new Map(results.map((r) => [r.symbol.id, r.hits]));
         const body = renderMatches(direction, depth > 1, matches, (m) => byId.get(m.id) ?? [], w);

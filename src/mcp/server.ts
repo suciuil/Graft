@@ -6,7 +6,9 @@ import { createInterface } from 'node:readline';
 import { TOOLS, callTool } from './tools.js';
 import { setMcpClient } from './client.js';
 import { mcpInstructions } from './instructions.js';
+import { repoFacts } from '../hosts/repo-facts.js';
 import { hasGraftIndex } from '../graph/root.js';
+import { keepWorkspaceMaps, mcpKeepBytes } from '../graph/load.js';
 import { mainWorktreeRoot } from '../graph/seed.js';
 import { runUpkeep } from '../upkeep-run.js';
 import { runningVersion } from '../upkeep.js';
@@ -104,6 +106,9 @@ export function startMcpServer(root: string, dirOverride?: string, version = '0'
   // repo's, so it does none of the repo upkeep either: it starts in every
   // project. (The flag keeps its old name: entries already written use it.)
   const brainsOnly = opts.brainsOnly === true;
+  // A long-lived server: the maps of a workspace too big to keep whole stay
+  // cached between queries, the most recently used, within a share of the heap.
+  if (!brainsOnly) keepWorkspaceMaps(mcpKeepBytes());
   // The self-maintenance pass, run once at boot. This is the ONLY channel that
   // reaches hosts with no hook support (Cursor, and any plain MCP client): it
   // refreshes rule files an older `graft init` wrote, and kicks off the cached
@@ -161,7 +166,7 @@ export function startMcpServer(root: string, dirOverride?: string, version = '0'
         // can actually read — without this, a Kilo config sitting on the machine
         // would feed Kilo's model list into a Cursor or Codex session.
         setMcpClient(params?.clientInfo?.name, params?.clientInfo?.version);
-        const local = [upkeep.length ? upkeep.join('\n') : '', brainsOnly ? '' : mcpInstructions()];
+        const local = [upkeep.length ? upkeep.join('\n') : '', brainsOnly ? '' : mcpInstructions(repoFacts(root, dirOverride))];
         const answer = (remote: string[]) =>
           reply(id, {
             protocolVersion: params?.protocolVersion ?? '2024-11-05',

@@ -56,6 +56,15 @@ export function fencedBlock(body: string, eol: LineEnding = '\n', markers: Marke
   return eol === '\n' ? block : block.replace(/\n/g, '\r\n');
 }
 
+/** The block fenced by `markers` in `text`, markers included and line endings
+ * made LF, or null when the text holds none. */
+export function blockIn(text: string, markers: Markers): string | null {
+  const lines = text.replace(/\r/g, '').split('\n');
+  const s = markerLineIndex(lines, markers.start);
+  const e = s === -1 ? -1 : markerLineIndex(lines, markers.end, s + 1);
+  return s !== -1 && e !== -1 ? lines.slice(s, e + 1).join('\n') : null;
+}
+
 /** The file's dominant line ending: CRLF if any '\r\n' is present, else LF. */
 function detectEol(text: string): LineEnding {
   return text.includes('\r\n') ? '\r\n' : '\n';

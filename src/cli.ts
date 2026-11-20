@@ -59,7 +59,7 @@ import { openBrowser } from "./util/browser.js";
 import { committedAtBase, learningsAtBase, teammateEdits, withBaseLearnings } from "./check/learning-edits.js";
 import { CACHE_DIR, contextDirFor } from "./context/node-file.js";
 import { loadGraphCached } from "./graph/load.js";
-import { combinedStaleness, deepRebuildDue, deepStalenessFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, initDeepSuggestion, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
+import { combinedStaleness, deepRebuildDue, deepStalenessFor, ensureFreshChildren, ensureFreshGraph, formatStalenessReport, initDeepSuggestion, refreshLinks, refreshNote, stalenessReport, summaryStaleness } from "./graph/refresh.js";
 import { federateSkeleton, isPartsWorkspace, isWorkspaceBuildRoot, readWorkspace, removeWorkspace } from "./graph/workspace.js";
 import { NOT_GIT_LINE, NOT_GIT_PAIR_REFUSAL, homeFolderRefusal, isGitWorkTree } from "./init-guard.js";
 import { hasGraftIndex, nearestGraftRoot } from "./graph/root.js";
@@ -206,6 +206,7 @@ import { claimedSummary, setClaimListener, setCompactNudge, setDeepDue, setInitD
 import { calledRecently, formatLastCalls, lastTurnCallsBy, readRecentCalls, recordRecentCall, summedTally, turnModels } from "./context/recent-calls.js";
 import { callerKey } from "./context/caller.js";
 import { settleInitDue } from "./hosts/auto-init.js";
+import { repoFacts } from "./hosts/repo-facts.js";
 import { formatUpdateNudge, maybeRefreshInBackground, readUpdateCache, refreshUpdateCache, writeStamp } from "./upkeep.js";
 import {
   countBucket,
@@ -550,6 +551,27 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
   const init = settleInitDue(root, { children: ws?.children }, process.env, !disabled);
   if (init.note) console.error(init.note);
   setInitDue(init.reason);
+}
+
+/**
+ * After a build that split `root` in parts, or made it one map again: the agent
+ * instructions `init` wrote there say how to work in a repository built in
+ * parts only where it is one (hosts/repo-facts.ts), so they are refreshed the
+ * way a query refreshes them (hosts/auto-init.ts): only text this graft may
+ * rewrite by itself is rewritten, and otherwise `graft init` is recommended.
+ */
+function afterPartsChange(root: string): void {
+  const init = settleInitDue(root);
+  if (init.note) console.error(init.note);
+  else if (init.reason) console.error(`· run \`${cmd("graft init")}\` here to update the agent instructions: ${init.reason}`);
+}
+
+/** In a repository built in parts, before a query that reads the links between
+ * them: make them again if a part changed (after {@link refreshBefore}, which
+ * rebuilds the parts). The note, when that failed, goes to stderr. */
+async function relinkBefore(dir: string, globalDir: string | undefined, opts: { refresh?: boolean }): Promise<void> {
+  const note = await refreshLinks(dir, { contextDir: globalDir, disabled: opts.refresh === false });
+  if (note) console.error(note);
 }
 
 /** Attached to every query command: `--no-refresh` answers from the graph exactly
@@ -1388,6 +1410,8 @@ grouped(program.command("build"), GROUP.setup)
         reuse: opts.reuse,
         lsp: opts.lsp,
         onlyDirs,
+        // A part's map: also what the links to the other parts are made from.
+        boundary: part || undefined,
         onProgress: ({ phase, index, total, file }) =>
           graphProgress.update(
             `${phase === "enrich" ? "summarizing" : "parsing"} ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
@@ -1612,6 +1636,8 @@ grouped(program.command("build"), GROUP.setup)
       console.error("");
       if (r.index) {
         console.log(`✓ one map per part: ${r.listed.length} part(s) indexed → ${r.index}`);
+        const here = resolve(process.cwd()) === resolve(target) ? "" : ` ${/\s/.test(target) ? `"${target}"` : target}`;
+        console.error(`  · \`${cmd(`graft parts${here}`)}\` lists them by the path that names one: --in <part>/ in a query, or in a prompt to your AI assistant`);
       } else {
         console.error("✗ no part was built, so the map here was left as it was");
       }
@@ -1623,7 +1649,11 @@ grouped(program.command("build"), GROUP.setup)
 
     for (const target of roots) {
       if (codeWs) console.error(`\n— ${label(target)}/`);
+      const partsBefore = repoFacts(target).parts === true;
       await buildOne(target, overrideFor(target));
+      // Built in parts now, or one map again: the agent instructions say how to work
+      // in a repository built in parts only where it is, so bring them up to date.
+      if ((repoFacts(target).parts === true) !== partsBefore) afterPartsChange(target);
     }
     // A deep build run by hand that went through fixes what a failed automatic
     // one reported: automatic runs may start again (graph/auto-deep.ts).
@@ -1673,6 +1703,9 @@ grouped(program.command("ask"), GROUP.find)
     await refreshBefore(dir, opts);
     const askGlobalDir = program.opts<GlobalOpts>().dir;
     if (readWorkspace(dir, askGlobalDir)) {
+      // Only a structural question ("who calls X") reads the links between parts.
+      const { structuralIntent } = await import("./ask/ask.js");
+      if (structuralIntent(query)) await relinkBefore(dir, askGlobalDir, opts);
       runWorkspaceAsk(dir, askGlobalDir, query, {
         limit: Number(opts.limit), source: opts.source, full: opts.full, in: opts.in, json: opts.json,
       });
@@ -2775,6 +2808,7 @@ grouped(program.command("callers"), GROUP.find)
       await refreshBefore(dir, opts);
       const globalOpts = program.opts<{ dir?: string }>();
       if (!opts.json && readWorkspace(dir, globalOpts.dir)) {
+        await relinkBefore(dir, globalOpts.dir, opts);
         runWorkspaceCallers(dir, globalOpts.dir, symbol, {
           direction: opts.direction === "out" ? "out" : "in",
           depth: opts.depth
@@ -2846,8 +2880,9 @@ grouped(program.command("grep"), GROUP.find)
       await refreshBefore(dir, opts);
       const globalOpts = program.opts<{ dir?: string }>();
       if (readWorkspace(dir, globalOpts.dir)) {
+        await relinkBefore(dir, globalOpts.dir, opts);
         runWorkspaceGrep(dir, globalOpts.dir, pattern, {
-          ignoreCase: opts.ignoreCase, fixed: opts.fixed, json: opts.json,
+          ignoreCase: opts.ignoreCase, fixed: opts.fixed, in: opts.in, json: opts.json,
         });
         return;
       }
@@ -2886,6 +2921,7 @@ grouped(program.command("map"), GROUP.find)
     }
     await refreshBefore(dir, opts); // after arg validation: a bad flag shouldn't cost a rebuild
     if (!opts.json && readWorkspace(root, globalOpts.dir)) {
+      await relinkBefore(dir, globalOpts.dir, opts);
       runWorkspaceMap(root, globalOpts.dir, { maxDirs: maxDirsW });
       return;
     }
@@ -2920,6 +2956,27 @@ grouped(program.command("languages"), GROUP.setup)
       return;
     }
     process.stdout.write(formatLanguageSupport(rows, brand()));
+  });
+
+// `graft parts`: the parts a repository too big for one map was built in, by
+// the names `--in <part>/` and a prompt take (graph/parts-list.ts). Reads only
+// the index and each part's file stats: no refresh, no graph loaded.
+grouped(program.command("parts"), GROUP.setup)
+  .description(
+    "List the parts a repository too big for one map was built in (graft build --all-parts), each by the path " +
+      "from the repo root that names it with --in <part>/ or in a prompt, with its files, map size and build time",
+  )
+  .argument("[dir]", "the repository, or any folder in it or in one of its parts (default: the current folder)")
+  .option("--json", "output the parts as JSON, with the folder each part's map is kept in")
+  .action(async (dirArg: string | undefined, opts: { json?: boolean }) => {
+    const { formatPartsReport, partsReport, partsRootFor } = await import("./graph/parts-list.js");
+    const globalDir = program.opts<GlobalOpts>().dir;
+    const { root, here } = partsRootFor(dirArg ?? process.cwd(), globalDir);
+    const report = partsReport(root, globalDir, here);
+    if (opts.json) console.log(JSON.stringify(report, null, 2));
+    else if (report.kind === "none") process.stderr.write(formatPartsReport(report));
+    else process.stdout.write(formatPartsReport(report));
+    if (report.kind === "none") process.exitCode = 1;
   });
 
 // `graft find-command <keyword>`: the commands whose name or description holds a

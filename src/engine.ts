@@ -58,6 +58,8 @@ export interface GraphRunOptions {
   lsp?: boolean;
   /** Repo-relative directory prefixes to limit the build to (`--only-dir`). */
   onlyDirs?: string[];
+  /** Write the map's boundary: a part of a repository built in parts (`graph/boundary.ts`). */
+  boundary?: boolean;
   onProgress?: GraphBuildOptions["onProgress"];
 }
 
@@ -108,6 +110,7 @@ export class Graft {
       reuse: opts.reuse,
       lsp: opts.lsp,
       onlyDirs: opts.onlyDirs,
+      boundary: opts.boundary,
       onProgress: opts.onProgress,
     });
   }

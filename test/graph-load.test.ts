@@ -13,6 +13,11 @@ import { join } from "node:path";
 import {
   loadGraphCached,
   loadAskIndexCached,
+  doneWithMap,
+  keepWorkspaceMaps,
+  mcpKeepBytes,
+  startMapCommand,
+  KEEP_GRAPHS_BYTES,
   __parseCount,
   __resetParseCounts,
 } from "../src/graph/load.js";
@@ -117,6 +122,113 @@ test("loadAskIndexCached: caches and invalidates the same way as the graph loade
   const i3 = loadAskIndexCached(dir);
   assert.equal(i3?.docCount, 1);
   assert.equal(__parseCount.askIndex, 2);
+});
+
+test("doneWithMap: a one-shot command drops each map once used; a budget keeps the most recently used", () => {
+  const dirs = ["a", "b", "c"].map((id) => {
+    const dir = fixtureDir();
+    writeGraph({ version: 1, nodes: [node(id)], edges: [] } as GraphV1, dir);
+    return dir;
+  });
+  const [a, b, c] = dirs;
+  const size = statSync(wiringPath(a)).size;
+  assert.ok(dirs.every((d) => statSync(wiringPath(d)).size === size), "the fixture maps are the same size");
+  // Each use one command: what a command leaves goes least recently used first.
+  const use = (dir: string) => {
+    startMapCommand();
+    const g = loadGraphCached(dir);
+    doneWithMap(dir);
+    return g;
+  };
+  try {
+    // No budget, as in a one-shot command: every use parses again.
+    __resetParseCounts();
+    use(a);
+    use(a);
+    assert.equal(__parseCount.graph, 2, "with no budget a map is dropped once used");
+
+    // Room for two maps: the least recently used goes when a third comes.
+    keepWorkspaceMaps(2 * size);
+    const ga = use(a);
+    use(b);
+    __resetParseCounts();
+    assert.strictEqual(use(a), ga, "a kept map is not parsed again");
+    use(c);
+    assert.equal(__parseCount.graph, 1, "c is parsed; a and b fit");
+    use(a);
+    assert.equal(__parseCount.graph, 1, "a, used last but one, is still kept");
+    use(b);
+    assert.equal(__parseCount.graph, 2, "b, the least recently used, made room for c");
+
+    // Lowering the budget drops what no longer fits, at once.
+    keepWorkspaceMaps(0);
+    __resetParseCounts();
+    use(a);
+    assert.equal(__parseCount.graph, 1);
+
+    // A map bigger than the whole budget is never kept.
+    keepWorkspaceMaps(size - 1);
+    __resetParseCounts();
+    use(a);
+    use(a);
+    assert.equal(__parseCount.graph, 2);
+
+    // ... and drops nothing else: the maps kept before it stay.
+    const big = fixtureDir();
+    writeGraph({ version: 1, nodes: ["d", "e", "f"].map(node), edges: [] } as GraphV1, big);
+    assert.ok(statSync(wiringPath(big)).size > 2 * size, "the big map outgrows the budget");
+    keepWorkspaceMaps(2 * size);
+    use(a);
+    use(b);
+    __resetParseCounts();
+    use(big);
+    use(big);
+    assert.equal(__parseCount.graph, 2, "the big map is parsed for each use");
+    use(a);
+    use(b);
+    assert.equal(__parseCount.graph, 2, "a and b were kept through it");
+  } finally {
+    keepWorkspaceMaps(0);
+  }
+});
+
+test("doneWithMap: a command walking more maps than fit keeps the first ones, so the next walk finds them", () => {
+  const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => {
+    const dir = fixtureDir();
+    writeGraph({ version: 1, nodes: [node(id)], edges: [] } as GraphV1, dir);
+    return dir;
+  });
+  const size = statSync(wiringPath(a)).size;
+  const walk = (...dirs: string[]) => {
+    startMapCommand();
+    for (const dir of dirs) {
+      loadGraphCached(dir);
+      doneWithMap(dir);
+    }
+  };
+  try {
+    keepWorkspaceMaps(2 * size);
+    walk(a, b, c);
+    __resetParseCounts();
+    walk(a, b, c);
+    assert.equal(__parseCount.graph, 1, "only c is parsed again: a and b were kept through both walks");
+
+    // A later command still makes room for a map it needs, with what the walks left.
+    __resetParseCounts();
+    walk(d, d);
+    assert.equal(__parseCount.graph, 1, "d is kept for its second use");
+    walk(b);
+    assert.equal(__parseCount.graph, 1, "b is still kept");
+    walk(a);
+    assert.equal(__parseCount.graph, 2, "a, the least recently used, made room for d");
+  } finally {
+    keepWorkspaceMaps(0);
+  }
+});
+
+test("mcpKeepBytes: a quarter of the heap, never less than what is kept anyway", () => {
+  assert.equal(mcpKeepBytes(4e9), 1e9);
+  assert.equal(mcpKeepBytes(800e6), KEEP_GRAPHS_BYTES);
 });
 
 // This file pins the mtime-keyed load cache, so the pre-query auto-refresh —

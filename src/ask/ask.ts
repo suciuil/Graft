@@ -28,7 +28,7 @@ import {
   scopesOfGraph,
 } from "../graph/scopes.js";
 import { normalizePathPrefix } from "../util/paths.js";
-import { resolveSymbol } from "../graph/traverse.js";
+import { resolveSymbolTier } from "../graph/traverse.js";
 import type { EdgeV1, GraphV1, NodeV1, Relation } from "../graph/types.js";
 import {
   combineComparableScopes,
@@ -336,14 +336,84 @@ function subjectWords(query: string): string[] {
  * match; the next (shorter) word is tried instead, same as an unresolved word
  * today — and if nothing survives for ANY word, `subjects.length === 0`
  * naturally falls through to the existing loud fallthrough note. */
-function findSubjectNodes(query: string, graph: GraphV1, inPrefix?: string): { nodes: NodeV1[]; tried: string } {
+export function findSubjectNodes(
+  query: string,
+  graph: GraphV1,
+  inPrefix?: string,
+): { nodes: NodeV1[]; tried: string; rank: number; tier: number } {
   const words = subjectWords(query).sort((a, b) => b.length - a.length);
-  for (const w of words) {
-    let nodes = resolveSymbol(graph, w);
+  for (const [rank, w] of words.entries()) {
+    let { nodes, tier } = resolveSymbolTier(graph, w);
     if (inPrefix) nodes = nodes.filter((n) => pathUnderPrefix(n.path, inPrefix));
-    if (nodes.length > 0) return { nodes, tried: w };
+    if (nodes.length > 0) return { nodes, tried: w, rank, tier };
   }
-  return { nodes: [], tried: words[0] ?? query };
+  return { nodes: [], tried: words[0] ?? query, rank: words.length, tier: 0 };
+}
+
+/** Which way a structural question walks: `outgoing` for "what does X call /
+ * import", else callers. Null when the query asks no structural question. */
+export interface StructuralIntent {
+  outgoing: boolean;
+  rels: ReadonlySet<Relation>;
+}
+
+export function structuralIntent(query: string): StructuralIntent | null {
+  const wantsIn = INCOMING.test(query);
+  const wantsOut = OUTGOING.test(query);
+  if (!wantsIn && !wantsOut) return null;
+  const outgoing = wantsOut && !wantsIn; // "what does X call / import" — else default to callers
+  return { outgoing, rels: new Set(outgoing ? OUTGOING_RELS : INCOMING_RELS) };
+}
+
+/** One structural hit: the node at the other end of an edge, or the raw target
+ * (an unresolved import's module string) when the graph has no such node. */
+export function structuralHit(node: NodeV1 | undefined, other: string, relation: Relation, outgoing: boolean): AskHit {
+  return {
+    kind: outgoing ? "callee" : "caller",
+    title: node ? node.name : other, // unresolved import target → raw module string
+    pointer: node ? `${node.path}:${node.span}` : other,
+    snippet: node?.summary?.split("\n")[0].trim() ?? node?.signature ?? "",
+    relation,
+    score: 1,
+  };
+}
+
+/** The structural hits of `subjects` in one graph, one per other end and
+ * relation, in graph edge order. `keep` drops edges the caller knows are wrong
+ * (a part's edges that every part together does not make). */
+export function structuralHits(
+  graph: GraphV1,
+  subjects: ReadonlySet<string>,
+  intent: StructuralIntent,
+  keep?: (e: EdgeV1) => boolean,
+): AskHit[] {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const hits: AskHit[] = [];
+  const seen = new Set<string>();
+  for (const e of graph.edges as EdgeV1[]) {
+    if (!intent.rels.has(e.relation)) continue;
+    const anchor = intent.outgoing ? e.source : e.target;
+    const other = intent.outgoing ? e.target : e.source;
+    if (!subjects.has(anchor) || seen.has(other + e.relation)) continue;
+    if (keep && !keep(e)) continue;
+    seen.add(other + e.relation);
+    hits.push(structuralHit(byId.get(other), other, e.relation, intent.outgoing));
+  }
+  return hits;
+}
+
+/** The order of structural hits: by pointer. */
+export const byPointer = (a: AskHit, b: AskHit): number => a.pointer.localeCompare(b.pointer);
+
+export function structuralNote(subject: string, outgoing: boolean): string {
+  return outgoing ? `outgoing edges from ${subject}` : `callers / references of ${subject}`;
+}
+
+/** Mark the hits whose file has parse errors and, with `source`, inline their
+ * code, as `ask` does for its own hits. `root` is the graph's repository. */
+export function dressHits(root: string, hits: AskHit[], graph: GraphV1, opts: { source?: boolean; full?: boolean }): void {
+  markParseErrors(hits, graph);
+  if (opts.source) inlineSource(root, hits, graph, opts.full ?? false);
 }
 
 /** `structural()`'s result: either a genuine structural `AskResult`, a signal
@@ -354,7 +424,7 @@ function findSubjectNodes(query: string, graph: GraphV1, inPrefix?: string): { n
  * caller falls through to `lexical()` silently, same as before this fix. */
 type StructuralOutcome = { result: AskResult } | { fallthroughNote: string } | null;
 
-function fallthroughNoteFor(subject: string): string {
+export function fallthroughNoteFor(subject: string): string {
   return (
     `structural index: no entries for '${subject}' — showing lexical matches; ` +
     `for precise edges try ${cmd("graft callers")} '${subject}', or ${cmd("graft grep")} '${subject}' for every reference (loosen the pattern if it returns nothing)`
@@ -362,52 +432,27 @@ function fallthroughNoteFor(subject: string): string {
 }
 
 function structural(query: string, graph: GraphV1, limit: number, inPrefix?: string): StructuralOutcome {
-  const wantsIn = INCOMING.test(query);
-  const wantsOut = OUTGOING.test(query);
-  if (!wantsIn && !wantsOut) return null;
+  const intent = structuralIntent(query);
+  if (!intent) return null;
 
   const { nodes: subjects, tried } = findSubjectNodes(query, graph, inPrefix);
   if (subjects.length === 0) return { fallthroughNote: fallthroughNoteFor(tried) };
 
-  const ids = new Set(subjects.map((n) => n.id));
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const outgoing = wantsOut && !wantsIn; // "what does X call / import" — else default to callers
-  const rels = new Set(outgoing ? OUTGOING_RELS : INCOMING_RELS);
-
-  const hits: AskHit[] = [];
-  const seen = new Set<string>();
-  for (const e of graph.edges as EdgeV1[]) {
-    if (!rels.has(e.relation)) continue;
-    const anchor = outgoing ? e.source : e.target;
-    const other = outgoing ? e.target : e.source;
-    if (!ids.has(anchor) || seen.has(other + e.relation)) continue;
-    seen.add(other + e.relation);
-    const node = byId.get(other);
-    hits.push({
-      kind: outgoing ? "callee" : "caller",
-      title: node ? node.name : other, // unresolved import target → raw module string
-      pointer: node ? `${node.path}:${node.span}` : other,
-      snippet: node?.summary?.split("\n")[0].trim() ?? node?.signature ?? "",
-      relation: e.relation,
-      score: 1,
-    });
-  }
+  const hits = structuralHits(graph, new Set(subjects.map((n) => n.id)), intent);
 
   // Subject resolved but the graph has no indexed edges for it — same "loud,
   // never a bare empty" contract as `graft callers`/`callees` — fall through
   // to lexical rather than returning a structural result with zero hits.
   if (hits.length === 0) return { fallthroughNote: fallthroughNoteFor(subjects[0].name) };
 
-  hits.sort((a, b) => a.pointer.localeCompare(b.pointer));
+  hits.sort(byPointer);
   return {
     result: {
       query,
       mode: "structural",
       subject: subjects[0].name,
       hits: hits.slice(0, limit),
-      note: outgoing
-        ? `outgoing edges from ${subjects[0].name}`
-        : `callers / references of ${subjects[0].name}`,
+      note: structuralNote(subjects[0].name, intent.outgoing),
     },
   };
 }
@@ -1262,6 +1307,9 @@ export interface AskOptions {
   /** @internal Return latent file queues and the exact baseline list so a
    * workspace parent can fuse files before projecting spans. */
   includeRankingMetadata?: boolean;
+  /** @internal False: rank matches only, for a workspace parent that has
+   * answered the structural question across its children already. */
+  structural?: boolean;
 }
 
 /** Parse a `path:Lx-Ly` pointer into its parts, or null if it isn't one
@@ -1346,7 +1394,7 @@ function inlineSource(root: string, hits: AskHit[], graph: GraphV1 | null, full:
 
 /** Every repo-relative file path a set of hits points into (dedup). A symbol
  * pointer is `path:span`; a concept pointer is a comma-joined path list. */
-function hitFiles(hits: AskHit[]): Set<string> {
+export function hitFiles(hits: readonly AskHit[]): Set<string> {
   const files = new Set<string>();
   for (const h of hits) {
     const span = parseSpan(h.pointer);
@@ -1391,7 +1439,7 @@ export function ask(dir: string, query: string, opts: AskOptions = {}): AskResul
 
   let result: AskResult;
   if (corpus.graph) {
-    const outcome = structural(query, corpus.graph, limit, inPrefix);
+    const outcome = opts.structural === false ? null : structural(query, corpus.graph, limit, inPrefix);
     if (outcome && "result" in outcome) {
       result = outcome.result;
     } else {

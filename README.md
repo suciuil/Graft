@@ -748,6 +748,10 @@ trail build --no-follow-nested-repos # exclude nested clones again and persist t
 trail build --index-text             # also index plain-text .txt files, cut into chunks with their own line spans; persist the choice
 trail build --no-index-text          # leave .txt files out again and persist that choice (the default)
 trail build --index-text-dir docs/specs  # index .txt files only under this folder (repeatable; turns --index-text on; code is still indexed everywhere)
+trail build --all-parts              # a repo too big for one map: build it as one map per part (folder)
+
+trail parts [dir]                    # list those parts by the path that names one: --in <part>/ in a query, or in a prompt
+trail parts --json                   # the same as JSON, with the folder each part's map is kept in
 
 trail staleness [dir]                # what % of summaries are out of date (changed + new code), whether `trail build --deep` is due against the threshold, and the worst files ($0, no LLM)
 trail staleness --top 20 --json      # more files, as JSON for scripts (`recommended`, `pct`, `totals`, per-repo split in a workspace)

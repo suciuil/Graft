@@ -86,12 +86,12 @@
 
 <div class="stats">
 <!-- stats:start -->
-  <div class="stat feature"><b>93</b><span>New features</span></div>
+  <div class="stat feature"><b>92</b><span>New features</span></div>
   <div class="stat improvement"><b>93</b><span>Improvements</span></div>
   <div class="stat fix"><b>47</b><span>Bug fixes</span></div>
   <div class="stat change"><b>22</b><span>Change requests</span></div>
-  <div class="stat"><b>255</b><span>Items in total</span></div>
-  <div class="stat scope"><b>190</b><span>Graft itself</span></div>
+  <div class="stat"><b>254</b><span>Items in total</span></div>
+  <div class="stat scope"><b>189</b><span>Graft itself</span></div>
   <div class="stat scope"><b>65</b><span>Tree-sitter grammars</span></div>
 <!-- stats:end -->
 </div>
@@ -107,12 +107,12 @@
       <tr class="sub"><td><a data-area="lang" data-scope="tree-sitter">of which Bundled tree-sitter grammars</a></td><td>18</td><td>9</td><td>37</td><td>1</td><td>65</td></tr>
       <tr><td><a data-area="llm">LLM providers &amp; deep build</a></td><td>11</td><td>5</td><td>13</td><td>5</td><td>34</td></tr>
       <tr><td><a data-area="savings">Savings, pricing &amp; model detection</a></td><td>12</td><td>13</td><td>16</td><td>3</td><td>44</td></tr>
-      <tr><td><a data-area="agents">Agent integrations</a></td><td>3</td><td>6</td><td>6</td><td>2</td><td>17</td></tr>
+      <tr><td><a data-area="agents">Agent integrations</a></td><td>2</td><td>6</td><td>6</td><td>2</td><td>16</td></tr>
       <tr><td><a data-area="cli">CLI &amp; configuration</a></td><td>16</td><td>7</td><td>11</td><td>1</td><td>35</td></tr>
       <tr><td><a data-area="privacy">Privacy / no-cloud</a></td><td>0</td><td>0</td><td>2</td><td>5</td><td>7</td></tr>
       <tr><td><a data-area="packaging">Packaging, installer, updates &amp; CI</a></td><td>12</td><td>2</td><td>8</td><td>6</td><td>28</td></tr>
-      <tr class="total"><td>Total</td><td>93</td><td>47</td><td>93</td><td>22</td><td>255</td></tr>
-      <tr class="scope"><td><a data-scope="graft">Graft</a></td><td>75</td><td>38</td><td>56</td><td>21</td><td>190</td></tr>
+      <tr class="total"><td>Total</td><td>92</td><td>47</td><td>93</td><td>22</td><td>254</td></tr>
+      <tr class="scope"><td><a data-scope="graft">Graft</a></td><td>74</td><td>38</td><td>56</td><td>21</td><td>189</td></tr>
       <tr class="scope"><td><a data-scope="tree-sitter">Bundled tree-sitter grammars</a></td><td>18</td><td>9</td><td>37</td><td>1</td><td>65</td></tr>
 <!-- counts:end -->
     </tbody>
@@ -203,7 +203,7 @@
     <li data-type="feature" data-area="packaging"><span class="tag">Feature</span><span><span class="area">Packaging &amp; installer</span>The "about" command now shows the fork's homepage (the online list of changes) and the page where installer kits are downloaded. A new "about web" opens the homepage. "about fork" opens the homepage when the local copy is missing. The address for reporting issues has been updated.</span></li>
     <li data-type="feature" data-area="llm"><span class="tag">Feature</span><span><span class="area">LLM &amp; deep build</span>Optional automatic deep build ("auto-deep", off by default, per repo or for all repos). When it is on and enough summaries are out of date, the first query starts the deep build in the background and the "run build --deep" reminder is no longer shown.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>When init or build fails, a final line now points to this fork's issue tracker and lists what to include in the report (the command, its full output, the version and the operating system).</span></li>
-    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The opt-in savings report now also records which AI assistant and which editor or terminal ran graft, with their versions (for example Kilo Code 7.8.18 in Visual Studio Code 1.144.0).</span></li>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>The opt-in savings report now also records which AI assistant and which editor or terminal ran graft, with their versions.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>If a caller search finds nothing, graft now says how many indexed files had syntax errors, because a caller inside an unreadable part of a file would be missing from the graph.</span></li>
     <li data-type="feature" data-area="cli"><span class="tag">Feature</span><span><span class="area">CLI &amp; configuration</span>New "graft find-command &lt;keyword&gt;" command searches all commands for a word or phrase in their name or description (not case-sensitive), lists the matches with name matches first, then shows the full help of each one. It exits with an error and points to "graft help" when nothing matches.</span></li>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span>When setup finishes, it now suggests running the deep build that adds code summaries if none has run yet or the existing summaries are too out of date. It explains why, notes that this needs an API key and costs tokens, says how to turn the suggestion off, and when an AI agent runs setup it asks the agent to pass the suggestion on to you.</span></li>
@@ -594,7 +594,7 @@
   <div class="scope" data-scope="graft">
   <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
   <ul>
-    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Model detection from host session records</b> when the agent doesn't report a model: Kilo Code (including forks, VS Code Insiders installs, paired models and subagents, and shells started by Kilo's agent), VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. Repos and VS Code workspaces opened through a junction or symlink are recognised, as are Kilo sessions not yet saved to Kilo's main database file. Kilo turns are not priced at the model of a Copilot chat in the same VS Code window, and Kilo and Copilot calls are not filed under the last Claude Code model in repos where Claude Code once ran. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.</span></li>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Model detection from host session records</b> when the agent doesn't report a model: VS Code / GitHub Copilot, and GitHub Copilot in JetBrains IDEs (including the locked session store on Windows). The agent's own report takes priority, except that a router family name (<code>gpt-5</code>) is refined to the precise model the host recorded. With several chats open, a host record is only used when the sessions agree or exactly one was written during the current turn. Otherwise tokens are shown without a price. When one turn used several models (for example a planning phase on a different model), savings are shown per model with a combined total.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Output templates and agent instructions put quotation marks around the tally, so agents quoted it in their replies.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Resolved unpriced token savings being filed under "unknown" when MCP agents omit their model identifier during tool calls.</span></li>
   </ul>
@@ -606,7 +606,7 @@
   <div class="scope" data-scope="graft">
   <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
   <ul>
-    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified (for example in Kilo Code or MCP sessions), savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.</span></li>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b><code>graft models</code> and a multi-model estimate table.</b> When the running model can't be identified, savings are estimated for every model the host has configured. The table is a fenced ASCII box with right-aligned amounts. When a call is priced, agents report one plain line instead of a table.</span></li>
     <li data-type="improvement" data-area="savings"><span class="tag">Improvement</span><span><span class="area">Savings &amp; pricing</span>Savings reports show where the price came from and which model was used, or why tokens could not be priced. They use readable model names ("Claude Opus 5") instead of routing IDs (<code>vertex_ai/claude-opus-5</code>).</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Prevented inaccurate and misleading dollar savings calculations caused by stale settings by removing deprecated static model and rate overrides (.graft/config.json model field, GRAFT_AGENT_MODEL, and GRAFT_INPUT_USD_PER_MTOK).</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Prevented the GRAFT_INPUT_USD_PER_MTOK environment variable from overriding known model list prices, keeping it strictly as a fallback for unpriced or unnamed models.</span></li>
@@ -621,7 +621,7 @@
   <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
   <ul>
     <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Agents report the model they run on</b> through a <code>--agent-model</code> CLI flag and an optional <code>model</code> parameter on every MCP tool. MCP calls keep their state separate, so concurrent requests don't mix. Agent instructions and MCP parameter descriptions ask for the model ID on every call, with specific guidance for GitHub Copilot in IntelliJ IDEA so it doesn't guess.</span></li>
-    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Lifetime savings ledger and <code>graft savings</code></b>: cumulative tokens and dollars saved per model, for all time, a year, a month or a day. <code>graft savings --all</code> totals every repo graft was used in. Earlier repos are found by a one-time, read-only scan of the folders remembered by Claude Code, Kilo, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex (<code>--discover</code> / <code>--no-discover</code>). One model spelled differently (punctuation, casing, provider prefixes, Databricks service ids and endpoint names) is kept as one row. If the savings file can't be read (for example an online-only OneDrive file), the saving is skipped with a warning instead of the history being lost, and an unreadable or corrupted file is set aside as a backup.</span></li>
+    <li data-type="feature" data-area="savings"><span class="tag">Feature</span><span><span class="area">Savings &amp; pricing</span><b>Lifetime savings ledger and <code>graft savings</code></b>: cumulative tokens and dollars saved per model, for all time, a year, a month or a day. <code>graft savings --all</code> totals every repo graft was used in. Earlier repos are found by a one-time, read-only scan of the folders remembered by Claude Code, VS Code, Cursor, Windsurf, VSCodium, JetBrains IDEs and Codex (<code>--discover</code> / <code>--no-discover</code>). One model spelled differently (punctuation, casing, provider prefixes, Databricks service ids and endpoint names) is kept as one row. If the savings file can't be read (for example an online-only OneDrive file), the saving is skipped with a warning instead of the history being lost, and an unreadable or corrupted file is set aside as a backup.</span></li>
     <li data-type="improvement" data-area="agents"><span class="tag">Improvement</span><span><span class="area">Agent integrations</span>Instruction templates explain how to run the CLI on every platform (plain <code>graft</code> on Windows too, with an <code>npx</code> fallback).</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Model IDs with a provider prefix (<code>anthropic/</code>, <code>azure/</code>, …) were not priced.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Savings were not tracked when CLI retrieval commands ran directly in a terminal.</span></li>
@@ -648,7 +648,7 @@
   <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
   <ul>
     <li data-type="feature" data-area="agents"><span class="tag">Feature</span><span><span class="area">Agent integrations</span><b>Tool-call gate for Claude Code and the Codex family.</b> Wasteful tool calls are redirected to the matching graft command instead of only being advised against.</span></li>
-    <li data-type="improvement" data-area="agents"><span class="tag">Improvement</span><span><span class="area">Agent integrations</span>Every agent gets the tool rules stated as rules: literal search → <code>graft grep</code>, "what's in this file" → <code>graft skeleton</code>, "who calls this" → <code>graft callers</code>. This covers Cursor, Kilo Code, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL.</span></li>
+    <li data-type="improvement" data-area="agents"><span class="tag">Improvement</span><span><span class="area">Agent integrations</span>Every agent gets the tool rules stated as rules: literal search → <code>graft grep</code>, "what's in this file" → <code>graft skeleton</code>, "who calls this" → <code>graft callers</code>. This covers Cursor, Kiro, Windsurf, Gemini, Copilot, Codex/AGENTS.md, Grok, Hermes and AdaL.</span></li>
     <li data-type="fix" data-area="llm"><span class="tag">Bug fix</span><span><span class="area">LLM &amp; deep build</span><code>build --deep</code> discarded good results when a model echoed the whole target description back instead of the plain ID.</span></li>
     <li data-type="fix" data-area="savings"><span class="tag">Bug fix</span><span><span class="area">Savings &amp; pricing</span>Token counts were unreadable on non-English locales ("1970 tokens saved" printed as "1.970").</span></li>
   </ul>
@@ -662,16 +662,6 @@
   <ul>
     <li data-type="fix" data-types="fix change" data-area="lang"><span class="tag">Bug fix</span><span><span class="area">Languages</span>Other changes to language support and parsing. <details class="more"><summary>details: 2 changes</summary><ul class="details"><li data-type="fix"><span class="tag">Bug fix</span><span>The second "build" key silently overrode the first — so npm run build was skipping the grammar step entirely (only the tsc + viewer half ran)</span></li><li data-type="change"><span class="tag">Change</span><span>Refresh the package-name-vs-grammar-key comments — the three places that cite the groovy package as the example of "package name ≠ grammar key" now name the new scope: scripts/build-grammars.mjs:302 (tarball naming), scripts/pack-bundle.mjs:22 (vendored-dir keying), and src/graph/extract.ts:85 (optionalGrammarPackages doc). Comment-only — no behavior change.</span></li></ul></details></span></li>
     <li data-type="change" data-area="packaging"><span class="tag">Change</span><span><span class="area">Packaging &amp; installer</span>The upstream GitHub CI workflows are disabled in the fork; they stay in the repository but do not run.</span></li>
-  </ul>
-  </div>
-</div>
-
-<div class="group" data-group="commit" data-date="2026-08-20">
-  <h2>2026-08-20 <small>first committed; build date not recorded</small></h2>
-  <div class="scope" data-scope="graft">
-  <h3>Graft <small>graft's own code, commands, settings and packaging</small></h3>
-  <ul>
-    <li data-type="feature" data-area="agents"><span class="tag">Feature</span><span><span class="area">Agent integrations</span><b>Kilo Code support.</b></span></li>
   </ul>
   </div>
 </div>

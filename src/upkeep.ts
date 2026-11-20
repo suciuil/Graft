@@ -35,6 +35,7 @@ import { homedir } from 'node:os';
 import { readJson, writeJsonAtomic, cacheDir } from './util/state.js';
 import { HOSTS, hostRelPath } from './hosts/registry.js';
 import { markersFor } from './hosts/sections.js';
+import { repoFacts, settledFacts } from './hosts/repo-facts.js';
 import { getNpmViewVersion, readCurrentVersion } from './cli-meta.js';
 import { brand } from './brand.js';
 import { FORK_RELEASES_URL } from './about.js';
@@ -315,6 +316,8 @@ export function wiredHostIds(repo: string): string[] {
  */
 function ownedFilesDrifted(repo: string, hosts: string[]): boolean {
   const wanted = new Set(hosts);
+  // Compared with the text fitted to the repo's map, as init writes it (built in parts or not).
+  const facts = repoFacts(repo);
   for (const host of HOSTS) {
     if (host.kind !== 'owned' || !wanted.has(host.id)) continue;
     // Under either name, each compared with the text that name renders: a repo on
@@ -326,7 +329,7 @@ function ownedFilesDrifted(repo: string, hosts: string[]): boolean {
         // Line endings are the checkout's to choose (git `core.autocrlf` rewrites
         // them), and a CRLF working copy of the right text is not stale content.
         const have = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
-        if (have !== host.content(n).replace(/\r\n/g, '\n')) return true;
+        if (have !== host.content(n, settledFacts(facts, have)).replace(/\r\n/g, '\n')) return true;
       } catch {
         // Unreadable is not evidence of drift; leave it to the next session.
       }

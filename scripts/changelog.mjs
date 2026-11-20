@@ -44,6 +44,12 @@
  * "(third-party)" and "(tree-sitter-<name>)" work too) are tree-sitter entries; everything else,
  * and lines marked "(graft)", are graft entries (see scopeOfNote and groupLanguages).
  *
+ * The changelog never names Kilo Code (OMITTED_NAME), and neither do the fork homepage and the kit
+ * release notes made from it: an aside in brackets or a place in a comma-separated list that names
+ * it is removed from an entry, then every later sentence that still does; an entry whose first
+ * sentence names it is left out (see withoutOmittedName and omitName). Legacy items and grammar
+ * lines are treated the same way.
+ *
  * What was read is kept in changelog-grammars.json, so
  * the page comes out the same on a machine that has only graft checked out (the snapshot is used
  * for every grammar repo that is not there); commit it with the changelog.
@@ -357,6 +363,73 @@ export function mergeLegacy(groups, legacy) {
   const rank = (e) => TYPES.findIndex((t) => t.key === e.type) * 2 + (e.legacy ? 0 : 1);
   for (const g of out) g.entries.sort((a, b) => rank(a) - rank(b));
   return { groups: out, unmatched: [...replaced].filter((t) => !found.has(t)) };
+}
+
+/**
+ * The name the changelog never shows (the page, the fork homepage published from it and the
+ * release notes of each kit): Kilo Code, in any spelling ("Kilo", "Kilo Code", "Kilo's",
+ * "KiloCode", "kilo-code", ".kilo/") and inside identifiers ("KILO_PID", "KILOCODE_VERSION"),
+ * but not words such as "kilobytes". Letters, not word characters, bound it: `_` is one.
+ */
+const NAME_SOURCE = String.raw`(?<![a-z])kilo(?:[\s_-]?code)?(?![a-z])`;
+export const OMITTED_NAME = new RegExp(NAME_SOURCE, "i");
+const NAME = String.raw`${NAME_SOURCE}(?:'s)?`;
+/** An aside in brackets that names it: "(for example Kilo Code 7.8 in VS Code)". */
+const NAME_ASIDE = new RegExp(String.raw`\s*\([^()]*${NAME}[^()]*\)`, "gi");
+/** Its place inside a comma-separated list: "Cursor, Kilo Code, Kiro". */
+const NAME_IN_LIST = new RegExp(String.raw`,\s+${NAME}(?=\s*,)`, "gi");
+/** Its place at the head of a list after a colon or bracket: "a model: Kilo Code, VS Code, …". */
+const NAME_LIST_HEAD = new RegExp(String.raw`([:(]\s*)${NAME},\s+`, "gi");
+/**
+ * Where an entry's text or HTML splits into sentences: after a full stop, question or exclamation
+ * mark (a closing tag may follow it) and before whatever starts the next one, a capital or not
+ * ("graft", "`KILO_PID`", "2 parts"), but not after an abbreviation such as "e.g." or "i.e.".
+ */
+const SENTENCE_BREAK = /(?<=[.!?](?:<\/\w+>)?)(?<!(?<![a-z])(?:e\.g|i\.e|cf|vs|viz|incl|approx)\.)\s+(?=\S)/i;
+
+/**
+ * An entry's text (or a legacy item's HTML) without the OMITTED_NAME: asides in brackets that
+ * name it and its place in a comma-separated list are removed, then every later sentence that
+ * still names it. Null when its first sentence, which says what the entry is about, still names
+ * it: the entry is left out. Text that does not name it comes back unchanged.
+ */
+export function withoutOmittedName(s) {
+  if (!OMITTED_NAME.test(s)) return s;
+  const cut = s.replace(NAME_ASIDE, "").replace(NAME_IN_LIST, "").replace(NAME_LIST_HEAD, "$1");
+  const [first, ...rest] = cut.split(SENTENCE_BREAK);
+  if (OMITTED_NAME.test(first)) return null;
+  return [first, ...rest.filter((x) => !OMITTED_NAME.test(x))].join(" ").replace(/\s{2,}/g, " ").trim();
+}
+
+/**
+ * The groups without the OMITTED_NAME (see withoutOmittedName), for every entry: commit-message
+ * entries, legacy items and the lines behind a grammar item's details link. An entry or line about
+ * it is left out, and so is a grammar item with no line left; a commit-date group left empty is
+ * dropped, as mergeLegacy does. Runs after mergeLegacy, whose `replaces` lists match the words the
+ * commits were written in.
+ * @param {ReturnType<typeof groupCommits>} groups
+ * @returns {ReturnType<typeof groupCommits>}  new groups; the ones passed in are not changed
+ */
+export function omitName(groups) {
+  const clean = (e) => {
+    if (e.html !== undefined) {
+      const html = withoutOmittedName(e.html);
+      return html === null ? null : html === e.html ? e : { ...e, html, text: htmlText(html) };
+    }
+    const text = withoutOmittedName(e.text);
+    return text === null ? null : text === e.text ? e : { ...e, text };
+  };
+  return groups
+    .map((g) => ({
+      ...g,
+      entries: g.entries.flatMap((e) => {
+        const kept = clean(e);
+        if (!kept || !e.details) return kept ? [kept] : [];
+        const details = e.details.map(clean).filter(Boolean);
+        return details.length ? [{ ...kept, details }] : [];
+      }),
+    }))
+    .filter((g) => g.kind !== "commit" || g.entries.length);
 }
 
 /** The collapsed list of a language item's changes, opened by its "details" link. */
@@ -925,7 +998,7 @@ export function generateChangelog(repoRoot, buildsData = readBuilds(repoRoot), l
   const commits = grammars.repos.length ? attachGrammarEntries(history.commits, grammars.repos, readVendorLog(repoRoot)) : history.commits;
   const merged = mergeLegacy(groupCommits(commits, history), legacy);
   const { unmatched } = merged;
-  const groups = groupLanguages(merged.groups, grammars.repos.map((r) => r.repo));
+  const groups = groupLanguages(omitName(merged.groups), grammars.repos.map((r) => r.repo));
   const html = renderChangelog(before, groups);
   return {
     path,

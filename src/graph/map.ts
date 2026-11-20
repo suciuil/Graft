@@ -94,6 +94,10 @@ export interface BuildRepoMapOptions {
   hubsPerDir?: number;
   /** Max global hotspots. Default 12. */
   hotspots?: number;
+  /** Added to the in-degree of these nodes (never below 0), as `grep.ts`
+   * `GrepOptions.inDegreeDelta`: a part's links from and voids by the other
+   * parts of a repository built in parts. */
+  inDegreeDelta?: ReadonlyMap<string, number>;
 }
 
 const DEFAULT_MAX_DIRS = 16;
@@ -247,6 +251,7 @@ export function buildRepoMap(graph: GraphV1, opts: BuildRepoMapOptions = {}): Re
   const fileNodes = graph.nodes.filter((n) => n.kind === "file");
   const totalFiles = fileNodes.length;
   const inDegree = computeInDegree(graph);
+  for (const [id, d] of opts.inDegreeDelta ?? []) inDegree.set(id, Math.max(0, (inDegree.get(id) ?? 0) + d));
 
   const scopes = scopesOfGraph(graph);
   let dirs: DirEntry[];
@@ -332,6 +337,12 @@ function droppedNote(dropped: number): string | null {
  * very large graphs).
  */
 export function formatRepoMap(map: RepoMap): string {
+  return withSavings(repoMapBody(map), map.saved) + "\n";
+}
+
+/** {@link formatRepoMap} without its savings line, for a report made of several
+ * maps (a repository built in parts) that carries one line for all of them. */
+export function repoMapBody(map: RepoMap): string {
   const { totals } = map;
   const header = `repo map — ${totals.files} files · ${totals.symbols} symbols · ${totals.edges} edges · ${totals.languages.join(", ")}`;
 
@@ -362,6 +373,5 @@ export function formatRepoMap(map: RepoMap): string {
   }
   lines.push(`hotspots: ${map.hotspots.map(formatHotspot).join("  ")}`);
 
-  const body = lines.join("\n");
-  return withSavings(body, map.saved) + "\n";
+  return lines.join("\n");
 }

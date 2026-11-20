@@ -7,17 +7,20 @@
  * with only `trail` installed is never told to run `graft`.
  */
 import type { Brand } from '../brand.js';
-import { NO_TERMINAL_FALLBACK, REPORT_FAILURES, trailSpelling } from '../claude/skill-template.js';
+import { NO_TERMINAL_FALLBACK, partsSection, REPORT_FAILURES, trailSpelling } from '../claude/skill-template.js';
+import type { RepoFacts } from './repo-facts.js';
 
 function inName(text: string, name: Brand): string {
   return name === 'trail' ? trailSpelling(text) : text;
 }
 
-export function instructionBody(name: Brand = 'graft'): string {
-  return inName(graftBody(), name);
+export function instructionBody(name: Brand = 'graft', facts: RepoFacts = {}): string {
+  return inName(graftBody(facts), name);
 }
 
-function graftBody(): string {
+/** `facts.parts`: the repo was built in parts, so the text says how to work in
+ * one (see `partsSection`); otherwise it says nothing of parts. */
+function graftBody(facts: RepoFacts = {}): string {
   return `## Graft — repo context graph
 
 This repo is indexed in \`graft/\`: small linked markdown nodes that explain each
@@ -56,7 +59,7 @@ ${NO_TERMINAL_FALLBACK}
 - Monorepos and folders of multiple repos rank fairly across sub-projects —
   hits carry \`[scope/]\` labels naming which one they're from. Narrow with
   \`graft ask "<task>" --in <scope>/\` once you know where you're working.
-
+${facts.parts ? `\n${partsSection(3)}\n` : ''}
 If a returned span is truncated ("+N more lines"), open the file at that exact
 range before finalizing. Only open source files when a node genuinely lacks a
 needed detail, and then at the exact file:line the node points to — never
@@ -163,8 +166,8 @@ no API key, $0).
 ${REPORT_FAILURES}`;
 }
 
-export function copilotInstructions(name: Brand = 'graft'): string {
-  return inName(`${graftBody()}
+export function copilotInstructions(name: Brand = 'graft', facts: RepoFacts = {}): string {
+  return inName(`${graftBody(facts)}
 
 ### Model reporting override: GitHub Copilot in IntelliJ IDEA only
 
@@ -189,20 +192,20 @@ own JetBrains session store when it can, and reports tokens only when it
 cannot.`, name);
 }
 
-export function cursorRule(name: Brand = 'graft'): string {
+export function cursorRule(name: Brand = 'graft', facts: RepoFacts = {}): string {
   return inName(`---
 description: Use the Graft context graph in graft/ before exploring source
 alwaysApply: true
 ---
-${graftBody()}
+${graftBody(facts)}
 `, name);
 }
 
-export function kiroSteering(name: Brand = 'graft'): string {
+export function kiroSteering(name: Brand = 'graft', facts: RepoFacts = {}): string {
   return inName(`---
 inclusion: always
 ---
-${graftBody()}
+${graftBody(facts)}
 `, name);
 }
 
@@ -217,8 +220,8 @@ ${graftBody()}
  * per-model table instead of a bare token count. The rule has to explain what to
  * do with that table, because the shape of the reply is otherwise unguessable.
  */
-export function kiloRule(name: Brand = 'graft'): string {
-  return inName(`${graftBody()}
+export function kiloRule(name: Brand = 'graft', facts: RepoFacts = {}): string {
+  return inName(`${graftBody(facts)}
 
 ### Reporting what graft saved (Kilo Code)
 
@@ -278,7 +281,7 @@ is already absent from the table by design.
 `, name);
 }
 
-export function windsurfRule(name: Brand = 'graft'): string {
-  return inName(`${graftBody()}
+export function windsurfRule(name: Brand = 'graft', facts: RepoFacts = {}): string {
+  return inName(`${graftBody(facts)}
 `, name);
 }

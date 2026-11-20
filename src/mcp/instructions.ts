@@ -24,6 +24,7 @@
  * 660–984, and nothing proves a longer one survives un-truncated.
  */
 import { brand, inBrand } from '../brand.js';
+import type { RepoFacts } from '../hosts/repo-facts.js';
 
 /** Tool names in the order an agent should reach for them, most-used first. */
 const TOOL_ORDER = [
@@ -39,8 +40,15 @@ export function toolSearchQuery(prefix = `mcp__${brand()}__`): string {
   return `select:${TOOL_ORDER.map((t) => `${prefix}${inBrand(t)}`).join(',')}`;
 }
 
+/**
+ * One line for a repository built in parts (`facts.parts`, see
+ * hosts/repo-facts.ts), and only there. It takes the text past the budget above
+ * (about 1,075 characters), so it stays one line, ahead of the closing two.
+ */
+const PARTS_LINE = 'Built in parts: each hit names its [part/]; pass `in: "<part>/"` to search one part; give paths from the repo root.';
+
 /** Under trail, the same text with trail's tool names (see brand.ts `inBrand`). */
-export function mcpInstructions(): string {
+export function mcpInstructions(facts: RepoFacts = {}): string {
   return inBrand([
     'This repo is indexed by graft: a prebuilt graph of every symbol, its file:line',
     'span, and who calls what. Prefer these over grep/read — one call usually',
@@ -53,6 +61,7 @@ export function mcpInstructions(): string {
     '- graft_trace_calls — who calls it, what it calls, blast radius before a rename.',
     '- graft_file_api — a file\'s whole API in ~200 tokens.',
     '- graft_repo_map — orientation in a new repo.',
+    ...(facts.parts ? [PARTS_LINE] : []),
     '',
     'Results reflect uncommitted edits — the graph refreshes each query.',
     'Send `model: "<your model id>"` on EVERY call; without it savings go unpriced.',

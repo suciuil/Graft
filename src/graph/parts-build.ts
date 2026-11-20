@@ -20,6 +20,7 @@ import { contextDirFor, ensureGitignored } from "../context/node-file.js";
 import { normalizeExcludeEntry } from "../ingest/fs.js";
 import { normalizeTextDir } from "../util/plain-text.js";
 import { patchBuildConfig, readBuildConfig, textDirsOf, textExtensionsOf, type BuildConfig } from "../util/state.js";
+import { linkParts } from "./parts-link.js";
 import { allPartsPlan, GraphTooLargeError } from "./size-guard.js";
 import { clearParentGraft, isPartsWorkspace, isSafePart, readWorkspace, writeWorkspace } from "./workspace.js";
 
@@ -176,5 +177,18 @@ export async function buildAllParts(
   for (const part of parts) await one(part, 0);
   if (cleared && res.index) ensureGitignored(root, contextDirFor(root, opts.override));
   res.listed = [...listed].sort();
+  if (res.index) {
+    try {
+      const l = linkParts(root, opts.override);
+      if (l) {
+        if (l.linked > 0) log(`· linked ${l.linked} part${l.linked === 1 ? "" : "s"}: ${l.links} link${l.links === 1 ? "" : "s"} between them`);
+        if (l.missing.length && l.linked > 0) {
+          log(`⚠ not linked (built by an older graft, or not built): ${l.missing.map((p) => `${p}/`).join(", ")}`);
+        }
+      }
+    } catch (err) {
+      log(`⚠ the links between the parts could not be made: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   return res;
 }

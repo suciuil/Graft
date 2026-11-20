@@ -55,19 +55,29 @@ export interface ResolveSymbolOptions {
  * substring. Multiple matches are not an error — every match is returned.
  */
 export function resolveSymbol(graph: GraphV1, query: string, opts: ResolveSymbolOptions = {}): NodeV1[] {
+  return resolveSymbolTier(graph, query, opts).nodes;
+}
+
+/** {@link resolveSymbol}, with which of its steps matched (`tier`: 0, 1 or 2;
+ * 0 when nothing did): a later step is taken only when no earlier one matched
+ * anything, so maps answering apart answer as one only at the lowest tier. */
+export function resolveSymbolTier(graph: GraphV1, query: string, opts: ResolveSymbolOptions = {}): { nodes: NodeV1[]; tier: number } {
   const lowerQuery = query.toLowerCase();
   const looksLikeFilename = query.includes(".") && !query.includes("#");
 
   let matches = symbolMatches(graph.nodes, lowerQuery);
+  let tier = 0;
 
   if (matches.length === 0 && query.includes(".")) {
     const lastSegment = query.slice(query.lastIndexOf(".") + 1).toLowerCase();
     if (lastSegment) {
       matches = graph.nodes.filter((n) => n.kind !== "file" && n.name.toLowerCase() === lastSegment);
+      tier = 1;
     }
   }
 
   if (matches.length === 0 && looksLikeFilename) {
+    tier = 2;
     matches = graph.nodes.filter(
       (n) =>
         n.kind === "file" &&
@@ -82,7 +92,7 @@ export function resolveSymbol(graph: GraphV1, query: string, opts: ResolveSymbol
     assertPrefixIndexed(graph, prefix);
     matches = matches.filter((n) => pathUnderPrefix(n.path, prefix));
   }
-  return matches;
+  return { nodes: matches, tier: matches.length > 0 ? tier : 0 };
 }
 
 /** Strips extract.ts's mint-time disambiguation ordinals (`~2`, `~3`, ...)
@@ -153,6 +163,29 @@ export function impactOf(graph: GraphV1, symbol: NodeV1, maxDepth = 2): EdgeHit[
   return impactOfMany(graph, [symbol], maxDepth);
 }
 
+/** A graph's walk-relation edges keyed for the walk direction. */
+export type Adjacency = Map<string, { other: string; relation: Relation }[]>;
+
+/**
+ * The walk-relation edges of `graph`, less those `skip` leaves out, keyed for
+ * the walk direction:
+ *   'in'  → key = edge.target, neighbour = edge.source (who points AT key)
+ *   'out' → key = edge.source, neighbour = edge.target (what key points TO)
+ */
+export function walkAdjacency(graph: GraphV1, direction: Direction, skip?: (e: EdgeV1) => boolean): Adjacency {
+  const adj: Adjacency = new Map();
+  for (const e of graph.edges as EdgeV1[]) {
+    if (!WALK_RELATIONS.has(e.relation) || skip?.(e)) continue;
+    const key = direction === "in" ? e.target : e.source;
+    const other = direction === "in" ? e.source : e.target;
+    const entry = { other, relation: e.relation };
+    const arr = adj.get(key);
+    if (arr) arr.push(entry);
+    else adj.set(key, [entry]);
+  }
+  return adj;
+}
+
 /**
  * BFS over walk-relation edges from *multiple* seed nodes at once, in the given
  * `direction` (`in` = incoming, the default — "who breaks if this changes";
@@ -171,20 +204,7 @@ export function impactOf(graph: GraphV1, symbol: NodeV1, maxDepth = 2): EdgeHit[
  */
 export function impactOfMany(graph: GraphV1, seeds: NodeV1[], maxDepth = 2, direction: Direction = "in"): EdgeHit[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-
-  // Adjacency keyed for the walk direction, restricted to walk relations:
-  //   'in'  → key = edge.target, neighbour = edge.source (who points AT key)
-  //   'out' → key = edge.source, neighbour = edge.target (what key points TO)
-  const adj = new Map<string, { other: string; relation: Relation }[]>();
-  for (const e of graph.edges as EdgeV1[]) {
-    if (!WALK_RELATIONS.has(e.relation)) continue;
-    const key = direction === "in" ? e.target : e.source;
-    const other = direction === "in" ? e.source : e.target;
-    const entry = { other, relation: e.relation };
-    const arr = adj.get(key);
-    if (arr) arr.push(entry);
-    else adj.set(key, [entry]);
-  }
+  const adj = walkAdjacency(graph, direction);
 
   const visited = new Set<string>(seeds.map((s) => s.id));
   const hits: EdgeHit[] = [];
@@ -208,7 +228,7 @@ export function impactOfMany(graph: GraphV1, seeds: NodeV1[], maxDepth = 2, dire
 
 /** Every non-file node whose `path` equals `fileNode.path` — the symbols
  * defined in that file. */
-function symbolsInFile(graph: GraphV1, fileNode: NodeV1): NodeV1[] {
+export function symbolsInFile(graph: GraphV1, fileNode: NodeV1): NodeV1[] {
   return graph.nodes.filter((n) => n.kind !== "file" && n.path === fileNode.path);
 }
 
@@ -226,6 +246,16 @@ export function impactOfFile(graph: GraphV1, fileNode: NodeV1, maxDepth = 2, dir
 }
 
 /**
+ * The nodes {@link edgeWalk} starts from for `node` at `depth`: the node, and
+ * for a `kind: 'file'` node walked deeper than one hop every symbol the file
+ * defines too (see {@link impactOfFile}). A walk carried on across the parts of
+ * a repository (`workspace.ts` `federateCallers`) starts from the same nodes.
+ */
+export function walkSeeds(graph: GraphV1, node: NodeV1, depth: number): NodeV1[] {
+  return depth > 1 && node.kind === "file" ? [node, ...symbolsInFile(graph, node)] : [node];
+}
+
+/**
  * The single entry point behind `graft callers` and the MCP `graft_trace_calls`
  * tool, covering all of what were once three commands:
  *   - `direction:in,  depth:1`  → callers      (who calls/references this)
@@ -240,6 +270,5 @@ export function impactOfFile(graph: GraphV1, fileNode: NodeV1, maxDepth = 2, dir
  */
 export function edgeWalk(graph: GraphV1, node: NodeV1, direction: Direction, depth: number): EdgeHit[] {
   if (depth <= 1) return direction === "in" ? callersOf(graph, node) : calleesOf(graph, node);
-  if (node.kind === "file") return impactOfFile(graph, node, depth, direction);
-  return impactOfMany(graph, [node], depth, direction);
+  return impactOfMany(graph, walkSeeds(graph, node, depth), depth, direction);
 }

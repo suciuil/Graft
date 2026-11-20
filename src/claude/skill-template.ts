@@ -1,6 +1,11 @@
 import { cmd, PACKAGE_FOR, type Brand } from "../brand.js";
 import { ISSUES_URL } from "../about.js";
 import { npmInstallLine } from "../cli-meta.js";
+import type { RepoFacts } from "../hosts/repo-facts.js";
+
+/** The heading of the parts section ({@link partsSection}), the same in every
+ * text that carries it; hosts/repo-facts.ts reads it back. */
+export const PARTS_HEADING = "In a repository built in parts";
 
 /**
  * This fork: how a teammate without trail installs it, pinned to the fork's
@@ -20,8 +25,37 @@ const TRAIL_INSTALL = npmInstallLine(PACKAGE_FOR.trail);
 /** Phase 2 (1.8): the one line on `trail skills update`, in the trail skill's Skills section. */
 export const SKILL_TEMPLATE_UPDATE_LINE = 'Trail may ask you to run `trail skills update <name> --offer <id>` only after the person typed yes to the change it showed.';
 
-export function skillTemplate(brand: Brand = "graft"): string {
-  return brand === "trail" ? trailSkill(graftSkill()) : graftSkill();
+export function skillTemplate(brand: Brand = "graft", facts: RepoFacts = {}): string {
+  return brand === "trail" ? trailSkill(graftSkill(facts)) : graftSkill(facts);
+}
+
+/**
+ * How to work in a repository `graft build` built in parts (one map per folder,
+ * graph/parts-build.ts), at heading `level`: the skill's sections are level 2,
+ * the host instructions' level 3. Only in the text written for such a
+ * repository (`facts.parts`, see hosts/repo-facts.ts): everywhere else it
+ * would be noise. The heading is {@link PARTS_HEADING}, which drift checks
+ * read back.
+ */
+export function partsSection(level: 2 | 3): string {
+  return `${"#".repeat(level)} ${PARTS_HEADING}
+
+This repo is too big for one map, so \`graft build\` built it in parts: one map
+per folder, each kept in that part's folder, with the list of parts and the
+links between them in \`graft/\`. Run graft from the repo root as usual:
+\`ask\`, \`grep\`, \`callers\`, \`skeleton\` and \`map\` search every part at once.
+
+- Each hit carries a \`[part/]\` label naming its part. Once you know where you
+  are working, narrow \`ask\`, \`grep\` and \`callers\` with \`--in <part>/\` (or a
+  folder inside it); over MCP, pass the same path as \`in\`.
+- \`graft parts\` lists every part by that path, and whether each is built.
+  When the user names a part in a prompt, it is one of these paths.
+- Give file paths from the repo root (\`graft skeleton <part>/src/file.c\`),
+  not from inside a part.
+- \`graft build\` at the repo root rebuilds every part and the links between
+  them.
+- Reading the map as files, a part's cards are in that part's own map folder
+  (usually \`<part>/graft/\`), not in the root \`graft/\`.`;
 }
 
 /**
@@ -295,7 +329,7 @@ command under its old name.
 `;
 }
 
-function graftSkill(): string {
+function graftSkill(facts: RepoFacts = {}): string {
   return `---
 name: graft
 description: This repo is indexed by graft/. For ANY task here, whether
@@ -390,7 +424,7 @@ stale if you have edited that file this turn.
 
 \`build\` is for the LLM layer (\`--deep\` adds a concept map; skip unless asked);
 \`check\` fails when \`graft/\` is stale, for CI.
-
+${facts.parts ? `\n${partsSection(2)}\n` : ""}
 ## Scenarios: the shortest path through a coding task
 
 | When you're… | Reach for | Calls |

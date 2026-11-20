@@ -114,18 +114,81 @@ export interface GoModule {
   dir: string;
 }
 
+/**
+ * What {@link resolveEdges} could not settle inside the map it resolves, for a
+ * repository built in parts (`graph/boundary.ts`), where the rest of the
+ * repository lives in other maps. Reporting changes no edge.
+ *
+ * Not reported: PL/SQL, MATLAB and Simulink calls and references, whose scope
+ * rules (`contains`, the MATLAB path, linked dictionaries) a map of only the
+ * unresolved edges could not apply, and member calls with no receiver type,
+ * which no map resolves.
+ */
+export interface ResolveCollector {
+  /** An edge that found NOTHING to point at in this map: an import of a module
+   * that is no node here, a call or reference with no candidate of its kind, a
+   * base type kept as its bare name. Never an edge dropped as ambiguous (a
+   * bigger map holds those candidates too, so it would drop it as well), unless
+   * a later lookup stage was tried after it (a Python or Swift constructor, a
+   * Swift implicit-self call), which a bigger map could answer.
+   * `kept`: the target the edge was kept pointing at all the same (an import's
+   * specifier, a base type's bare name); absent when the edge was dropped. */
+  unresolved(e: RawEdge, kept?: string): void;
+  /** An edge resolved by a lookup a bigger map could answer differently: a call
+   * or reference by a name unique in another file (`inferred`), an import by a
+   * path suffix or base name unique in this map (or a path from its root), a
+   * constructor or free function tried only because this map has no candidate
+   * of the first kind looked up. */
+  inferred(e: RawEdge, targetId: string): void;
+}
+
 export interface ResolveOptions {
   /** The Go modules found in the repo. Enables mapping Go import package paths
    * (`example.com/app/pkg/util`) to the in-repo directory they name, relative to the
    * owning module's `go.mod` location. Empty/absent → Go imports stay external strings. */
   goModules?: GoModule[];
+  /** Told about every edge left unresolved, and every name-guessed one. */
+  collect?: ResolveCollector;
+  /** Told the edge each raw edge became (also when it duplicates one already
+   * made), for a caller that has to know which raw edge led where. */
+  onEdge?: (raw: RawEdge, edge: EdgeV1) => void;
 }
 
-export function resolveEdges(
-  nodes: NodeV1[],
-  rawEdges: RawEdge[],
-  opts: ResolveOptions = {},
-): EdgeV1[] {
+/** The lookups {@link resolveEdges} resolves names, specifiers and owners
+ * against, built once from the nodes (see {@link buildResolveIndex}). */
+interface ResolveIndex {
+  byId: Map<string, NodeV1>;
+  globalName: Map<string, NodeV1[]>;
+  perFileName: Map<string, Map<string, NodeV1[]>>;
+  ownerMethod: Map<string, NodeV1[]>;
+  goFilesByDir: Map<string, string[]>;
+  javaFilesBySuffix: Map<string, string[]>;
+  cFilesBySuffix: Map<string, string[]>;
+  rustCrateRoots: string[];
+  phpFilesBySuffix: Map<string, string[]>;
+  cmakeModules: Map<string, string[]>;
+  perlFilesBySuffix: Map<string, string[]>;
+  gleamFilesBySuffix: Map<string, string[]>;
+  matlabQualified: Map<string, NodeV1[]>;
+  simulinkPaths: Map<string, NodeV1[]>;
+  matlabFilesByBase: Map<string, string[]>;
+  hasGoModules: boolean;
+}
+
+/**
+ * The definitions a name could mean from `file`, as {@link resolveEdges} sees
+ * them: nodes of the name with one of `kinds`, in a language `file` can reach.
+ */
+function nameCandidates(globalName: ResolveIndex["globalName"], name: string, file: string, kinds: readonly Kind[]): NodeV1[] {
+  return (globalName.get(name) ?? []).filter((n) => kinds.includes(n.kind) && reachable(file, n.path));
+}
+
+/**
+ * Index `nodes` for {@link resolveEdges}: names (global and per file), owner-
+ * qualified methods, and the path-suffix and module tables each language's
+ * imports resolve against.
+ */
+function buildResolveIndex(nodes: NodeV1[], opts: Pick<ResolveOptions, "goModules"> = {}): ResolveIndex {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const globalName = new Map<string, NodeV1[]>();
   const perFileName = new Map<string, Map<string, NodeV1[]>>();
@@ -233,6 +296,49 @@ export function resolveEdges(
       if (owner) push(ownerMethod, `${owner}.${n.name}`, n);
     }
   }
+  return {
+    byId, globalName, perFileName, ownerMethod, goFilesByDir, javaFilesBySuffix, cFilesBySuffix,
+    rustCrateRoots, phpFilesBySuffix, cmakeModules, perlFilesBySuffix, gleamFilesBySuffix,
+    matlabQualified, simulinkPaths, matlabFilesByBase, hasGoModules,
+  };
+}
+
+export function resolveEdges(
+  nodes: NodeV1[],
+  rawEdges: RawEdge[],
+  opts: ResolveOptions = {},
+): EdgeV1[] {
+  const {
+    byId,
+    globalName,
+    perFileName,
+    ownerMethod,
+    goFilesByDir,
+    javaFilesBySuffix,
+    cFilesBySuffix,
+    rustCrateRoots,
+    phpFilesBySuffix,
+    cmakeModules,
+    perlFilesBySuffix,
+    gleamFilesBySuffix,
+    matlabQualified,
+    simulinkPaths,
+    matlabFilesByBase,
+    hasGoModules,
+  } = buildResolveIndex(nodes, opts);
+  const collect = opts.collect;
+  /** No candidate of `kinds` anywhere `file` can reach: nothing was found (as
+   * opposed to several, which is ambiguous and never reported). */
+  const noCandidate = (name: string, file: string, kinds: readonly Kind[]): boolean =>
+    nameCandidates(globalName, name, file, kinds).length === 0;
+  /** Tell the collector how a by-name lookup of `e` as `kinds` came out: guessed
+   * by a unique name in another file, or nothing found at all. */
+  const report = (e: RawEdge, kinds: readonly Kind[], hit: { id: string; confidence: EdgeV1["confidence"] } | null): void => {
+    if (!collect) return;
+    if (hit) {
+      if (hit.confidence === "inferred") collect.inferred(e, hit.id);
+    } else if (noCandidate(e.name!, e.file, kinds)) collect.unresolved(e);
+  };
 
   // classParents: class/interface name → its declared base-class names, from raw
   // `extends` edges (source id's own name → the base name). Used to walk up an
@@ -283,7 +389,11 @@ export function resolveEdges(
 
   const out: EdgeV1[] = [];
   const seen = new Set<string>();
+  const onEdge = opts.onEdge;
+  /** The raw edge being resolved, for {@link ResolveOptions.onEdge}. */
+  let current: RawEdge | undefined;
   const add = (source: string, target: string, relation: Relation, confidence: EdgeV1["confidence"]) => {
+    if (onEdge && current) onEdge(current, { source, target, relation, confidence });
     const key = `${source}\0${relation}\0${target}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -291,35 +401,46 @@ export function resolveEdges(
   };
 
   for (const e of rawEdges) {
+    current = e;
     if (e.relation === "contains" && e.targetId) {
       add(e.source, e.targetId, "contains", "extracted");
     } else if (e.relation === "imports" && e.specifier) {
-      const target =
-        hasGoModules && e.file.endsWith(".go")
-          ? resolveGoImport(e.specifier, opts.goModules!, goFilesByDir)
-          : e.file.endsWith(".java")
-            ? resolveJavaImport(e.specifier, javaFilesBySuffix)
-            : C_EXT.test(e.file)
-              ? resolveCInclude(e.specifier, e.file, byId, cFilesBySuffix)
-              : e.file.endsWith(".rs")
-                ? resolveRustUse(e.specifier, e.file, byId, rustCrateRoots)
-                : e.file.endsWith(".php")
-                  ? resolvePhpUse(e.specifier, phpFilesBySuffix)
-                  : CMAKE_FILE.test(e.file)
-                    ? resolveCmakeImport(e.specifier, e.file, byId, cmakeModules)
-                    : BASH_FILE.test(e.file)
-                      ? resolveShellSource(e.specifier, e.file, byId)
-                      : PERL_FILE.test(e.file)
-                        ? resolvePerlModule(e.specifier, perlFilesBySuffix)
-                        : MAKE_FILE.test(e.file)
-                          ? resolveMakeInclude(e.specifier, e.file, byId)
-                          : e.file.endsWith(".gleam")
-                            ? resolveGleamImport(e.specifier, gleamFilesBySuffix)
-                            : MATLAB_FILE.test(e.file)
-                              ? resolveMatlabImport(e.specifier, matlabQualified)
-                              : SIMULINK_FILE.test(e.file)
-                                ? resolveByBaseName(e.specifier, matlabFilesByBase)
-                                : resolveImport(e.specifier, e.file, byId);
+      const spec = e.specifier;
+      // `guessed`: found by a lookup a bigger map could answer differently (a path
+      // suffix or base name unique in this map, a path from its root), as opposed
+      // to a path relative to the importing file, its crate or its Go module.
+      let target: string;
+      let guessed = true;
+      /** A path tried relative to the importing file first: guessed unless it is
+       * that. Only a boundary reads it, so a map's build alone skips the check. */
+      const byPath = (t: string): string => {
+        if (collect) guessed = t !== posix.normalize(posix.join(posix.dirname(toPosixPath(e.file)), toPosixPath(spec)));
+        return t;
+      };
+      if (hasGoModules && e.file.endsWith(".go")) {
+        target = resolveGoImport(spec, opts.goModules!, goFilesByDir);
+        guessed = false;
+      } else if (e.file.endsWith(".java")) target = resolveJavaImport(spec, javaFilesBySuffix);
+      else if (C_EXT.test(e.file)) target = byPath(resolveCInclude(spec, e.file, byId, cFilesBySuffix));
+      else if (e.file.endsWith(".rs")) {
+        target = resolveRustUse(spec, e.file, byId, rustCrateRoots);
+        guessed = false;
+      } else if (e.file.endsWith(".php")) target = resolvePhpUse(spec, phpFilesBySuffix);
+      else if (CMAKE_FILE.test(e.file)) target = byPath(resolveCmakeImport(spec, e.file, byId, cmakeModules));
+      else if (BASH_FILE.test(e.file)) target = byPath(resolveShellSource(spec, e.file, byId));
+      else if (PERL_FILE.test(e.file)) target = resolvePerlModule(spec, perlFilesBySuffix);
+      else if (MAKE_FILE.test(e.file)) target = byPath(resolveMakeInclude(spec, e.file, byId));
+      else if (e.file.endsWith(".gleam")) target = resolveGleamImport(spec, gleamFilesBySuffix);
+      else if (MATLAB_FILE.test(e.file)) target = resolveMatlabImport(spec, matlabQualified);
+      else if (SIMULINK_FILE.test(e.file)) target = resolveByBaseName(spec, matlabFilesByBase);
+      else {
+        target = resolveImport(spec, e.file, byId);
+        guessed = false;
+      }
+      if (collect) {
+        if (!byId.has(target)) collect.unresolved(e, target);
+        else if (guessed) collect.inferred(e, target);
+      }
       add(e.source, target, "imports", "extracted");
     } else if (e.relation === "extends" || e.relation === "implements") {
       // `implements` also resolves to a `trait` — PHP models trait composition
@@ -328,6 +449,8 @@ export function resolveEdges(
       const kinds: Kind[] =
         e.relation === "implements" ? ["interface", "trait"] : PERL_FILE.test(e.file) ? ["package"] : ["class", "interface"];
       const hit = resolveName(e.name!, e.file, kinds, perFileName, globalName);
+      if (collect && !hit && noCandidate(e.name!, e.file, kinds)) collect.unresolved(e, e.name!);
+      else report(e, kinds, hit);
       // an unresolved base is usually an external/imported type — keep the name.
       add(e.source, hit?.id ?? e.name!, e.relation, hit?.confidence ?? "inferred");
     } else if (e.relation === "references" && e.name) {
@@ -335,14 +458,22 @@ export function resolveEdges(
         // A named import gives both halves needed for sound resolution: the module
         // it came from and the exported name. Resolve inside that file only, so a
         // same-named symbol elsewhere in the repo cannot become a false edge.
-        const targetFile = e.file.endsWith(".php")
-          ? resolvePhpUse(e.specifier, phpFilesBySuffix)
-          : e.file.endsWith(".gleam")
-            ? resolveGleamImport(e.specifier, gleamFilesBySuffix)
-            : resolveImport(e.specifier, e.file, byId);
-        if (!byId.has(targetFile)) continue; // external or unresolved module
+        const bySuffix = moduleBySuffix(e.file);
+        const targetFile = !bySuffix
+          ? resolveImport(e.specifier, e.file, byId)
+          : e.file.endsWith(".php")
+            ? resolvePhpUse(e.specifier, phpFilesBySuffix)
+            : resolveGleamImport(e.specifier, gleamFilesBySuffix);
+        if (!byId.has(targetFile)) {
+          collect?.unresolved(e);
+          continue; // external or unresolved module
+        }
         const candidates = narrowGleamByKind(perFileName.get(targetFile)?.get(e.name) ?? [], e.file, TYPE_KINDS);
-        if (candidates.length === 1) add(e.source, candidates[0].id, "references", "extracted");
+        if (candidates.length === 1) {
+          // The module was found by a path suffix unique in this map.
+          if (bySuffix) collect?.inferred(e, candidates[0].id);
+          add(e.source, candidates[0].id, "references", "extracted");
+        }
       } else if (SIMULINK_FILE.test(e.file) && byId.get(e.source)?.origin === "ast") {
         // Simulink: a library link names its block by path (`Lib/Sub/Block`); a block
         // parameter, a signal name or a data type names a dictionary entry or a
@@ -375,6 +506,7 @@ export function resolveEdges(
         // PHP attribute without a `use` import (same-file or globally unique class).
         const refKinds: Kind[] = ["class", "interface", "trait", "enum"];
         const hit = resolveName(e.name, e.file, refKinds, perFileName, globalName);
+        report(e, refKinds, hit);
         if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (e.file.endsWith(".java") && byId.get(e.source)?.origin === "ast") {
         // Java annotation without a specifier (same-file or globally unique
@@ -389,19 +521,30 @@ export function resolveEdges(
         const refKinds: Kind[] = ["interface"];
         const hit = resolveName(e.name, e.file, refKinds, perFileName, globalName);
         const anno = hit ? byId.get(hit.id) : undefined;
-        if (hit && hit.id !== e.source && anno?.signature?.includes("@interface"))
+        if (hit && hit.id !== e.source && anno?.signature?.includes("@interface")) {
+          if (hit.confidence === "inferred") collect?.inferred(e, hit.id);
           add(e.source, hit.id, "references", hit.confidence);
-        else add(e.source, e.name, "references", "inferred");
+        } else {
+          if (
+            collect &&
+            !nameCandidates(globalName, e.name, e.file, refKinds).some((n) => n.signature?.includes("@interface"))
+          )
+            collect.unresolved(e, e.name);
+          add(e.source, e.name, "references", "inferred");
+        }
       } else if (MAKE_FILE.test(e.file)) {
         // A prerequisite naming another target, or `$(VAR)` naming a variable/define.
         // A prerequisite that is a source file (`main.c`) or an undefined variable
         // (`$(CC)`, set by make itself) finds nothing and drops.
-        const hit = resolveName(e.name, e.file, e.kinds ?? ["target"], perFileName, globalName);
+        const makeKinds: Kind[] = e.kinds ?? ["target"];
+        const hit = resolveName(e.name, e.file, makeKinds, perFileName, globalName);
+        report(e, makeKinds, hit);
         if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (CMAKE_FILE.test(e.file)) {
         // CMake target_link_libraries / add_dependencies / ALIAS: the name of another
         // target. An external library (`Threads::Threads`, `m`) finds nothing and drops.
         const hit = resolveName(e.name, e.file, CMAKE_TARGET_KINDS, perFileName, globalName);
+        report(e, CMAKE_TARGET_KINDS, hit);
         if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       } else if (byId.get(e.source)?.origin === "generic") {
         // Breadth tier: a bare-name structural reference (extends / implements /
@@ -411,6 +554,7 @@ export function resolveEdges(
         // provably untouched.
         const refKinds: Kind[] = ["class", "interface", "struct", "enum", "type", "module"];
         const hit = resolveName(e.name, e.file, refKinds, perFileName, globalName);
+        report(e, refKinds, hit);
         if (hit && hit.id !== e.source) add(e.source, hit.id, "references", hit.confidence);
       }
     } else if (e.relation === "calls") {
@@ -422,7 +566,10 @@ export function resolveEdges(
       // `new`) collide with in-repo names constantly, so the call drops.
       if (e.specifier && e.file.endsWith(".gleam")) {
         const targetFile = resolveGleamImport(e.specifier, gleamFilesBySuffix);
-        if (!byId.has(targetFile)) continue;
+        if (!byId.has(targetFile)) {
+          collect?.unresolved(e);
+          continue;
+        }
         const candidates = narrowGleamByKind(perFileName.get(targetFile)?.get(e.name!) ?? [], e.file, CALLABLE_KINDS);
         if (candidates.length === 1) add(e.source, candidates[0].id, "calls", "extracted");
         continue;
@@ -470,9 +617,14 @@ export function resolveEdges(
         const hit = resolveTypedMember(e.recvType, e.name!, e.file, ownerMethod, classParents, classTraits, e.argCount);
         if (hit === "ambiguous") continue; // drop — never guess past an ambiguous owner
         if (hit) {
+          if (hit.confidence === "inferred") collect?.inferred(e, hit.id);
           add(e.source, hit.id, "calls", hit.confidence);
           continue;
         }
+        // Nothing on the receiver's owner chain in this map: its type (or a base
+        // of it) may live in another one. An implicit-self call tries a free
+        // function below first, and is reported there.
+        if (!e.implicitSelf) collect?.unresolved(e);
         // No owner-qualified match means the call is unresolved. A unique bare
         // method name is not evidence that this receiver has that method — a
         // name-fallback here was measured to HALVE call-edge precision (73%→37%
@@ -514,18 +666,34 @@ export function resolveEdges(
           : e.file.endsWith(".java")
             ? ["class", "struct", "enum", "interface"]
             : ["function"]);
-      let hit = resolveName(e.name!, e.file, callKinds, perFileName, globalName);
+      const first = resolveName(e.name!, e.file, callKinds, perFileName, globalName);
+      let hit = first;
       // Python is the Java case without the `new` to mark it: `Widget()` is an
       // ordinary call node, so a constructor edge dies against the function-only
       // index. Java can widen to types outright; Python has free functions, so
       // widening would trade real function edges for type ones. Hence a fallback,
       // not a swap — types are tried only once functions have found nothing, and
       // resolveName's same-file-then-unique-global rule still drops the ambiguous.
-      if (!hit && PY_EXT.test(e.file)) {
-        hit = resolveName(e.name!, e.file, PY_CTOR_KINDS, perFileName, globalName);
-      }
-      if (!hit && SWIFT_EXT.test(e.file)) {
-        hit = resolveName(e.name!, e.file, SWIFT_CTOR_KINDS, perFileName, globalName);
+      // Swift does the same for its constructors.
+      const ctorKinds = PY_EXT.test(e.file) ? PY_CTOR_KINDS : SWIFT_EXT.test(e.file) ? SWIFT_CTOR_KINDS : null;
+      if (!hit && ctorKinds) hit = resolveName(e.name!, e.file, ctorKinds, perFileName, globalName);
+      if (collect) {
+        if (e.viaMember) {
+          // A Swift implicit-self call with no such member on its owner chain here:
+          // a bigger map may find one on a base type in another part first.
+          if (hit) collect.inferred(e, hit.id);
+          else collect.unresolved(e);
+        } else if (first || !ctorKinds) {
+          report(e, callKinds, hit);
+        } else {
+          // The constructor stage ran because the first found no single candidate
+          // here. With none at all, a bigger map may find one there first; with
+          // several, it drops that stage too and comes to the same constructors.
+          const noFirst = noCandidate(e.name!, e.file, callKinds);
+          if (hit) {
+            if (noFirst || hit.confidence === "inferred") collect.inferred(e, hit.id);
+          } else if (noFirst || noCandidate(e.name!, e.file, ctorKinds)) collect.unresolved(e);
+        }
       }
       if (hit) add(e.source, hit.id, "calls", hit.confidence); // drop unresolved calls (too noisy)
     }
@@ -568,9 +736,7 @@ function resolveName(
   // Cross-file: also require a language that could actually reach this one.
   // Without it a unique name match ANYWHERE in the repo wins, which is how a Go
   // builtin ended up resolving into a TypeScript test — see FAMILIES above.
-  const global = (globalName.get(name) ?? []).filter(
-    (n) => kinds.includes(n.kind) && reachable(file, n.path),
-  );
+  const global = nameCandidates(globalName, name, file, kinds);
   if (global.length === 1) return { id: global[0].id, confidence: "inferred" };
   return null;
 }
@@ -794,10 +960,19 @@ function resolveTraitMember(
 }
 
 /**
+ * Whether the named imports of `file` name their module by a path suffix unique
+ * in the map (a PHP `use`, a Gleam module: always a file of that language)
+ * rather than by a path {@link resolveImport} follows from `file`.
+ */
+export function moduleBySuffix(file: string): boolean {
+  return file.endsWith(".php") || file.endsWith(".gleam");
+}
+
+/**
  * Resolve a module specifier to a file node id when it points inside the repo;
  * otherwise return the raw specifier (external package or unresolved path).
  */
-function resolveImport(spec: string, file: string, byId: Map<string, NodeV1>): string {
+export function resolveImport(spec: string, file: string, byId: { has(id: string): boolean }): string {
   if (!spec.startsWith(".")) return spec;
   // Belt-and-braces: `node.path` is posix by construction (`../util/paths.ts`),
   // but this also accepts a hand-written or hand-edited graph.

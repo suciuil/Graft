@@ -27,11 +27,14 @@ import {
   localGrammarRepos,
   mergeLegacy,
   namesGrammar,
+  OMITTED_NAME,
+  omitName,
   OTHER_LANGUAGE,
   parseCommitMessage,
   readGrammarRepos,
   readLegacy,
   renderChangelog,
+  withoutOmittedName,
 } from "../scripts/changelog.mjs";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "..", "..");
@@ -218,6 +221,100 @@ test("the committed changelog-legacy.json is valid and names each covered entry 
     }
   }, /unknown type/);
   assert.deepEqual(readLegacy(join(repoRoot, "docs")), [], "no file, no items");
+});
+
+test("withoutOmittedName removes Kilo Code from asides, lists and later sentences, and drops entries about it", () => {
+  // Asides in brackets and places in a list go; the rest of the sentence stays
+  assert.equal(
+    withoutOmittedName("The report records the assistant and editor with their versions (for example Kilo Code 7.8.18 in Visual Studio Code 1.144.0)."),
+    "The report records the assistant and editor with their versions.",
+  );
+  assert.equal(withoutOmittedName("This covers Cursor, Kilo Code, Kiro and Codex."), "This covers Cursor, Kiro and Codex.");
+  assert.equal(withoutOmittedName("The scan reads Claude Code, Kilo, VS Code and Codex."), "The scan reads Claude Code, VS Code and Codex.");
+  assert.equal(withoutOmittedName("Model detection: Kilo Code, VS Code and JetBrains IDEs."), "Model detection: VS Code and JetBrains IDEs.");
+  // A later sentence that still names it goes; the first sentence says what the entry is about
+  assert.equal(
+    withoutOmittedName("Savings are priced with the model you used. Previously Kilo and Copilot calls were misfiled. It runs once."),
+    "Savings are priced with the model you used. It runs once.",
+  );
+  assert.equal(withoutOmittedName("Kilo sessions are found through a junction. Copilot ones too."), null);
+  assert.equal(withoutOmittedName("Forks of KiloCode are recognised."), null);
+  assert.equal(withoutOmittedName("Installs under the automotive.kilo-code extension id are recognised."), null);
+  assert.equal(withoutOmittedName("<b>Kilo Code support.</b>"), null);
+  // Legacy HTML: a closing tag after the full stop still ends the sentence
+  assert.equal(
+    withoutOmittedName("<b><code>graft models</code> and a table.</b> In Kilo the table shows. When priced, one line."),
+    "<b><code>graft models</code> and a table.</b> When priced, one line.",
+  );
+  // Other words and text without the name are left alone
+  const plain = "Files up to 50  kilobytes  are read (fast).";
+  assert.equal(withoutOmittedName(plain), plain);
+  assert.ok(!OMITTED_NAME.test("kilobytes and kilograms"));
+});
+
+test("withoutOmittedName finds sentences that start without a capital, keeps abbreviations whole and sees the name in identifiers", () => {
+  // "e.g." and "i.e." do not end a sentence: no cut-off entry is kept
+  assert.equal(withoutOmittedName("Savings are priced for more assistants, e.g. Kilo Code and Copilot, at their list price."), null);
+  assert.equal(
+    withoutOmittedName("Prices are read once, i.e. at startup. Previously Kilo calls were misfiled."),
+    "Prices are read once, i.e. at startup.",
+  );
+  // A later sentence that starts with a lowercase word, a backtick or a digit is its own sentence
+  assert.equal(withoutOmittedName("Startup is faster. graft now reads Kilo's session store directly."), "Startup is faster.");
+  assert.equal(
+    withoutOmittedName("The scan now also reads remembered folders. `graft savings --all` also finds Kilo repos."),
+    "The scan now also reads remembered folders.",
+  );
+  assert.equal(withoutOmittedName("Parts are linked. 2 Kilo sessions were read twice. It is fixed."), "Parts are linked. It is fixed.");
+  // The name inside identifiers, where `_` is a word character
+  assert.equal(withoutOmittedName("Detection now honours `KILO_PID` and `KILOCODE_VERSION`."), null);
+  assert.equal(withoutOmittedName("The model is read. It also honours KILO_PID."), "The model is read.");
+  assert.ok(OMITTED_NAME.test("kilo_code"));
+  assert.ok(!OMITTED_NAME.test("KILOBYTES_MAX"));
+});
+
+test("omitName applies to commit entries, legacy items and grammar details, and drops what is left empty", () => {
+  const groups = mergeLegacy(
+    groupCommits(
+      [
+        {
+          hash: "b",
+          date: "2026-11-05",
+          entries: [
+            { type: "feature", text: "The report names the editor (for example Kilo Code in VS Code)." },
+            { type: "fix", text: "Kilo sessions are found again." },
+            { type: "improvement", text: "The C grammar has been updated.", area: "lang", scope: "tree-sitter", grammar: "tree-sitter-c", details: [{ type: "fix", text: "Kilo-only grammar line." }] },
+            { type: "improvement", text: "The Bash grammar has been updated.", area: "lang", scope: "tree-sitter", grammar: "tree-sitter-bash", details: [{ type: "fix", text: "Heredocs parse." }, { type: "fix", text: "Kilo line." }] },
+          ],
+        },
+        { hash: "a", date: "2026-10-01", entries: [{ type: "feature", text: "Add support for Kilo Code extension" }] },
+      ],
+      { unrecorded: new Set(["a"]), builds: [{ id: "1", date: "2026-11-05", version: "0.28.0", ships: new Set(["b", "a"]) }] },
+    ),
+    [
+      { date: "2026-09-01", type: "feature", area: "agents", html: "<b>Kilo Code support.</b>", replaces: ["Add support for Kilo Code extension"] },
+      { date: "2026-09-02", type: "improvement", area: "agents", html: "This covers Cursor, Kilo Code, Kiro &amp; Codex." },
+    ],
+  );
+  assert.deepEqual(groups.unmatched, [], "replaces lists still match the words the commits were written in");
+  const omitted = omitName(groups.groups);
+  assert.deepEqual(
+    omitted.map((g: any) => [g.kind, g.version ?? g.date ?? "", g.entries.map((e: any) => [e.text, ...(e.details ?? []).map((d: any) => d.text)])]),
+    [
+      ["pending", "", []],
+      ["bundle", "0.28.0", [["The report names the editor."], ["The Bash grammar has been updated.", "Heredocs parse."]]],
+      ["commit", "2026-09-02", [["This covers Cursor, Kiro & Codex."]]],
+    ],
+  );
+  const html = renderChangelog(shell, omitted);
+  assert.ok(html.includes("This covers Cursor, Kiro &amp; Codex."), "legacy HTML keeps its markup");
+  assert.ok(!OMITTED_NAME.test(html));
+  assert.ok(groups.groups[1].entries.some((e: any) => OMITTED_NAME.test(e.text)), "the groups passed in are not changed");
+});
+
+test("the shipped changelog never names Kilo Code", () => {
+  const html = readFileSync(join(repoRoot, "docs", "changelog.html"), "utf8");
+  assert.ok(!OMITTED_NAME.test(html), "run npm run changelog");
 });
 
 test("addBuild records a build once per date and version", () => {

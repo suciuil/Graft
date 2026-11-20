@@ -16,7 +16,8 @@ import { extname, join, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { HOSTS, hostRelPath, hostWiringName } from './registry.js';
-import { fencedBlock, markersFor, type Markers } from './sections.js';
+import { blockIn, fencedBlock, markersFor } from './sections.js';
+import { factsKey, repoFacts, settledFacts } from './repo-facts.js';
 import { skillTemplate } from '../claude/skill-template.js';
 import { trailSkillPath } from '../claude/init.js';
 import { readStamp, runningVersion, wiredHostIds } from '../upkeep.js';
@@ -25,16 +26,6 @@ import { readStamp, runningVersion, wiredHostIds } from '../upkeep.js';
  * editors change them without changing what the agent reads. */
 function normalize(text: string): string {
   return text.replace(/\r/g, '').replace(/[ \t]+$/gm, '').trimEnd();
-}
-
-/** The fenced block in `text`, or null when the file holds none (it was not
- * installed for this host, so there is nothing to be out of date). */
-function blockIn(text: string, markers: Markers): string | null {
-  const lines = text.replace(/\r/g, '').split('\n');
-  const s = lines.findIndex((l) => l.trim() === markers.start);
-  if (s === -1) return null;
-  const e = lines.findIndex((l, i) => i > s && l.trim() === markers.end);
-  return e === -1 ? null : lines.slice(s, e + 1).join('\n');
 }
 
 function read(path: string): string | null {
@@ -132,6 +123,9 @@ function installedParts(repo: string, opts: { home?: string }): InstalledPart[] 
   // The agents a previous init chose here: a shared file such as AGENTS.md is
   // read by several hosts, and naming only the wired ones is the real scope.
   const wired = new Set([...wiredHostIds(root), ...(readStamp(root)?.hosts ?? [])]);
+  // The text init writes fits the repo's map (built in parts or not), and keeps
+  // what a file already says where the map tells nothing (see repo-facts.ts).
+  const facts = repoFacts(root);
   const seen = new Set<string>();
   for (const host of HOSTS) {
     const path = join(root, hostRelPath(host, name));
@@ -141,7 +135,8 @@ function installedParts(repo: string, opts: { home?: string }): InstalledPart[] 
     if (text === null) continue;
     const current = host.kind === 'owned' ? text : blockIn(text, markers);
     if (current === null) continue;
-    const wanted = host.kind === 'owned' ? host.content(name) : fencedBlock(host.content(name), '\n', markers);
+    const content = host.content(name, settledFacts(facts, current));
+    const wanted = host.kind === 'owned' ? content : fencedBlock(content, '\n', markers);
     const readers = HOSTS.filter((h) => join(root, hostRelPath(h, name)) === path).map((h) => h.id);
     const hosts = readers.filter((id) => wired.has(id));
     out.push({ file: relative(root, path), hosts: hosts.length ? hosts : readers.slice(0, 1), current, wanted });
@@ -149,7 +144,8 @@ function installedParts(repo: string, opts: { home?: string }): InstalledPart[] 
   // Claude Code's skill: in the repo under graft's names, user-level under trail's.
   const skill = name === 'trail' ? trailSkillPath(opts.home ?? homedir()) : join(root, '.claude', 'skills', 'graft', 'SKILL.md');
   const text = read(skill);
-  if (text !== null) out.push({ file: name === 'trail' ? skill : relative(root, skill), hosts: ['claude'], current: text, wanted: skillTemplate(name) });
+  // Trail's skill is the user's, shared by every repo, so it says nothing of this one's map.
+  if (text !== null) out.push({ file: name === 'trail' ? skill : relative(root, skill), hosts: ['claude'], current: text, wanted: name === 'trail' ? skillTemplate(name) : skillTemplate(name, settledFacts(facts, text)) });
   return out.map((p) => ({ ...p, file: p.file.replace(/\\/g, '/') }));
 }
 
@@ -214,7 +210,7 @@ function capped(items: string[], max: number, noun: string): string {
  * The modules whose text makes up what `init` writes, relative to this one and
  * without their extension (`.js` in `dist/`, `.ts` under tsx).
  */
-const TEMPLATE_MODULES = ['./instructions', './registry', './sections', '../claude/skill-template', '../brand', '../about'];
+const TEMPLATE_MODULES = ['./instructions', './registry', './sections', './repo-facts', '../claude/skill-template', '../brand', '../about'];
 
 function statPart(path: string): string {
   try {
@@ -274,7 +270,8 @@ function instructionFilesStamp(repo: string, home?: string): string {
     const name = hostWiringName(root);
     const paths = new Set(HOSTS.map((h) => join(root, hostRelPath(h, name))));
     paths.add(name === 'trail' ? trailSkillPath(home ?? homedir()) : join(root, '.claude', 'skills', 'graft', 'SKILL.md'));
-    return [...paths].map((p) => `${p}=${statPart(p)}`).join('|');
+    // What the map says of the repo too: a build that splits it in parts changes the wanted text.
+    return [factsKey(repoFacts(root)), ...[...paths].map((p) => `${p}=${statPart(p)}`)].join('|');
   } catch {
     return '-';
   }

@@ -14,6 +14,16 @@ import { hasGraftIndex } from '../graph/root.js';
 import type { PlannedWrite } from '../hosts/plan.js';
 import { repoWiredForTrail, type Brand } from '../brand.js';
 import { noteChildBuildFailure } from '../report-hint.js';
+import { repoFacts, settledFacts } from '../hosts/repo-facts.js';
+
+/** The file's text, or null when it is absent or unreadable. */
+function readIfThere(path: string): string | null {
+  try {
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
 
 /** trail's committed hook, inside `.trail/` where a `.claude/*` ignore rule can't drop it. */
 export const TRAIL_HOOK = join('.trail', 'hook.cjs');
@@ -164,9 +174,10 @@ export function runInit(
 
   // Install the graft skill — the piece that redirects the agent to graft/ before it
   // greps source. Overwritten each run (graft owns this file), like the shims above.
+  // Fitted to the repo's map (built in parts or not), like the other agents' files.
   const skillPath = skill;
   mkdirSync(dirname(skillPath), { recursive: true });
-  writeFileSync(skillPath, skillTemplate('graft'));
+  writeFileSync(skillPath, skillTemplate('graft', settledFacts(repoFacts(dir), readIfThere(skillPath))));
 
   // Register the graft MCP server in the project's .mcp.json so Claude Code
   // exposes graft_find_code/graft_trace_calls/etc. as tools — the same keyed merge the

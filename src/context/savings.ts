@@ -45,7 +45,25 @@ function fileSizes(graph: GraphV1): Map<string, number> {
  * Returns undefined when not a single path has a known size — the caller then
  * omits the estimate instead of claiming a bogus one. */
 export function savingsFor(graph: GraphV1, paths: Iterable<string>): Savings | undefined {
-  const sizes = fileSizes(graph);
+  return savingsFromSizes(fileSizes(graph), paths);
+}
+
+/** The sizes `graph` knows for the distinct `paths`, keyed by path. For a
+ * baseline gathered across several maps (a repository built in parts, a folder
+ * of repos), where each map sizes only its own files: the caller notes them
+ * while that map is loaded, and adds them up with {@link savingsFromSizes}. */
+export function knownSizes(graph: GraphV1, paths: Iterable<string>): Map<string, number> {
+  const want = new Set(paths);
+  const out = new Map<string, number>();
+  if (want.size === 0) return out;
+  for (const n of graph.nodes)
+    if (n.kind === 'file' && typeof n.chars === 'number' && want.has(n.path)) out.set(n.path, n.chars);
+  return out;
+}
+
+/** {@link savingsFor} over sizes already gathered (see {@link knownSizes}):
+ * undefined when not one of `paths` has a known size. */
+export function savingsFromSizes(sizes: ReadonlyMap<string, number>, paths: Iterable<string>): Savings | undefined {
   let baselineChars = 0;
   let files = 0;
   for (const p of new Set(paths)) {

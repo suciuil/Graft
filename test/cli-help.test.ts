@@ -114,7 +114,7 @@ test("graft --help ends with the common commands, then how to get more help on o
     .map((l) => l.trim().split(/\s{2,}/));
   assert.deepEqual(
     listed.map(([term]) => term),
-    ["find-command", "model", "build", "deep-threshold", "staleness", "config", "savings", "files location", "about"].map((c) => `graft ${c}`),
+    ["find-command", "model", "build", "parts", "deep-threshold", "staleness", "config", "savings", "files location", "about"].map((c) => `graft ${c}`),
   );
   for (const [term, desc] of listed) assert.ok(desc && desc.length <= 60, `${term} has a very short description`);
   assert.match(tail, /\n\nMore about any command: `graft <command> --help` \(or `graft help <command>`\)\.\n$/, "the last line");

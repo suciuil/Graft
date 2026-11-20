@@ -129,7 +129,12 @@ holding both) into one row per part.
    do not rewrite published history: add the missing lines as a git note,
    `git notes --ref=changelog append -m "- Feature: …" <commit>`, which
    counts as part of that commit's message (share it with
-   `git push origin refs/notes/changelog`).
+   `git push origin refs/notes/changelog`). The page, the homepage and the
+   release notes never name Kilo Code (`OMITTED_NAME` in
+   `scripts/changelog.mjs`): the generator removes an aside in brackets or a
+   place in a comma-separated list that names it, then every later sentence
+   that still does, and leaves out a line whose first sentence names it. So
+   do not name it in these lines; say "the AI assistant" instead.
 2. **Graft or a bundled tree-sitter grammar.** The generator files these
    under the grammars: every typed line of the grammar repositories, a fork
    line about how a grammar the fork builds parses its language (it names

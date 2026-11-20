@@ -37,6 +37,7 @@ import { writeFingerprint } from "./fingerprint.js";
 import { seedGraph, type SeedResult } from "./seed.js";
 import { filterByOnlyDirs, listSourceStats, useTextExtensions } from "./source-files.js";
 import { resolveEdges, type GoModule } from "./resolve.js";
+import { boundaryCollector, boundaryPath, hasBoundary, makeBoundary, writeBoundary, type BoundaryText } from "./boundary.js";
 import { enrichGraph, type EnrichStats, type SourceLookup } from "./enrich.js";
 import { readGraph, writeGraph, wiringPath } from "./write.js";
 import { writeCards, writeIndex, writeCovers, type CardStats } from "./cards.js";
@@ -167,6 +168,10 @@ export interface GraphBuildOptions {
    * `GraphTooLargeError` (default `GRAPH_CHAR_BUDGET`, under V8's string limit).
    * For tests; nothing else sets it. */
   maxGraphChars?: number;
+  /** Write the map's boundary (`graph/boundary.ts`), for the links between the
+   * parts of a repository built in parts. Default: when the map has one already,
+   * so the refresh before a query keeps a part's boundary current. */
+  boundary?: boolean;
   onProgress?: (info: {
     phase: "parse" | "enrich";
     index: number;
@@ -423,7 +428,24 @@ export async function buildGraph(
     files: entries,
   });
 
-  const edges = resolveEdges(nodes, rawEdges, { goModules: readGoModules(root, repoFiles) });
+  const goModules = readGoModules(root, repoFiles);
+  // No stamp, no boundary: nothing could tell whether it was written by this code.
+  const collector =
+    (opts.boundary ?? hasBoundary(outDir)) && boundaryPath(outDir) !== null ? boundaryCollector() : undefined;
+  const edges = resolveEdges(nodes, rawEdges, { goModules, collect: collector });
+  // A part's boundary: what the link step needs to resolve, against the other
+  // parts, the edges this part could not settle by itself. Made here, from what
+  // only this point holds (it reads none of what the meaning pass adds), and
+  // written once the map is: a boundary never runs ahead of its map.
+  let boundary: BoundaryText | null = null;
+  let boundaryError = "could not be written";
+  if (collector) {
+    try {
+      boundary = makeBoundary(nodes, rawEdges, collector.collected, goModules);
+    } catch (err) {
+      boundaryError = `could not be made (${err instanceof Error ? err.message : String(err)})`;
+    }
+  }
 
   // Guard 5 (minimum-substance): node counts aren't known until nodes are
   // assembled, so the merge-tiny-scopes-into-root guard runs here.
@@ -498,6 +520,10 @@ export async function buildGraph(
     if (err instanceof RangeError) throw guard.tooLarge(false, MAX_STRING_CHARS);
     throw err;
   }
+  if (collector && !writeBoundary(outDir, boundary)) {
+    errors.push(`boundary: ${boundaryError}, so the links to the other parts will miss this part`);
+  }
+  boundary = null;
   // `ask`'s token/IDF sidecar — moves per-query corpus tokenization to build
   // time (~45% of query time on a 32k-node graph, profiled). Lives in the
   // cache dir; `ask` falls back to live tokenization when it's absent/stale.

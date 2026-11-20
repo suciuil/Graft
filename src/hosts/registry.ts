@@ -11,8 +11,9 @@ import { join } from 'node:path';
 import { instructionBody, copilotInstructions, cursorRule, kiloRule, kiroSteering, windsurfRule } from './instructions.js';
 import { KILO_RULE_REL } from './kilo.js';
 import { skillTemplate } from '../claude/skill-template.js';
-import { markersFor } from './sections.js';
+import { blockIn, markersFor } from './sections.js';
 import { repoWiredForTrail, type Brand } from '../brand.js';
+import type { RepoFacts } from './repo-facts.js';
 
 export interface DetectProbe {
   home: string;
@@ -26,8 +27,9 @@ export interface HostTarget {
   kind: 'section' | 'owned';
   /** Target file, relative to the repo root, under graft's names (see `hostRelPath`). */
   relPath: string;
-  /** The text, in the spelling of the repo's name for the tool. */
-  content(name?: Brand): string;
+  /** The text, in the spelling of the repo's name for the tool, fitted to what
+   * `facts` says of the repo's map (see `repo-facts.ts`; none: the plain text). */
+  content(name?: Brand, facts?: RepoFacts): string;
   detect(probe: DetectProbe): boolean;
   /**
    * Selected by default, whether or not `detect` finds the tool's folders. For
@@ -173,6 +175,27 @@ export function defaultHosts(probe: DetectProbe): HostTarget[] {
  */
 export function hostRelPath(host: HostTarget, name: Brand): string {
   return name === 'trail' && host.kind === 'owned' ? host.relPath.replace(/\bgraft\b/g, 'trail') : host.relPath;
+}
+
+/**
+ * The text graft wrote for `host` in `repo` before: the whole file it owns, or
+ * its fenced block in a shared file; under `name`, else under graft's names (a
+ * repo moving to trail). Null when there is none. What a refresh keeps when
+ * the repo's map says nothing (see `settledFacts` in repo-facts.ts).
+ */
+export function installedHostText(repo: string, host: HostTarget, name: Brand): string | null {
+  for (const n of name === 'trail' ? (['trail', 'graft'] as const) : (['graft'] as const)) {
+    try {
+      const path = join(repo, hostRelPath(host, n));
+      if (!existsSync(path)) continue;
+      const text = readFileSync(path, 'utf8');
+      const mine = host.kind === 'owned' ? text : blockIn(text, markersFor(n));
+      if (mine !== null) return mine;
+    } catch {
+      /* unreadable: as if absent */
+    }
+  }
+  return null;
 }
 
 /** Cursor's hooks shim is repo-local, so it carries the repo's name too. */

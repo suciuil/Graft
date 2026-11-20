@@ -499,6 +499,19 @@ export const GRAFT_HELP: Record<string, CommandHelp> = {
       "could not tell which model you ran.",
     examples: ["graft models", "graft models --tokens 50000"],
   },
+  parts: {
+    description:
+      "List the parts a repository too big for one map was built in (`graft build --all-parts`, or `all` in the " +
+      "list a too-big build offers), so you know their names. A part is named by its folder's path from the repo " +
+      "root, exactly as listed: narrow `graft ask`, `graft grep` and `graft callers` to one with `--in <part>/` (over " +
+      "MCP, the `in` argument), or name it in a prompt to your AI assistant. For each part: the files its map holds, " +
+      "the map's size and when it was built, or that it is not built yet or its folder is gone; and whether the links " +
+      "between the parts are up to date. Run inside a part, it still lists every part of the repository and marks " +
+      "the one you are in. A folder of separate repos lists its repos the same way; a repository with one map says " +
+      "so. --json adds the folder each part's map is kept in. Free: no LLM, nothing rebuilt, no graph loaded.",
+    examples: ["graft parts", "graft parts --json", "graft parts path/to/repo"],
+    globals: ["dir"],
+  },
   "prices status": {
     description:
       "Show whether a local copy of LiteLLM's model price catalog is stored and how old it is, and the snapshot of " +
@@ -770,6 +783,7 @@ export const COMMON_COMMANDS: [string, string][] = [
   ["find-command", "find a command by a word in its name or description"],
   ["model", "show or pick the model `build --deep` uses"],
   ["build", "build or update the graph; --deep adds LLM summaries"],
+  ["parts", "list the parts a big repo is built in, to name in prompts"],
   ["deep-threshold", "show or set when `build --deep` is recommended"],
   ["staleness", "show how out of date the summaries are"],
   ["config", "show or change this repo's settings"],

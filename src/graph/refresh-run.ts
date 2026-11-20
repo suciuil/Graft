@@ -12,10 +12,19 @@ export interface RefreshRunArgs {
   dir: string;
   contextDir?: string;
   onlyDirs?: string[];
+  /** Make the links between the parts of a repository built in parts
+   * (`parts-link.ts`) instead of building: it reads every part's boundary, which
+   * on a big repository takes a gigabyte the MCP server should not keep. */
+  link?: boolean;
 }
 
 export async function main(arg: string): Promise<void> {
-  const { dir, contextDir, onlyDirs } = JSON.parse(arg) as RefreshRunArgs;
+  const { dir, contextDir, onlyDirs, link } = JSON.parse(arg) as RefreshRunArgs;
+  if (link) {
+    const { linkParts } = await import("./parts-link.js");
+    linkParts(dir, contextDir);
+    return;
+  }
   await buildGraph(dir, { contextDir, graphOnly: true, onlyDirs });
 }
 
